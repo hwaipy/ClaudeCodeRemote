@@ -1,37 +1,63 @@
-"""SessionManager：进程注册表 + 事件广播。M1 内存版。M4 上 SQLite。
+"""SessionManager：进程注册表 + 事件广播 + SQLite 持久化 + hibernate 调度。
 
-每个 session 一个独立 task 把 ClaudeProcess.events() 抽干，事件 fan-out 给所有
-当前 WS 订阅者。事件也会留一份完整 backlog 在内存里，新订阅者进来先收 backlog
-再接实时流（页面刷新时不丢上下文）。
+每个 active session 一个独立 task 把 ClaudeProcess.events() 抽干，关键事件落 DB +
+fan-out 给所有当前 WS 订阅者。订阅者首次进来先从 DB 重放历史，再接实时流。
+
+Idle > HIBERNATE_IDLE_S 自动 SIGTERM 子进程；--resume 时拿 claude_session_id 拉起。
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import db
 from .claude_process import ClaudeProcess
 
 log = logging.getLogger(__name__)
 
+HIBERNATE_IDLE_S = float(os.environ.get("CCR_HIBERNATE_IDLE_S", "1800"))  # 30 min
+HIBERNATE_TICK_S = float(os.environ.get("CCR_HIBERNATE_TICK_S", "60"))
+
+# 哪些事件落 DB（其它视为流式噪音，可从落了 DB 的事件重建 UI）
+_PERSIST_TOP = {"assistant", "user", "result", "user_input"}
+
+
+def _classify(evt: dict[str, Any]) -> str | None:
+    """决定一个事件的持久化 kind，None 表示不存。"""
+    t = evt.get("type")
+    if t in _PERSIST_TOP:
+        return t
+    if t == "system" and evt.get("subtype") == "init":
+        return "system_init"
+    if t == "_ccr":
+        sub = evt.get("subtype")
+        if sub == "permission_request":
+            return "perm_req"
+        if sub == "permission_resolved":
+            return "perm_resolved"
+    return None
+
 
 @dataclass
 class Session:
-    id: str            # 本地稳定 id（spawn 时生成，永不变）
+    id: str
     cwd: str
     name: str
     created_at: float
-    proc: ClaudeProcess
-    claude_session_id: str | None = None  # 从 system/init 拿到
-    events: list[dict[str, Any]] = field(default_factory=list)
+    proc: ClaudeProcess | None
+    claude_session_id: str | None = None
+    last_activity_at: float = field(default_factory=time.time)
     subscribers: set[asyncio.Queue[dict[str, Any]]] = field(default_factory=set)
     pump_task: asyncio.Task[None] | None = None
     seq: int = 0
     finished: bool = False
+    hibernated: bool = False
 
     def envelope(self, evt: dict[str, Any]) -> dict[str, Any]:
         self.seq += 1
@@ -42,89 +68,165 @@ class SessionManager:
     def __init__(self) -> None:
         self.sessions: dict[str, Session] = {}
         self._lock = asyncio.Lock()
+        self._hibernate_task: asyncio.Task[None] | None = None
+
+    # ---------- 启动 / 关闭 ----------
+
+    async def startup(self) -> None:
+        """server 启动时调：DB 已 init 之后，把 DB 里未删除的会话装载成 hibernated 状态。"""
+        from .permission_gateway import gateway
+        rows = await db.list_sessions()
+        for r in rows:
+            sess = Session(
+                id=r["id"],
+                cwd=r["cwd"],
+                name=r["name"],
+                created_at=r["created_at"],
+                proc=None,
+                claude_session_id=r["claude_session_id"],
+                last_activity_at=r["last_activity_at"],
+                hibernated=True,
+                finished=r["finished_at"] is not None,
+            )
+            sess.seq = await db.max_seq(r["id"])
+            async with self._lock:
+                self.sessions[sess.id] = sess
+            await gateway.load_for_session(sess.id)
+        self._hibernate_task = asyncio.create_task(
+            self._hibernate_loop(), name="hibernate-scheduler",
+        )
+        log.info("session manager loaded %d sessions from DB", len(rows))
+
+    async def shutdown(self) -> None:
+        if self._hibernate_task:
+            self._hibernate_task.cancel()
+        async with self._lock:
+            items = list(self.sessions.values())
+        for s in items:
+            if s.proc is not None:
+                await s.proc.terminate()
+        for s in items:
+            if s.pump_task:
+                s.pump_task.cancel()
+
+    # ---------- spawn / resume / delete ----------
 
     async def spawn(self, cwd: str, name: str = "") -> Session:
-        # 本地稳定 id（独立于 claude 自己的 session_id）。
         local_id = "ccr-" + uuid.uuid4().hex[:12]
         proc = ClaudeProcess(cwd=cwd, ccr_session_id=local_id)
         await proc.start()
         sess = Session(
-            id=local_id,
-            cwd=cwd,
-            name=name or "untitled",
-            created_at=time.time(),
-            proc=proc,
+            id=local_id, cwd=cwd, name=name or "untitled",
+            created_at=time.time(), proc=proc,
         )
+        await db.insert_session(local_id, sess.name, cwd, sess.created_at)
         async with self._lock:
             self.sessions[local_id] = sess
         sess.pump_task = asyncio.create_task(self._pump(sess), name=f"pump-{local_id}")
         return sess
 
+    async def resume(self, sess_id: str) -> Session | None:
+        async with self._lock:
+            sess = self.sessions.get(sess_id)
+        if not sess:
+            return None
+        if sess.proc is not None and sess.proc.proc and sess.proc.proc.returncode is None:
+            # 已经活着
+            return sess
+        if not sess.claude_session_id:
+            log.warning("resume %s: no claude_session_id; spawning fresh in same cwd", sess_id)
+        proc = ClaudeProcess(cwd=sess.cwd, ccr_session_id=sess.id,
+                             resume_session_id=sess.claude_session_id)
+        await proc.start()
+        sess.proc = proc
+        sess.hibernated = False
+        sess.finished = False
+        sess.last_activity_at = time.time()
+        await db.mark_resumed(sess_id)
+        sess.pump_task = asyncio.create_task(self._pump(sess), name=f"pump-{sess_id}")
+        log.info("resumed %s (claude=%s)", sess_id, sess.claude_session_id)
+        return sess
+
+    async def delete(self, sess_id: str) -> bool:
+        async with self._lock:
+            sess = self.sessions.pop(sess_id, None)
+        if not sess:
+            return False
+        if sess.proc is not None:
+            try:
+                await sess.proc.terminate()
+            except Exception:
+                log.exception("terminate during delete failed for %s", sess_id)
+        if sess.pump_task:
+            sess.pump_task.cancel()
+        await db.mark_deleted(sess_id)
+        return True
+
+    # ---------- pump ----------
+
     async def _pump(self, sess: Session) -> None:
         log.debug("pump start for %s", sess.id)
+        assert sess.proc is not None
         try:
             async for evt in sess.proc.events():
                 log.debug("pump got: type=%s subtype=%s", evt.get("type"),
                           evt.get("subtype") or (evt.get("event") or {}).get("type"))
-                # 抓 claude 真实 session_id 存到 sess（不再切换 sess.id）
+                # 抓 claude 真实 session_id
                 if (evt.get("type") == "system" and evt.get("subtype") == "init"
                         and sess.claude_session_id is None):
                     real = evt.get("session_id")
                     if real:
                         sess.claude_session_id = real
-                        log.info("claude session_id assigned: %s (sess=%s cwd=%s)",
-                                 real, sess.id, sess.cwd)
-                env = sess.envelope(evt)
-                sess.events.append(env)
-                # fan-out（拷一份 list 避免迭代时 set 变化）
-                for q in list(sess.subscribers):
-                    try:
-                        q.put_nowait(env)
-                    except asyncio.QueueFull:
-                        log.warning("subscriber queue full, dropping event for %s", sess.id)
+                        await db.update_claude_sid(sess.id, real)
+                        log.info("claude session_id assigned: %s (sess=%s)", real, sess.id)
+                await self._deliver(sess, evt)
         except Exception:
             log.exception("pump crashed for session %s", sess.id)
         finally:
-            sess.finished = True
-            # 给订阅者发一个收尾信号
+            sess.finished = sess.proc is None or (sess.proc.proc is not None
+                                                  and sess.proc.proc.returncode is not None)
             terminator = sess.envelope({"type": "_internal", "subtype": "pump_done"})
-            sess.events.append(terminator)
             for q in list(sess.subscribers):
                 try:
                     q.put_nowait(terminator)
                 except asyncio.QueueFull:
                     pass
 
-    async def list_sessions(self) -> list[dict[str, Any]]:
-        async with self._lock:
-            items = list(self.sessions.values())
-        out = []
-        for s in items:
-            out.append({
-                "id": s.id,
-                "claude_session_id": s.claude_session_id,
-                "name": s.name,
-                "cwd": s.cwd,
-                "created_at": s.created_at,
-                "finished": s.finished,
-                "event_count": len(s.events),
-            })
-        out.sort(key=lambda r: -r["created_at"])
-        return out
+    async def _deliver(self, sess: Session, evt: dict[str, Any]) -> None:
+        env = sess.envelope(evt)
+        kind = _classify(evt)
+        if kind is not None:
+            try:
+                await db.append_message(sess.id, env["seq"], env["ts"], kind, evt)
+                await db.update_activity(sess.id, env["ts"])
+            except Exception:
+                log.exception("persist message failed for %s", sess.id)
+        sess.last_activity_at = env["ts"]
+        for q in list(sess.subscribers):
+            try:
+                q.put_nowait(env)
+            except asyncio.QueueFull:
+                log.warning("subscriber queue full, dropping event for %s", sess.id)
 
-    async def get(self, session_id: str) -> Session | None:
-        async with self._lock:
-            return self.sessions.get(session_id)
+    async def inject_event(self, sess: Session, event: dict[str, Any]) -> None:
+        await self._deliver(sess, event)
+
+    # ---------- subscribe ----------
 
     async def subscribe(self, sess: Session) -> AsyncIterator[dict[str, Any]]:
-        """订阅一个会话：先重放 backlog，再走实时队列。"""
+        """先重放 DB 里的历史，再发一个 backlog_done 分界，再走实时队列。"""
         q: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1024)
-        # snapshot backlog before adding to subscribers，防止重复
-        backlog = list(sess.events)
         sess.subscribers.add(q)
         try:
-            for env in backlog:
-                yield env
+            history = await db.load_messages(sess.id)
+            for seq, ts, kind, payload in history:
+                yield {"seq": seq, "ts": ts, "event": payload}
+            # backlog 完成分界：不入 DB，仅作 UI 信号
+            yield {
+                "seq": -1, "ts": time.time(),
+                "event": {"type": "_ccr", "subtype": "backlog_done",
+                          "history_count": len(history)},
+            }
             while True:
                 env = await q.get()
                 yield env
@@ -133,25 +235,81 @@ class SessionManager:
         finally:
             sess.subscribers.discard(q)
 
-    async def inject_event(self, sess: Session, event: dict[str, Any]) -> None:
-        """把一个自造事件注入会话流（走 envelope + fan-out + backlog）。
-        用于权限请求、桥接消息等不来自 claude stream 的事件。"""
-        env = sess.envelope(event)
-        sess.events.append(env)
-        for q in list(sess.subscribers):
-            try:
-                q.put_nowait(env)
-            except asyncio.QueueFull:
-                log.warning("subscriber queue full, dropping injected event for %s", sess.id)
+    # ---------- list / get ----------
 
-    async def shutdown(self) -> None:
+    async def list_sessions(self) -> list[dict[str, Any]]:
+        rows = await db.list_sessions()
+        async with self._lock:
+            mem = dict(self.sessions)
+        out = []
+        for r in rows:
+            sess = mem.get(r["id"])
+            if sess is not None and sess.proc is not None:
+                proc_alive = (sess.proc.proc is not None
+                              and sess.proc.proc.returncode is None)
+            else:
+                proc_alive = False
+            if r["deleted_at"]:
+                state = "deleted"
+            elif r["hibernated_at"] and not proc_alive:
+                state = "hibernated"
+            elif proc_alive:
+                state = "running"
+            elif r["finished_at"]:
+                state = "finished"
+            else:
+                state = "idle"
+            out.append({
+                "id": r["id"],
+                "claude_session_id": r["claude_session_id"],
+                "name": r["name"],
+                "cwd": r["cwd"],
+                "created_at": r["created_at"],
+                "last_activity_at": r["last_activity_at"],
+                "hibernated_at": r["hibernated_at"],
+                "finished_at": r["finished_at"],
+                "state": state,
+            })
+        return out
+
+    async def get(self, session_id: str) -> Session | None:
+        async with self._lock:
+            return self.sessions.get(session_id)
+
+    # ---------- hibernate ----------
+
+    async def _hibernate_loop(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(HIBERNATE_TICK_S)
+                await self._sweep_idle()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            log.exception("hibernate loop crashed")
+
+    async def _sweep_idle(self) -> None:
+        now = time.time()
         async with self._lock:
             items = list(self.sessions.values())
-        for s in items:
-            await s.proc.terminate()
-        for s in items:
-            if s.pump_task:
-                s.pump_task.cancel()
+        for sess in items:
+            if sess.proc is None:
+                continue
+            if sess.proc.proc is None or sess.proc.proc.returncode is not None:
+                # 进程已退；标 hibernated 但 mem 保留以便 resume
+                sess.hibernated = True
+                continue
+            if now - sess.last_activity_at < HIBERNATE_IDLE_S:
+                continue
+            log.info("hibernating %s (idle=%ss)", sess.id,
+                     int(now - sess.last_activity_at))
+            try:
+                await sess.proc.terminate()
+            except Exception:
+                log.exception("terminate during hibernate failed for %s", sess.id)
+            await db.mark_hibernated(sess.id)
+            sess.hibernated = True
+            sess.proc = None
 
 
 manager = SessionManager()

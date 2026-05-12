@@ -46,9 +46,30 @@ async def list_sessions() -> dict[str, Any]:
 @router.get("/sessions/{session_id}/stderr")
 async def stderr_tail(session_id: str) -> dict[str, Any]:
     sess = await manager.get(session_id)
+    if not sess or sess.proc is None:
+        raise HTTPException(404, "session not found / not running")
+    return {"stderr": sess.proc.stderr_tail}
+
+
+@router.post("/sessions/{session_id}/resume")
+async def resume_session(session_id: str) -> dict[str, Any]:
+    sess = await manager.resume(session_id)
     if not sess:
         raise HTTPException(404, "session not found")
-    return {"stderr": sess.proc.stderr_tail}
+    return {
+        "id": sess.id,
+        "claude_session_id": sess.claude_session_id,
+        "cwd": sess.cwd,
+        "name": sess.name,
+    }
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str) -> dict[str, Any]:
+    ok = await manager.delete(session_id)
+    if not ok:
+        raise HTTPException(404, "session not found")
+    return {"ok": True}
 
 
 class PermissionWaitRequest(BaseModel):

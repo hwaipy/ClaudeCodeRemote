@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config
+from . import config, db
 from .api import router as api_router
 from .session_manager import manager
 from .ws import router as ws_router
@@ -26,8 +26,13 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    yield
-    await manager.shutdown()
+    await db.init()
+    await manager.startup()
+    try:
+        yield
+    finally:
+        await manager.shutdown()
+        await db.close()
 
 
 app = FastAPI(title="ClaudeCodeRemote", lifespan=lifespan)

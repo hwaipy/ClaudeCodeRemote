@@ -110,6 +110,22 @@ function syncPresetChips() {
 }
 $("spawn-cwd").addEventListener("input", syncPresetChips);
 
+const STATE_BADGES = {
+  running:     { label: "运行中", cls: "running" },
+  idle:        { label: "空闲",   cls: "idle" },
+  hibernated:  { label: "休眠",   cls: "hibernated" },
+  finished:    { label: "已结束", cls: "finished" },
+};
+
+function relTime(ts) {
+  if (!ts) return "";
+  const d = Date.now()/1000 - ts;
+  if (d < 60)     return Math.max(1, Math.floor(d)) + "s";
+  if (d < 3600)   return Math.floor(d/60) + "m";
+  if (d < 86400)  return Math.floor(d/3600) + "h";
+  return Math.floor(d/86400) + "d";
+}
+
 async function refreshSessions() {
   const list = $("session-list");
   try {
@@ -123,12 +139,27 @@ async function refreshSessions() {
     for (const s of arr) {
       const el = document.createElement("div");
       el.className = "session-card";
-      const finishedTag = s.finished ? '<span class="tiny"> · 已结束</span>' : '';
+      const badge = STATE_BADGES[s.state] || STATE_BADGES.idle;
+      const active = relTime(s.last_activity_at);
       el.innerHTML = `
-        <div class="name">${escHTML(s.name || "untitled")}${finishedTag}</div>
+        <div class="session-row1">
+          <div class="name">${escHTML(s.name || "untitled")}</div>
+          <span class="state-badge ${badge.cls}">${badge.label}</span>
+          <button class="del-btn" title="删除会话">🗑</button>
+        </div>
         <div class="meta">${escHTML(s.cwd)}</div>
-        <div class="tiny">${escHTML(s.id)}</div>`;
-      el.addEventListener("click", () => enterChat(s.id, s.name, s.cwd));
+        <div class="tiny">${escHTML(s.id)} · 活跃 ${active}前</div>`;
+      el.querySelector(".del-btn").addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!confirm(`删除会话 "${s.name}"？不可恢复。`)) return;
+        try {
+          await api(`/api/sessions/${encodeURIComponent(s.id)}`, { method: "DELETE" });
+          refreshSessions();
+        } catch (err) {
+          alert("删除失败：" + err.message);
+        }
+      });
+      el.addEventListener("click", () => enterChat(s.id, s.name, s.cwd, s.state));
       list.appendChild(el);
     }
   } catch (e) {
@@ -170,7 +201,7 @@ $("spawn-go").addEventListener("click", async () => {
 });
 
 // ---------- Chat ----------
-function enterChat(id, name, cwd) {
+async function enterChat(id, name, cwd, sessionState) {
   state.sessionId = id;
   state.msgById.clear();
   state.toolById.clear();
@@ -181,6 +212,14 @@ function enterChat(id, name, cwd) {
   $("chat-log").innerHTML = "";
   setStatus("connecting", "连接中…");
   showView("chat");
+  // 若不是 running，先 resume 拉起子进程
+  if (sessionState && sessionState !== "running") {
+    try {
+      await api(`/api/sessions/${encodeURIComponent(id)}/resume`, { method: "POST" });
+    } catch (e) {
+      appendBubble("system", `恢复失败：${e.message}`);
+    }
+  }
   connectWS();
   $("chat-input").focus();
 }
@@ -407,6 +446,7 @@ function handleEvent(evt) {
   if (t === "stream_event") return handleStreamEvent(evt.event || {});
   if (t === "assistant")    return handleAssistantMessage(evt.message || {});
   if (t === "user")         return handleUserMessage(evt.message || {});
+  if (t === "user_input")   return handleUserInput(evt);
   if (t === "system")       return handleSystem(evt);
   if (t === "result")       return handleResult(evt);
   if (t === "_ccr") {
@@ -518,6 +558,10 @@ function handleUserMessage(msg) {
   }
 }
 
+function handleUserInput(evt) {
+  appendBubble("user", evt.content || "");
+}
+
 function handleSystem(evt) {
   if (evt.subtype === "init") {
     setStatus("busy", "已就绪");
@@ -547,8 +591,8 @@ function sendUserMessage() {
   const ta = $("chat-input");
   const text = ta.value.trim();
   if (!text || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
-  appendBubble("user", text);
   state.ws.send(JSON.stringify({ type: "user_message", content: text }));
+  // user bubble 等 server 注入 user_input echo 时再渲染（保证刷新/resume 也能看到）
   ta.value = "";
   ta.style.height = "auto";
   setStatus("busy", "等待回复…");

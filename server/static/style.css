@@ -100,11 +100,32 @@ input:focus, textarea:focus { border-color: #58a6ff; }
   display: flex; flex-direction: column; gap: 4px;
 }
 .session-card:hover { border-color: #58a6ff77; }
-.session-card .name { font-weight: 600; }
+.session-card .session-row1 {
+  display: flex; align-items: center; gap: 8px;
+}
+.session-card .name { flex: 1; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .session-card .meta { font-size: 12px; color: #8b949e;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.state-badge {
+  flex: 0 0 auto;
+  font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid #30363d; background: #21262d; color: #8b949e;
+}
+.state-badge.running    { background: #0f2e1a; color: #7ee787; border-color: #2ea04388; }
+.state-badge.idle       { background: #1f6feb22; color: #58a6ff; border-color: #58a6ff55; }
+.state-badge.hibernated { background: #3a2e0c33; color: #e3b341; border-color: #bb800988; }
+.state-badge.finished   { background: #21262d; color: #6e7681; border-color: #30363d; }
+.del-btn {
+  flex: 0 0 auto;
+  background: transparent; border: 0; color: #6e7681;
+  cursor: pointer; padding: 4px 6px; border-radius: 6px;
+  font-size: 14px; line-height: 1;
+}
+.del-btn:hover { color: #ffa198; background: #2d1115; }
 .session-empty { color: #6e7681; font-size: 13px; padding: 14px;
   text-align: center; border: 1px dashed #30363d; border-radius: 10px; }
 

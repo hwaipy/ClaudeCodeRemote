@@ -70,10 +70,22 @@ async def ws_session(ws: WebSocket, session_id: str) -> None:
                 kind = msg.get("type")
                 if kind == "user_message":
                     content = (msg.get("content") or "").strip()
-                    if content:
-                        log.debug("ws->claude: user_message %d chars sess=%s",
-                                  len(content), session_id)
-                        await sess.proc.send_user_message(content)
+                    if not content:
+                        continue
+                    if sess.proc is None:
+                        # 自动 resume
+                        log.info("sess %s hibernated; auto-resume", sess.id)
+                        resumed = await manager.resume(sess.id)
+                        if resumed is None or resumed.proc is None:
+                            log.error("auto-resume failed for %s", sess.id)
+                            continue
+                    log.debug("ws->claude: user_message %d chars sess=%s",
+                              len(content), session_id)
+                    # 先注入一份 user_input 事件让流（含 DB 持久化和前端 echo）
+                    await manager.inject_event(sess, {
+                        "type": "user_input", "content": content,
+                    })
+                    await sess.proc.send_user_message(content)
                 elif kind == "permission_decision":
                     await _handle_permission_decision(sess.id, msg)
                 elif kind == "ping":

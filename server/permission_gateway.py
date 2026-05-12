@@ -91,9 +91,31 @@ class PermissionGateway:
             return False
         if persist in ("tool", "command") and decision.get("behavior") == "allow":
             self.remember(req.ccr_session_id, persist, req.tool_name, req.tool_input)
+            key = (req.tool_name if persist == "tool"
+                   else cmd_fingerprint(req.tool_name, req.tool_input))
+            try:
+                from . import db
+                await db.save_perm(req.ccr_session_id, persist, key)
+            except Exception:
+                log.exception("save_perm failed for sess=%s", req.ccr_session_id)
         if not req.future.done():
             req.future.set_result(decision)
         return True
+
+    async def load_for_session(self, sid: str) -> None:
+        """server 启动时按需把 DB 里该 session 的白名单加载进内存。"""
+        try:
+            from . import db
+            rows = await db.load_perms(sid)
+        except Exception:
+            log.exception("load_perms failed for sess=%s", sid)
+            return
+        st = self._allow_state(sid)
+        for scope, key in rows:
+            if scope == "tool":
+                st["tools"].add(key)
+            elif scope == "command":
+                st["commands"].add(key)
 
     def remember(self, sid: str, scope: str, tool_name: str, tool_input: dict[str, Any]) -> None:
         st = self._allow_state(sid)
