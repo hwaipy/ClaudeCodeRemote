@@ -1,27 +1,28 @@
 /* ============================================================
  * 主题变量：默认 light（GitHub primer 风），data-theme="dark" 切换
  * ============================================================ */
-/* 配色来自 docs/refs/pytimetag-DESIGN.md（Apple Design System Inspired）：
-   纯白/浅灰底 + Apple Blue 单一 accent + 极少 shadow + tight letter-spacing。
-   ok/warn/danger 取 Apple system colors（green/orange/red）。 */
+/* 严格按 docs/refs/pytimetag-DESIGN.md (Apple-inspired)：
+   "the entire chromatic budget is spent on blue" — 唯一 accent 是 Apple Blue。
+   状态色全部走 blue + gray，仅"错误/删除"破例用 Apple system red。
+   不引入 green / orange / yellow。 */
 :root,
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg-page:        #ffffff;        /* light section: pure white */
-  --bg-elev:        #f5f5f7;        /* Apple light gray: sidebar/header/foot */
+  --bg-page:        #ffffff;        /* Hero light: pure white */
+  --bg-elev:        #f5f5f7;        /* DESIGN.md "Light Gray" — sidebar/foot/asst bubble */
   --bg-card:        #ffffff;
-  --bg-input:       #fafafc;        /* Apple filter/search bg */
-  --bg-hover:       #ededf2;        /* Apple button-active */
+  --bg-input:       #fafafc;        /* DESIGN.md "Button Default Light" — search/input bg */
+  --bg-hover:       #ededf2;        /* DESIGN.md "Button Active" */
   --bg-soft:        #f5f5f7;
-  --border:         #d2d2d7;        /* Apple input border */
+  --border:         #d2d2d7;
   --border-soft:    #e8e8ed;
-  --text:           #1d1d1f;        /* Apple near-black for body */
-  --text-muted:     rgba(0,0,0,0.80);
-  --text-dim:       rgba(0,0,0,0.48);
+  --text:           #1d1d1f;        /* DESIGN.md "Near Black" */
+  --text-muted:     rgba(0,0,0,0.80);  /* DESIGN.md "Black 80%" */
+  --text-dim:       rgba(0,0,0,0.48);  /* DESIGN.md "Black 48%" */
   --code-fg:        #1d1d1f;
-  --link:           #0066cc;        /* Apple light-bg link */
+  --link:           #0066cc;        /* DESIGN.md "Link Blue" */
 
-  --accent:         #0071e3;        /* Apple Blue — singular accent */
+  --accent:         #0071e3;        /* DESIGN.md "Apple Blue" */
   --accent-fg:      #0066cc;
   --accent-bg:      rgba(0,113,227,0.08);
   --accent-border:  #0071e3;
@@ -29,31 +30,37 @@
 
   --primary-btn:       #0071e3;
   --primary-btn-hover: #0077ed;
+  --dark-btn:          #1d1d1f;     /* DESIGN.md "Primary Dark" alt CTA */
+  --dark-btn-hover:    #000000;
 
-  --ok-fg:          #248a3d;        /* darker green for text contrast on white */
-  --ok-bg:          rgba(52,199,89,0.13);
-  --ok-border:      #34c759;        /* Apple system green */
-  --ok-btn:         #248a3d;
-  --ok-btn-hover:   #1d6e30;
+  /* 「运行中 / 已完成」状态：中性灰（Apple 风不引入绿）*/
+  --ok-fg:          rgba(0,0,0,0.80);
+  --ok-bg:          var(--bg-hover);
+  --ok-border:      var(--border-soft);
+  --ok-btn:         var(--dark-btn);
+  --ok-btn-hover:   var(--dark-btn-hover);
 
-  --warn-fg:        #a85100;
-  --warn-bg:        rgba(255,149,0,0.13);
-  --warn-border:    #ff9500;        /* Apple system orange */
-  --warn-glow:      rgba(255,149,0,0.32);
+  /* 「等批准 / 等输入」状态：用 accent blue（同 accent）*/
+  --warn-fg:        var(--accent-fg);
+  --warn-bg:        var(--accent-bg);
+  --warn-border:    var(--accent);
+  --warn-glow:      rgba(0,113,227,0.32);
 
+  /* 仅"错误 / 删除 / 拒绝"用 Apple system red，跟功能语义紧绑 */
   --danger-fg:      #d70015;
-  --danger-bg:      rgba(255,59,48,0.10);
-  --danger-border:  #ff3b30;        /* Apple system red */
+  --danger-bg:      rgba(255,59,48,0.08);
+  --danger-border:  #ff3b30;
 
-  --bubble-user-bg:     rgba(0,113,227,0.08);
+  --bubble-user-bg:     rgba(0,113,227,0.10);
   --bubble-user-border: transparent;
   --bubble-asst-bg:     #f5f5f7;
   --bubble-asst-border: transparent;
 
-  --diff-add-bg:    rgba(52,199,89,0.13);
-  --diff-del-bg:    rgba(255,59,48,0.10);
+  /* diff：add 用 accent blue tint，del 用 danger red tint */
+  --diff-add-bg:    rgba(0,113,227,0.08);
+  --diff-del-bg:    rgba(255,59,48,0.08);
 
-  /* Apple uses one soft diffused shadow OR none */
+  /* DESIGN.md: "Apple uses shadow extremely sparingly" — 单层 soft diffused */
   --shadow-card:    rgba(0,0,0,0.06) 0 1px 3px;
   --shadow-soft:    rgba(0,0,0,0.04) 0 1px 2px;
   --shadow-toast:   rgba(0,0,0,0.22) 3px 5px 30px 0;
@@ -61,11 +68,11 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg-page:        #000000;        /* Apple dark section: pure black */
-  --bg-elev:        #1d1d1f;        /* Apple near-black for sidebar/head/foot */
-  --bg-card:        #272729;        /* Apple dark surface 1 */
+  --bg-page:        #000000;        /* DESIGN.md "Pure Black" hero */
+  --bg-elev:        #1d1d1f;
+  --bg-card:        #272729;        /* DESIGN.md "Dark Surface 1" */
   --bg-input:       #1d1d1f;
-  --bg-hover:       #2a2a2d;        /* Apple dark surface 4 */
+  --bg-hover:       #2a2a2d;        /* DESIGN.md "Dark Surface 4" */
   --bg-soft:        #1d1d1f;
   --border:         rgba(255,255,255,0.12);
   --border-soft:    rgba(255,255,255,0.06);
@@ -73,7 +80,7 @@
   --text-muted:     rgba(255,255,255,0.80);
   --text-dim:       rgba(255,255,255,0.48);
   --code-fg:        #ffffff;
-  --link:           #2997ff;        /* Apple bright blue for dark bg */
+  --link:           #2997ff;        /* DESIGN.md "Bright Blue" for dark bg */
 
   --accent:         #2997ff;
   --accent-fg:      #2997ff;
@@ -83,29 +90,31 @@
 
   --primary-btn:       #0071e3;
   --primary-btn-hover: #0077ed;
+  --dark-btn:          #2a2a2d;
+  --dark-btn-hover:    #3a3a3d;
 
-  --ok-fg:          #30d158;        /* Apple system green dark variant */
-  --ok-bg:          rgba(48,209,88,0.15);
-  --ok-border:      #30d158;
-  --ok-btn:         #248a3d;
-  --ok-btn-hover:   #30d158;
+  --ok-fg:          rgba(255,255,255,0.80);
+  --ok-bg:          var(--bg-hover);
+  --ok-border:      var(--border-soft);
+  --ok-btn:         var(--dark-btn);
+  --ok-btn-hover:   var(--dark-btn-hover);
 
-  --warn-fg:        #ff9f0a;
-  --warn-bg:        rgba(255,159,10,0.15);
-  --warn-border:    #ff9f0a;
-  --warn-glow:      rgba(255,159,10,0.42);
+  --warn-fg:        var(--accent-fg);
+  --warn-bg:        var(--accent-bg);
+  --warn-border:    var(--accent);
+  --warn-glow:      rgba(41,151,255,0.40);
 
   --danger-fg:      #ff453a;
   --danger-bg:      rgba(255,69,58,0.13);
   --danger-border:  #ff453a;
 
-  --bubble-user-bg:     rgba(41,151,255,0.13);
+  --bubble-user-bg:     rgba(41,151,255,0.14);
   --bubble-user-border: transparent;
   --bubble-asst-bg:     #1d1d1f;
   --bubble-asst-border: transparent;
 
-  --diff-add-bg:    rgba(48,209,88,0.18);
-  --diff-del-bg:    rgba(255,69,58,0.16);
+  --diff-add-bg:    rgba(41,151,255,0.14);
+  --diff-del-bg:    rgba(255,69,58,0.14);
 
   --shadow-card:    rgba(0,0,0,0.4) 0 1px 3px;
   --shadow-soft:    rgba(0,0,0,0.3) 0 1px 2px;
