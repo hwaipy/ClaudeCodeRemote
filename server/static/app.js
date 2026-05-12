@@ -389,6 +389,51 @@ function escHTML(s) {
   return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 }
 
+// ---------- markdown 渲染 ----------
+// marked.js 解析 + DOM sanitizer 去掉 script/iframe/javascript: URL，
+// 链接强制 target=_blank rel=noopener。
+if (typeof marked !== "undefined") {
+  marked.setOptions({ gfm: true, breaks: true, headerIds: false, mangle: false });
+}
+const _UNSAFE_TAGS = new Set([
+  "SCRIPT","STYLE","IFRAME","OBJECT","EMBED","FORM","INPUT","TEXTAREA",
+  "BUTTON","LINK","META","BASE"
+]);
+function sanitizeMD(html) {
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  const walk = (el) => {
+    [...el.children].forEach(child => {
+      if (_UNSAFE_TAGS.has(child.tagName)) { child.remove(); return; }
+      // 去 on* 事件、javascript: URL
+      [...child.attributes].forEach(a => {
+        const n = a.name.toLowerCase();
+        if (n.startsWith("on")) child.removeAttribute(a.name);
+        if ((n === "href" || n === "src") && /^\s*javascript:/i.test(a.value)) {
+          child.removeAttribute(a.name);
+        }
+      });
+      if (child.tagName === "A") {
+        child.setAttribute("target", "_blank");
+        child.setAttribute("rel", "noopener noreferrer");
+      }
+      walk(child);
+    });
+  };
+  walk(tmp);
+  return tmp.innerHTML;
+}
+function renderMarkdown(text) {
+  if (!text) return "";
+  if (typeof marked === "undefined") return escHTML(text).replace(/\n/g, "<br>");
+  try {
+    return sanitizeMD(marked.parse(String(text)));
+  } catch (e) {
+    console.warn("markdown parse failed:", e);
+    return escHTML(text).replace(/\n/g, "<br>");
+  }
+}
+
 // ---------- Tool 卡片 ----------
 const TOOL_ICONS = {
   Bash: "⌘",
@@ -693,7 +738,7 @@ function handleStreamEvent(ev) {
       const msg = state.msgById.get(block.msgId);
       if (msg) {
         msg.text += d.text || "";
-        msg.bubble.textContent = msg.text;
+        msg.bubble.innerHTML = renderMarkdown(msg.text);
         $("chat-log").scrollTop = $("chat-log").scrollHeight;
       }
     } else if (d.type === "input_json_delta" && block.type === "tool_use") {
@@ -728,9 +773,10 @@ function handleAssistantMessage(msg) {
       const cur = id && state.msgById.get(id);
       if (cur) {
         cur.text = b.text;
-        cur.bubble.textContent = b.text;
+        cur.bubble.innerHTML = renderMarkdown(b.text);
       } else if (b.text) {
-        const bubble = appendBubble("assistant", b.text);
+        const bubble = appendBubble("assistant", "");
+        bubble.innerHTML = renderMarkdown(b.text);
         if (id) state.msgById.set(id, { bubble, text: b.text });
       }
     } else if (b.type === "tool_use") {
