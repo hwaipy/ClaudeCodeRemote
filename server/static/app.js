@@ -21,6 +21,24 @@ const presets = [
   ["Synology/Claude", "~/SynologyDrive/Claude"],
 ];
 
+// ---------- 主题 ----------
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t === "dark" ? "dark" : "light");
+  try { localStorage.setItem("ccr.theme", t); } catch (e) {}
+}
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") || "light";
+}
+function toggleTheme() {
+  applyTheme(currentTheme() === "dark" ? "light" : "dark");
+}
+// 初始化主题（早于 DOM 其它操作）
+(function initTheme() {
+  let t = "light";
+  try { t = localStorage.getItem("ccr.theme") || "light"; } catch (e) {}
+  applyTheme(t);
+})();
+
 // ---------- 视图切换 ----------
 function showView(name) {
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
@@ -929,6 +947,10 @@ $("chat-input").addEventListener("input", e => {
 // ---------- 启动 ----------
 renderPresets();
 setupAttachmentInput();
+// 主题切换按钮
+document.querySelectorAll("#theme-toggle, #theme-toggle-login").forEach(b => {
+  b.addEventListener("click", toggleTheme);
+});
 // PWA service worker（只在 secure context 下有效；http 公网会静默失败，不影响功能）
 // register 路径基于 <base href>，scope 同前缀
 if ("serviceWorker" in navigator) {
