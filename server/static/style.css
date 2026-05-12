@@ -200,6 +200,92 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .btn-secondary:hover { background: var(--border); }
 .btn-block { width: 100%; margin-top: 16px; }
 
+.path-row { display: flex; gap: 8px; align-items: stretch; }
+.path-row > input { flex: 1; min-width: 0; }
+.path-row .path-browse {
+  flex: 0 0 auto;
+  padding: 0 14px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+/* ============================================================
+ * 目录浏览 modal（Apple 风：白卡片 / 大圆角 / 软阴影）
+ * ============================================================ */
+.modal-bg {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  z-index: 200;
+  -webkit-backdrop-filter: saturate(180%) blur(8px);
+  backdrop-filter: saturate(180%) blur(8px);
+}
+.modal-bg[hidden] { display: none; }
+.modal {
+  width: 100%;
+  max-width: 540px;
+  max-height: 80vh;
+  display: flex; flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: var(--shadow-toast);
+}
+.modal-head {
+  flex: 0 0 auto;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-elev);
+}
+.modal-head .crumb {
+  flex: 1; min-width: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+}
+.modal-x {
+  flex: 0 0 auto;
+  background: transparent; border: 0;
+  color: var(--text-muted);
+  font-size: 22px;
+  cursor: pointer;
+  padding: 0 6px;
+  line-height: 1;
+}
+.modal-x:hover { color: var(--text); }
+.modal-list {
+  flex: 1; min-height: 0;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.modal-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.modal-row:last-child { border-bottom: 0; }
+.modal-row:hover { background: var(--bg-hover); }
+.modal-row .icon { flex: 0 0 18px; color: var(--text-dim); }
+.modal-row .name { flex: 1; word-break: break-all; }
+.modal-row.parent { color: var(--accent); }
+.modal-empty {
+  padding: 20px; text-align: center;
+  color: var(--text-dim); font-size: 14px;
+}
+.modal-foot {
+  flex: 0 0 auto;
+  display: flex; gap: 10px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border-soft);
+}
+.modal-foot .btn { flex: 1; padding: 10px; font-size: 14px; }
+
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .chip {
   font-size: 13px;

@@ -144,6 +144,57 @@ function syncPresetChips() {
 }
 $("spawn-cwd").addEventListener("input", syncPresetChips);
 
+// ---------- 目录浏览 modal ----------
+const _browse = { curPath: "" };
+async function browseLoad(path) {
+  const list = $("modal-list");
+  list.innerHTML = '<div class="modal-empty">加载中…</div>';
+  try {
+    const j = await api(`api/ls?path=${encodeURIComponent(path || "")}`);
+    _browse.curPath = j.path;
+    $("modal-crumb").textContent = j.path;
+    const rows = [];
+    if (j.parent !== null) {
+      rows.push(`<div class="modal-row parent" data-path="${escHTML(j.parent)}"><span class="icon">↰</span><span class="name">.. (上一级)</span></div>`);
+    }
+    for (const d of j.dirs) {
+      const child = j.path === "/" ? "/" + d : j.path + "/" + d;
+      rows.push(`<div class="modal-row" data-path="${escHTML(child)}"><span class="icon">📁</span><span class="name">${escHTML(d)}</span></div>`);
+    }
+    if (!j.dirs.length && j.parent === null) {
+      rows.push('<div class="modal-empty">（无子目录）</div>');
+    } else if (!j.dirs.length) {
+      rows.push('<div class="modal-empty">（无子目录）</div>');
+    }
+    list.innerHTML = rows.join("");
+    list.querySelectorAll(".modal-row").forEach(el => {
+      el.addEventListener("click", () => browseLoad(el.dataset.path));
+    });
+  } catch (e) {
+    list.innerHTML = `<div class="modal-empty err show">加载失败：${escHTML(e.message)}</div>`;
+  }
+}
+function openBrowse() {
+  $("modal-browse").hidden = false;
+  browseLoad($("spawn-cwd").value.trim() || "~");
+}
+function closeBrowse() {
+  $("modal-browse").hidden = true;
+}
+$("browse-btn").addEventListener("click", openBrowse);
+$("modal-close").addEventListener("click", closeBrowse);
+$("modal-cancel").addEventListener("click", closeBrowse);
+$("modal-confirm").addEventListener("click", () => {
+  if (_browse.curPath) {
+    $("spawn-cwd").value = _browse.curPath;
+    syncPresetChips();
+  }
+  closeBrowse();
+});
+$("modal-browse").addEventListener("click", (e) => {
+  if (e.target.id === "modal-browse") closeBrowse();
+});
+
 const STATE_BADGES = {
   running:             { label: "运行中", cls: "running" },
   busy:                { label: "工作中", cls: "busy" },

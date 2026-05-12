@@ -43,6 +43,37 @@ async def list_sessions() -> dict[str, Any]:
     return {"sessions": await manager.list_sessions()}
 
 
+class LsResponse(BaseModel):
+    path: str
+    parent: str | None
+    dirs: list[str]
+
+
+@router.get("/ls")
+async def ls(path: str = "") -> LsResponse:
+    """目录浏览：返回某个绝对路径下的子目录列表 + 父目录。点目录浏览器用。"""
+    from .config import DEFAULT_CWD
+    raw = (path or "").strip() or DEFAULT_CWD
+    expanded = os.path.expanduser(raw)
+    if not os.path.isabs(expanded):
+        raise HTTPException(400, "请使用绝对路径（以 / 开头），或 ~ 开头")
+    p = Path(expanded).resolve()
+    if not p.exists():
+        raise HTTPException(400, f"路径不存在：{p}")
+    if not p.is_dir():
+        raise HTTPException(400, f"不是目录：{p}")
+    try:
+        dirs = sorted(
+            (e.name for e in os.scandir(p)
+             if e.is_dir(follow_symlinks=False) and not e.name.startswith(".")),
+            key=str.lower,
+        )
+    except PermissionError:
+        raise HTTPException(403, f"无权限读取：{p}")
+    parent = None if p == p.parent else str(p.parent)
+    return LsResponse(path=str(p), parent=parent, dirs=dirs)
+
+
 @router.get("/sessions/{session_id}/stderr")
 async def stderr_tail(session_id: str) -> dict[str, Any]:
     sess = await manager.get(session_id)

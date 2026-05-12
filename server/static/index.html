@@ -41,7 +41,10 @@
       <label for="spawn-name">名称（可选）</label>
       <input id="spawn-name" type="text" placeholder="例如：调试日志">
       <label for="spawn-cwd">工作目录</label>
-      <input id="spawn-cwd" type="text" placeholder="/abs/path">
+      <div class="path-row">
+        <input id="spawn-cwd" type="text" placeholder="/abs/path">
+        <button type="button" class="btn btn-secondary path-browse" id="browse-btn">浏览…</button>
+      </div>
       <div class="chips" id="cwd-presets"></div>
       <button class="btn btn-primary btn-block" id="spawn-go">启动</button>
       <div class="err" id="spawn-err"></div>
@@ -74,6 +77,21 @@
     <div class="chat-foot">
       <textarea id="chat-input" rows="1" placeholder="给 Claude 发消息…（Enter 发送，Shift+Enter 换行；可粘贴图片）"></textarea>
       <button class="btn btn-primary send" id="chat-send">发送</button>
+    </div>
+  </div>
+</div>
+
+<!-- 目录浏览 modal -->
+<div class="modal-bg" id="modal-browse" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <div class="crumb mono" id="modal-crumb"></div>
+      <button class="modal-x" id="modal-close" type="button">×</button>
+    </div>
+    <div class="modal-list" id="modal-list"></div>
+    <div class="modal-foot">
+      <button class="btn btn-secondary" id="modal-cancel" type="button">取消</button>
+      <button class="btn btn-primary"   id="modal-confirm" type="button">选择此目录</button>
     </div>
   </div>
 </div>
