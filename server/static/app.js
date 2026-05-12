@@ -914,6 +914,13 @@ $("chat-input").addEventListener("input", e => {
 // ---------- 启动 ----------
 renderPresets();
 setupAttachmentInput();
+// PWA service worker（只在 secure context 下有效；http 公网会静默失败，不影响功能）
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js")
+      .catch(err => console.warn("SW register failed (expected on http):", err.message));
+  });
+}
 if (state.token) {
   tryLogin(state.token).then(enterHome).catch(() => {
     state.token = "";

@@ -55,6 +55,36 @@ async def index() -> HTMLResponse:
     )
 
 
+# PWA 三件套要在根路径暴露，SW 的 scope 才能是 '/'
+from fastapi.responses import FileResponse, Response
+
+
+@app.get("/manifest.webmanifest")
+async def pwa_manifest() -> FileResponse:
+    return FileResponse(
+        config.STATIC_DIR / "manifest.webmanifest",
+        media_type="application/manifest+json",
+    )
+
+
+@app.get("/icon.svg")
+async def pwa_icon() -> FileResponse:
+    return FileResponse(config.STATIC_DIR / "icon.svg", media_type="image/svg+xml")
+
+
+@app.get("/sw.js")
+async def pwa_sw() -> Response:
+    body = (config.STATIC_DIR / "sw.js").read_bytes()
+    return Response(
+        body,
+        media_type="application/javascript",
+        headers={
+            "Service-Worker-Allowed": "/",
+            "Cache-Control": "no-cache, must-revalidate",
+        },
+    )
+
+
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}

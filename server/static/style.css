@@ -180,7 +180,9 @@ input:focus, textarea:focus { border-color: #58a6ff; }
 }
 .chat-head {
   flex: 0 0 auto;
-  padding: 12px 14px; border-bottom: 1px solid #21262d;
+  padding: max(12px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right))
+           12px max(14px, env(safe-area-inset-left));
+  border-bottom: 1px solid #21262d;
   display: flex; align-items: center; gap: 12px;
   background: #0d1117;
 }

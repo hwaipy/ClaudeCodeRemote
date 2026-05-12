@@ -1,0 +1,20 @@
+[Unit]
+Description=ClaudeCodeRemote (web UI on :1881)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 改成你自己的项目路径
+WorkingDirectory=%h/codes/ClaudeCodeRemote
+# 从 ~/.config/ccr/env 加载 CCR_TOKEN 等环境变量
+EnvironmentFile=%h/.config/ccr/env
+ExecStart=/usr/bin/python3 -u -m uvicorn server.main:app --host 0.0.0.0 --port 1881 --log-level info
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ccr
+
+[Install]
+WantedBy=default.target
