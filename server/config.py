@@ -41,6 +41,22 @@ DEFAULT_CWD: str = os.environ.get("CCR_DEFAULT_CWD", str(Path.home() / "codes"))
 
 STATIC_DIR: Path = Path(__file__).parent / "static"
 
+# 资源版本号：取 static 目录下 app.js + style.css 的 mtime 较大值。
+# index.html 引用静态资源时附 ?v=BUILD_ID，让浏览器强缓存自动失效。
+def _build_id() -> str:
+    try:
+        ms = []
+        for n in ("app.js", "style.css", "index.html"):
+            p = STATIC_DIR / n
+            if p.exists():
+                ms.append(int(p.stat().st_mtime))
+        return str(max(ms)) if ms else "0"
+    except Exception:
+        return "0"
+
+
+BUILD_ID: str = _build_id()
+
 # hook 桥接器调本机 server 走 127.0.0.1（不出环回）
 BRIDGE_URL: str = os.environ.get(
     "CCR_BRIDGE_URL", f"http://127.0.0.1:{PORT}/api/permission/wait"

@@ -10,7 +10,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import config, db
@@ -41,9 +41,18 @@ app.include_router(ws_router)
 app.mount("/static", StaticFiles(directory=str(config.STATIC_DIR)), name="static")
 
 
+_INDEX_HTML = (config.STATIC_DIR / "index.html").read_text(encoding="utf-8").replace(
+    "__BUILD_ID__", config.BUILD_ID
+)
+
+
 @app.get("/")
-async def index() -> FileResponse:
-    return FileResponse(config.STATIC_DIR / "index.html")
+async def index() -> HTMLResponse:
+    # 静态资源带 ?v=<BUILD_ID> 让浏览器强缓存按文件变更自动失效
+    return HTMLResponse(
+        _INDEX_HTML,
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
 
 
 @app.get("/healthz")

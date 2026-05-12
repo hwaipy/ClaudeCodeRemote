@@ -525,6 +525,10 @@ function markPermissionResolved(evt) {
   resolved.hidden = false;
   resolved.textContent = prefix + (evt.message || "");
   card.classList.add(dotCls);
+  // 如果没有 pending 卡片了，把头部状态从「等待批准」收回
+  if (!document.querySelector('.perm-card.pending')) {
+    setStatus("", "空闲");
+  }
 }
 
 // ---------- 事件分发 ----------
