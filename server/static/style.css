@@ -1,106 +1,113 @@
 /* ============================================================
  * 主题变量：默认 light（GitHub primer 风），data-theme="dark" 切换
  * ============================================================ */
+/* 配色取自 Sphinx Furo 主题（github.com/pradyunsg/furo）：浅灰底 + 纯白
+   卡片 + 蓝色 brand。映射保存在 docs/refs/furo-colors.scss。 */
 :root,
 :root[data-theme="light"] {
   color-scheme: light;
-  /* Anthropic Claude 风：暖米白底 + 焦糖橙 accent */
-  --bg-page:        #faf9f6;
-  --bg-elev:        #f3f0ea;   /* sidebar / chat-head / chat-foot 次背景 */
+  --bg-page:        #ffffff;     /* Furo background-primary */
+  --bg-elev:        #f8f9fb;     /* Furo background-secondary（sidebar/header/foot） */
   --bg-card:        #ffffff;
   --bg-input:       #ffffff;
-  --bg-hover:       #ece6da;
-  --bg-soft:        #f3f0ea;
-  --border:         #d8d2c4;
-  --border-soft:    #e5e0d2;
-  --text:           #292524;
-  --text-muted:     #57534e;
-  --text-dim:       #8c867d;
-  --code-fg:        #292524;
-  --link:           #b85728;
+  --bg-hover:       #efeff4;     /* Furo background-hover */
+  --bg-soft:        #f8f9fb;
+  --border:         #eeebee;     /* Furo background-border */
+  --border-soft:    #f1f1f3;
+  --text:           #0e0e0e;     /* Furo foreground-primary ~ black */
+  --text-muted:     #5a5c63;     /* Furo foreground-secondary */
+  --text-dim:       #6b6f76;     /* Furo foreground-muted */
+  --code-fg:        #0e0e0e;
+  --link:           #2757dd;     /* Furo brand-content */
 
-  --accent:         #c1632a;     /* Claude 橙 */
-  --accent-fg:      #a04a1c;
-  --accent-bg:      #fdf0dc;
-  --accent-border:  #e8a565;
-  --accent-hover:   #fbe1be;
+  --accent:         #0a4bff;     /* Furo brand-primary */
+  --accent-fg:      #2757dd;
+  --accent-bg:      #ddeeff;     /* Furo guilabel-background base */
+  --accent-border:  #bedaf5;
+  --accent-hover:   #cae3f6;
 
-  --ok-fg:          #2d6a31;
-  --ok-bg:          #e8efd9;
-  --ok-border:      #87bf78;
-  --ok-btn:         #5a8a3a;
-  --ok-btn-hover:   #466a2c;
+  --primary-btn:       #0a4bff;
+  --primary-btn-hover: #2757dd;
 
-  --warn-fg:        #a16207;
-  --warn-bg:        #fef3c7;
-  --warn-border:    #f5c560;
-  --warn-glow:      rgba(245,197,96,0.45);
+  --ok-fg:          #21632c;     /* Furo api-added */
+  --ok-bg:          rgba(56,168,77,0.12);
+  --ok-border:      #38a84d;
+  --ok-btn:         #21632c;
+  --ok-btn-hover:   #18491f;
 
-  --danger-fg:      #b22b2b;
-  --danger-bg:      #fbe5e0;
-  --danger-border:  #e89289;
+  --warn-fg:        #605706;     /* Furo api-deprecated */
+  --warn-bg:        rgba(240,217,15,0.20);
+  --warn-border:    #f0d90f;
+  --warn-glow:      rgba(240,217,15,0.45);
 
-  --bubble-user-bg:     #fdf0dc;
-  --bubble-user-border: #e8a565;
+  --danger-fg:      #b30000;     /* Furo problematic */
+  --danger-bg:      #ffe5e5;
+  --danger-border:  #ff5c5c;
+
+  --bubble-user-bg:     #ddeeff;
+  --bubble-user-border: #bedaf5;
   --bubble-asst-bg:     #ffffff;
-  --bubble-asst-border: #e5e0d2;
+  --bubble-asst-border: #eeebee;
 
-  --diff-add-bg:    #e8efd9;
-  --diff-del-bg:    #fbe5e0;
+  --diff-add-bg:    rgba(56,168,77,0.12);
+  --diff-del-bg:    #ffe5e5;
 
-  --shadow-card:    0 4px 14px rgba(82,67,49,0.08), 0 1px 3px rgba(82,67,49,0.06);
-  --shadow-soft:    0 2px 8px rgba(82,67,49,0.06);
-  --shadow-toast:   0 10px 30px rgba(82,67,49,0.18), 0 0 16px rgba(193,99,42,0.15);
+  --shadow-card:    0 1px 2px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.06);
+  --shadow-soft:    0 1px 3px rgba(0,0,0,0.06);
+  --shadow-toast:   0 8px 24px rgba(0,0,0,0.18);
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg-page:        #0e1117;
-  --bg-elev:        #0d1117;
-  --bg-card:        #161b22;
-  --bg-input:       #0d1117;
-  --bg-hover:       #21262d;
-  --bg-soft:        #161b22;
-  --border:         #30363d;
-  --border-soft:    #21262d;
-  --text:           #e6edf3;
-  --text-muted:     #8b949e;
-  --text-dim:       #6e7681;
-  --code-fg:        #c9d1d9;
-  --link:           #58a6ff;
+  --bg-page:        #131416;     /* Furo dark background-primary */
+  --bg-elev:        #1a1c1e;     /* Furo dark background-secondary */
+  --bg-card:        #18181a;     /* Furo dark card-background */
+  --bg-input:       #131416;
+  --bg-hover:       #1e2124;
+  --bg-soft:        #1a1c1e;
+  --border:         #303335;     /* Furo dark background-border */
+  --border-soft:    #25282a;
+  --text:           #cfd0d0;
+  --text-muted:     #9ca0a5;
+  --text-dim:       #81868d;
+  --code-fg:        #cfd0d0;
+  --link:           #5ca5ff;     /* Furo dark brand-content */
 
-  --accent:         #58a6ff;
-  --accent-fg:      #58a6ff;
-  --accent-bg:      rgba(31,111,235,0.13);
-  --accent-border:  rgba(88,166,255,0.55);
-  --accent-hover:   rgba(31,111,235,0.27);
+  --accent:         #3d94ff;     /* Furo dark brand-primary */
+  --accent-fg:      #5ca5ff;
+  --accent-bg:      rgba(8,53,99,0.5);
+  --accent-border:  rgba(61,148,255,0.4);
+  --accent-hover:   #1e2124;
 
-  --ok-fg:          #7ee787;
-  --ok-bg:          #0f2e1a;
-  --ok-border:      rgba(46,160,67,0.55);
-  --ok-btn:         #238636;
-  --ok-btn-hover:   #2ea043;
+  --primary-btn:       #3d94ff;
+  --primary-btn-hover: #5ca5ff;
 
-  --warn-fg:        #e3b341;
-  --warn-bg:        rgba(58,46,12,0.6);
-  --warn-border:    rgba(187,128,9,0.55);
-  --warn-glow:      rgba(187,128,9,0.55);
+  --ok-fg:          #3db854;     /* Furo dark api-added */
+  --ok-bg:          rgba(38,115,52,0.20);
+  --ok-border:      #267334;
+  --ok-btn:         #267334;
+  --ok-btn-hover:   #3db854;
 
-  --danger-fg:      #ffa198;
-  --danger-bg:      rgba(45,17,21,0.5);
-  --danger-border:  rgba(248,81,73,0.33);
+  --warn-fg:        #b1a10b;
+  --warn-bg:        rgba(177,161,11,0.15);
+  --warn-border:    #6e6407;
+  --warn-glow:      rgba(177,161,11,0.5);
 
-  --bubble-user-bg:     rgba(31,111,235,0.13);
-  --bubble-user-border: rgba(31,111,235,0.33);
-  --bubble-asst-bg:     #161b22;
-  --bubble-asst-border: #30363d;
+  --danger-fg:      #ff7575;     /* Furo dark api-removed */
+  --danger-bg:      rgba(176,59,59,0.25);
+  --danger-border:  #b03b3b;
 
-  --diff-add-bg:    rgba(15,46,26,0.5);
-  --diff-del-bg:    rgba(45,17,21,0.3);
+  --bubble-user-bg:     rgba(8,53,99,0.5);
+  --bubble-user-border: rgba(19,57,95,0.6);
+  --bubble-asst-bg:     #18181a;
+  --bubble-asst-border: #303335;
 
-  --shadow-card:    0 8px 30px rgba(0,0,0,0.35);
-  --shadow-soft:    0 4px 12px rgba(0,0,0,0.25);
-  --shadow-toast:   0 8px 28px rgba(0,0,0,0.4), 0 0 16px rgba(88,166,255,0.25);
+  --diff-add-bg:    rgba(56,168,77,0.20);
+  --diff-del-bg:    rgba(176,59,59,0.30);
+
+  --shadow-card:    0 1px 3px rgba(0,0,0,0.6);
+  --shadow-soft:    0 1px 2px rgba(0,0,0,0.4);
+  --shadow-toast:   0 10px 28px rgba(0,0,0,0.5);
 }
 
 * { box-sizing: border-box; }
@@ -172,8 +179,8 @@ input:focus, textarea:focus { border-color: var(--accent); }
   cursor: pointer;
   font-weight: 600;
 }
-.btn-primary { background: var(--ok-btn); color: #fff; }
-.btn-primary:hover { background: var(--ok-btn-hover); }
+.btn-primary { background: var(--primary-btn); color: #fff; }
+.btn-primary:hover { background: var(--primary-btn-hover); }
 .btn-primary:disabled { background: var(--border); cursor: not-allowed; }
 .btn-secondary { background: var(--bg-hover); color: var(--text); border: 1px solid var(--border); }
 .btn-secondary:hover { background: var(--border); }
