@@ -39,6 +39,28 @@ async def _handle_permission_decision(sess_id: str, msg: dict) -> None:
                     req_id, sess_id)
 
 
+@router.websocket("/ws-global")
+async def ws_global(ws: WebSocket) -> None:
+    """全局活动流：前端主页订阅，server 推送所有 sess 的状态变化。"""
+    token = ws.query_params.get("token")
+    if not check_ws_token(token):
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="invalid token")
+        return
+    await ws.accept()
+    try:
+        async for msg in manager.global_subscribe():
+            await ws.send_json(msg)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        log.exception("ws-global push crashed")
+    finally:
+        try:
+            await ws.close()
+        except Exception:
+            pass
+
+
 @router.websocket("/ws/{session_id}")
 async def ws_session(ws: WebSocket, session_id: str) -> None:
     token = ws.query_params.get("token")

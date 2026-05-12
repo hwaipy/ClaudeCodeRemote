@@ -111,11 +111,18 @@ function syncPresetChips() {
 $("spawn-cwd").addEventListener("input", syncPresetChips);
 
 const STATE_BADGES = {
-  running:     { label: "运行中", cls: "running" },
-  idle:        { label: "空闲",   cls: "idle" },
-  hibernated:  { label: "休眠",   cls: "hibernated" },
-  finished:    { label: "已结束", cls: "finished" },
+  running:             { label: "运行中", cls: "running" },
+  busy:                { label: "工作中", cls: "busy" },
+  waiting_permission:  { label: "等批准", cls: "waiting" },
+  needs_input:         { label: "等输入", cls: "needs-input" },
+  idle:                { label: "空闲",   cls: "idle" },
+  hibernated:          { label: "休眠",   cls: "hibernated" },
+  finished:            { label: "已结束", cls: "finished" },
 };
+
+// 主页状态板：按 sess.id 缓存当前快照
+state.sessionsById = new Map();   // id -> session payload
+state.globalWS = null;
 
 function relTime(ts) {
   if (!ts) return "";
@@ -126,52 +133,128 @@ function relTime(ts) {
   return Math.floor(d/86400) + "d";
 }
 
-async function refreshSessions() {
+function renderSessionList() {
   const list = $("session-list");
-  try {
-    const j = await api("/api/sessions");
-    const arr = j.sessions || [];
-    if (!arr.length) {
-      list.innerHTML = `<div class="session-empty">暂无会话</div>`;
-      return;
-    }
-    list.innerHTML = "";
-    for (const s of arr) {
-      const el = document.createElement("div");
-      el.className = "session-card";
-      const badge = STATE_BADGES[s.state] || STATE_BADGES.idle;
-      const active = relTime(s.last_activity_at);
-      el.innerHTML = `
-        <div class="session-row1">
-          <div class="name">${escHTML(s.name || "untitled")}</div>
-          <span class="state-badge ${badge.cls}">${badge.label}</span>
-          <button class="del-btn" title="删除会话">🗑</button>
-        </div>
-        <div class="meta">${escHTML(s.cwd)}</div>
-        <div class="tiny">${escHTML(s.id)} · 活跃 ${active}前</div>`;
-      el.querySelector(".del-btn").addEventListener("click", async (e) => {
-        e.stopPropagation();
-        if (!confirm(`删除会话 "${s.name}"？不可恢复。`)) return;
-        try {
-          await api(`/api/sessions/${encodeURIComponent(s.id)}`, { method: "DELETE" });
-          refreshSessions();
-        } catch (err) {
-          alert("删除失败：" + err.message);
-        }
-      });
-      el.addEventListener("click", () => enterChat(s.id, s.name, s.cwd, s.state));
-      list.appendChild(el);
-    }
-  } catch (e) {
-    list.innerHTML = `<div class="err show">加载失败：${escHTML(e.message)}</div>`;
+  const arr = Array.from(state.sessionsById.values())
+    .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+  if (!arr.length) {
+    list.innerHTML = `<div class="session-empty">暂无会话</div>`;
+    return;
   }
+  list.innerHTML = "";
+  for (const s of arr) {
+    const badge = STATE_BADGES[s.state] || STATE_BADGES.idle;
+    const active = relTime(s.last_activity_at);
+    const pp = s.pending_permissions || 0;
+    const needs = s.needs_action_detail;
+    const el = document.createElement("div");
+    el.className = "session-card state-" + (badge.cls || "idle");
+    el.innerHTML = `
+      <div class="session-row1">
+        <div class="name">${escHTML(s.name || "untitled")}</div>
+        <span class="state-badge ${badge.cls}">${badge.label}${pp > 1 ? ` ×${pp}` : ""}</span>
+        <button class="del-btn" title="删除会话">🗑</button>
+      </div>
+      <div class="meta">${escHTML(s.cwd)}</div>
+      <div class="tiny">${escHTML(s.id)} · 活跃 ${active}前${needs ? " · " + escHTML(needs.slice(0, 40)) : ""}</div>`;
+    el.querySelector(".del-btn").addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!confirm(`删除会话 "${s.name}"？不可恢复。`)) return;
+      try {
+        await api(`/api/sessions/${encodeURIComponent(s.id)}`, { method: "DELETE" });
+      } catch (err) {
+        alert("删除失败：" + err.message);
+      }
+    });
+    el.addEventListener("click", () => enterChat(s.id, s.name, s.cwd, s.state));
+    list.appendChild(el);
+  }
+}
+
+// in-app toast：会话状态变到 waiting_permission / needs_input 且不在该会话的 chat 视图时提醒
+const _lastNotifiedState = new Map();
+function maybeNotify(s) {
+  // 当前在 home view 时不需要 toast（卡片本身已显眼）
+  if ($("view-home").classList.contains("active")) return;
+  // 当前正打开这个 session 时不打扰
+  if ($("view-chat").classList.contains("active") && state.sessionId === s.id) return;
+  const prev = _lastNotifiedState.get(s.id);
+  const interesting = s.state === "waiting_permission" || s.state === "needs_input";
+  if (interesting && prev !== s.state) {
+    showToast(`${s.name} · ${STATE_BADGES[s.state].label}`, s.id);
+  }
+  _lastNotifiedState.set(s.id, s.state);
+}
+
+function showToast(text, sessId) {
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.textContent = text;
+  if (sessId) {
+    t.style.cursor = "pointer";
+    t.addEventListener("click", () => {
+      const s = state.sessionsById.get(sessId);
+      if (s) enterChat(s.id, s.name, s.cwd, s.state);
+    });
+  }
+  document.body.appendChild(t);
+  requestAnimationFrame(() => t.classList.add("show"));
+  setTimeout(() => {
+    t.classList.remove("show");
+    setTimeout(() => t.remove(), 350);
+  }, 4000);
 }
 
 function enterHome() {
   showView("home");
   if (!$("spawn-cwd").value) $("spawn-cwd").value = state.cwd || presets[1][1];
   syncPresetChips();
-  refreshSessions();
+  connectGlobalWS();
+}
+
+function connectGlobalWS() {
+  if (state.globalWS && state.globalWS.readyState === WebSocket.OPEN) return;
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const url = `${proto}://${location.host}/ws-global?token=${encodeURIComponent(state.token)}`;
+  const ws = new WebSocket(url);
+  state.globalWS = ws;
+  ws.addEventListener("message", (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+      handleGlobalMsg(msg);
+    } catch (e) { console.warn("bad global ws msg", e); }
+  });
+  ws.addEventListener("close", () => {
+    state.globalWS = null;
+    // 重连：仅在 home view 时
+    if ($("view-home").classList.contains("active")) {
+      setTimeout(connectGlobalWS, 2000);
+    }
+  });
+}
+
+function handleGlobalMsg(msg) {
+  if (msg.type === "snapshot") {
+    state.sessionsById.clear();
+    for (const s of msg.sessions || []) state.sessionsById.set(s.id, s);
+    renderSessionList();
+  } else if (msg.type === "session_state") {
+    state.sessionsById.set(msg.id, msg);
+    renderSessionList();
+    maybeNotify(msg);
+  } else if (msg.type === "session_deleted") {
+    state.sessionsById.delete(msg.id);
+    renderSessionList();
+  }
+  updateTitleBadge();
+}
+
+function updateTitleBadge() {
+  let pending = 0;
+  for (const s of state.sessionsById.values()) {
+    pending += (s.pending_permissions || 0);
+  }
+  document.title = (pending > 0 ? `[${pending}] ` : "") + "ClaudeCodeRemote";
 }
 
 $("spawn-go").addEventListener("click", async () => {

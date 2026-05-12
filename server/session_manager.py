@@ -58,10 +58,39 @@ class Session:
     seq: int = 0
     finished: bool = False
     hibernated: bool = False
+    pending_permissions: int = 0          # 当前等待用户决定的权限请求数
+    needs_action_detail: str | None = None  # post_turn_summary 报告的待办（None=无）
+    busy: bool = False                     # 在 message_start 和 message_stop 之间
 
     def envelope(self, evt: dict[str, Any]) -> dict[str, Any]:
         self.seq += 1
         return {"seq": self.seq, "ts": time.time(), "event": evt}
+
+    def compute_state(self) -> str:
+        if self.pending_permissions > 0:
+            return "waiting_permission"
+        if self.needs_action_detail:
+            return "needs_input"
+        if self.proc is not None and self.proc.proc and self.proc.proc.returncode is None:
+            return "busy" if self.busy else "running"
+        if self.hibernated:
+            return "hibernated"
+        if self.finished:
+            return "finished"
+        return "idle"
+
+    def status_payload(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "cwd": self.cwd,
+            "claude_session_id": self.claude_session_id,
+            "created_at": self.created_at,
+            "last_activity_at": self.last_activity_at,
+            "state": self.compute_state(),
+            "pending_permissions": self.pending_permissions,
+            "needs_action_detail": self.needs_action_detail,
+        }
 
 
 class SessionManager:
@@ -69,6 +98,31 @@ class SessionManager:
         self.sessions: dict[str, Session] = {}
         self._lock = asyncio.Lock()
         self._hibernate_task: asyncio.Task[None] | None = None
+        # 全局订阅者：监听所有会话状态变化（前端主页用）
+        self._global_subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
+
+    # ---------- 全局事件广播 ----------
+
+    def _broadcast_status(self, sess: Session) -> None:
+        payload = {"type": "session_state", **sess.status_payload()}
+        for q in list(self._global_subscribers):
+            try:
+                q.put_nowait(payload)
+            except asyncio.QueueFull:
+                log.warning("global subscriber queue full")
+
+    async def global_subscribe(self) -> AsyncIterator[dict[str, Any]]:
+        """前端订阅全局活动流：先发一份当前所有 sess 的状态快照，再走实时。"""
+        q: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=512)
+        self._global_subscribers.add(q)
+        try:
+            async with self._lock:
+                snapshot = [s.status_payload() for s in self.sessions.values()]
+            yield {"type": "snapshot", "sessions": snapshot}
+            while True:
+                yield await q.get()
+        finally:
+            self._global_subscribers.discard(q)
 
     # ---------- 启动 / 关闭 ----------
 
@@ -123,6 +177,7 @@ class SessionManager:
         async with self._lock:
             self.sessions[local_id] = sess
         sess.pump_task = asyncio.create_task(self._pump(sess), name=f"pump-{local_id}")
+        self._broadcast_status(sess)
         return sess
 
     async def resume(self, sess_id: str) -> Session | None:
@@ -145,6 +200,7 @@ class SessionManager:
         await db.mark_resumed(sess_id)
         sess.pump_task = asyncio.create_task(self._pump(sess), name=f"pump-{sess_id}")
         log.info("resumed %s (claude=%s)", sess_id, sess.claude_session_id)
+        self._broadcast_status(sess)
         return sess
 
     async def delete(self, sess_id: str) -> bool:
@@ -160,6 +216,12 @@ class SessionManager:
         if sess.pump_task:
             sess.pump_task.cancel()
         await db.mark_deleted(sess_id)
+        # 广播一个 deletion 通知（前端从列表中移除）
+        for q in list(self._global_subscribers):
+            try:
+                q.put_nowait({"type": "session_deleted", "id": sess_id})
+            except asyncio.QueueFull:
+                pass
         return True
 
     # ---------- pump ----------
@@ -202,11 +264,46 @@ class SessionManager:
             except Exception:
                 log.exception("persist message failed for %s", sess.id)
         sess.last_activity_at = env["ts"]
+        # 状态变化检测（必须在 envelope/落库之后；并在 fan-out 之前确定，
+        # 以便 broadcast_status 时拿到最新值）
+        state_dirty = self._apply_state_signals(sess, evt)
         for q in list(sess.subscribers):
             try:
                 q.put_nowait(env)
             except asyncio.QueueFull:
                 log.warning("subscriber queue full, dropping event for %s", sess.id)
+        if state_dirty:
+            self._broadcast_status(sess)
+
+    def _apply_state_signals(self, sess: Session, evt: dict[str, Any]) -> bool:
+        """根据事件更新 sess 状态字段；返回是否有变化（影响 compute_state）。"""
+        t = evt.get("type")
+        sub = evt.get("subtype")
+        before = sess.compute_state()
+        before_pending = sess.pending_permissions
+        before_need = sess.needs_action_detail
+
+        if t == "_ccr" and sub == "permission_request":
+            sess.pending_permissions += 1
+        elif t == "_ccr" and sub == "permission_resolved":
+            sess.pending_permissions = max(0, sess.pending_permissions - 1)
+        elif t == "system" and sub == "post_turn_summary":
+            detail = (evt.get("needs_action") or "").strip()
+            sess.needs_action_detail = detail or None
+        elif t == "stream_event":
+            inner = (evt.get("event") or {}).get("type")
+            if inner == "message_start":
+                sess.busy = True
+            elif inner == "message_stop":
+                sess.busy = False
+        elif t == "user_input":
+            # 新的用户输入：消除 needs_input 状态
+            sess.needs_action_detail = None
+
+        after = sess.compute_state()
+        return (after != before
+                or sess.pending_permissions != before_pending
+                or sess.needs_action_detail != before_need)
 
     async def inject_event(self, sess: Session, event: dict[str, Any]) -> None:
         await self._deliver(sess, event)
@@ -238,38 +335,10 @@ class SessionManager:
     # ---------- list / get ----------
 
     async def list_sessions(self) -> list[dict[str, Any]]:
-        rows = await db.list_sessions()
         async with self._lock:
-            mem = dict(self.sessions)
-        out = []
-        for r in rows:
-            sess = mem.get(r["id"])
-            if sess is not None and sess.proc is not None:
-                proc_alive = (sess.proc.proc is not None
-                              and sess.proc.proc.returncode is None)
-            else:
-                proc_alive = False
-            if r["deleted_at"]:
-                state = "deleted"
-            elif r["hibernated_at"] and not proc_alive:
-                state = "hibernated"
-            elif proc_alive:
-                state = "running"
-            elif r["finished_at"]:
-                state = "finished"
-            else:
-                state = "idle"
-            out.append({
-                "id": r["id"],
-                "claude_session_id": r["claude_session_id"],
-                "name": r["name"],
-                "cwd": r["cwd"],
-                "created_at": r["created_at"],
-                "last_activity_at": r["last_activity_at"],
-                "hibernated_at": r["hibernated_at"],
-                "finished_at": r["finished_at"],
-                "state": state,
-            })
+            items = list(self.sessions.values())
+        out = [s.status_payload() for s in items]
+        out.sort(key=lambda r: -r["created_at"])
         return out
 
     async def get(self, session_id: str) -> Session | None:
@@ -310,6 +379,7 @@ class SessionManager:
             await db.mark_hibernated(sess.id)
             sess.hibernated = True
             sess.proc = None
+            self._broadcast_status(sess)
 
 
 manager = SessionManager()

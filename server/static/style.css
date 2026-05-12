@@ -115,10 +115,51 @@ input:focus, textarea:focus { border-color: #58a6ff; }
   font-size: 11px; padding: 2px 8px; border-radius: 999px;
   border: 1px solid #30363d; background: #21262d; color: #8b949e;
 }
-.state-badge.running    { background: #0f2e1a; color: #7ee787; border-color: #2ea04388; }
-.state-badge.idle       { background: #1f6feb22; color: #58a6ff; border-color: #58a6ff55; }
-.state-badge.hibernated { background: #3a2e0c33; color: #e3b341; border-color: #bb800988; }
-.state-badge.finished   { background: #21262d; color: #6e7681; border-color: #30363d; }
+.state-badge.running     { background: #0f2e1a; color: #7ee787; border-color: #2ea04388; }
+.state-badge.busy        { background: #1a3a1a; color: #7ee787; border-color: #2ea04388; }
+.state-badge.waiting     { background: #3a2e0c; color: #ffd966; border-color: #bb800988; }
+.state-badge.needs-input { background: #1f6feb44; color: #79c0ff; border-color: #58a6ff; }
+.state-badge.idle        { background: #1f6feb22; color: #58a6ff; border-color: #58a6ff55; }
+.state-badge.hibernated  { background: #3a2e0c33; color: #e3b341; border-color: #bb800988; }
+.state-badge.finished    { background: #21262d; color: #6e7681; border-color: #30363d; }
+
+/* 卡片边框跟状态联动 */
+.session-card.state-waiting {
+  border-color: #bb8009; box-shadow: 0 0 0 1px #bb800944, 0 0 12px rgba(187, 128, 9, 0.35);
+  animation: ccr-pulse-yellow 2s ease-in-out infinite;
+}
+.session-card.state-needs-input {
+  border-color: #58a6ff; box-shadow: 0 0 12px rgba(88, 166, 255, 0.30);
+}
+.session-card.state-busy { border-color: #2ea04388; }
+@keyframes ccr-pulse-yellow {
+  0%, 100% { box-shadow: 0 0 0 1px #bb800944, 0 0 12px rgba(187, 128, 9, 0.30); }
+  50%      { box-shadow: 0 0 0 2px #bb8009, 0 0 18px rgba(187, 128, 9, 0.55); }
+}
+
+/* in-app toast (主页跳出来的临时通知) */
+.toast {
+  position: fixed;
+  top: max(20px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%) translateY(-120%);
+  z-index: 200;
+  background: #161b22;
+  color: #e6edf3;
+  border: 1px solid #58a6ff;
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 14px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.4), 0 0 16px rgba(88,166,255,.25);
+  opacity: 0;
+  transition: transform .35s cubic-bezier(.2,.8,.2,1), opacity .35s;
+  max-width: calc(100vw - 32px);
+  pointer-events: auto;
+}
+.toast.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
 .del-btn {
   flex: 0 0 auto;
   background: transparent; border: 0; color: #6e7681;
