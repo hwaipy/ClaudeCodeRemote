@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0e1117">
+<title>ClaudeCodeRemote</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- 登录 -->
+<div class="view" id="view-login">
+  <div class="center-wrap">
+    <div class="card">
+      <h1>ClaudeCodeRemote</h1>
+      <label for="login-token">Bearer Token</label>
+      <input id="login-token" type="password" autocomplete="current-password" placeholder="CCR_TOKEN">
+      <button class="btn btn-primary btn-block" id="login-go">登录</button>
+      <div class="err" id="login-err"></div>
+      <div class="hint">Token 设置在服务器环境变量 <span class="kbd">CCR_TOKEN</span>。</div>
+    </div>
+  </div>
+</div>
+
+<!-- 会话列表 / 新建 -->
+<div class="view" id="view-home">
+  <div class="center-wrap">
+    <div class="card">
+      <h1>新建会话</h1>
+      <label for="spawn-name">名称（可选）</label>
+      <input id="spawn-name" type="text" placeholder="例如：调试日志">
+      <label for="spawn-cwd">工作目录</label>
+      <input id="spawn-cwd" type="text" placeholder="/abs/path">
+      <div class="chips" id="cwd-presets"></div>
+      <button class="btn btn-primary btn-block" id="spawn-go">启动</button>
+      <div class="err" id="spawn-err"></div>
+
+      <h1 style="margin-top: 28px;">已有会话</h1>
+      <div class="session-list" id="session-list">
+        <div class="session-empty">加载中…</div>
+      </div>
+      <div class="tiny" style="margin-top: 12px;">
+        <a href="#" id="logout">登出</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 聊天 -->
+<div class="view" id="view-chat">
+  <div class="chat">
+    <div class="chat-head">
+      <button class="back" id="chat-back" title="返回">←</button>
+      <div class="info">
+        <div class="name" id="chat-name">…</div>
+        <div class="meta" id="chat-meta">…</div>
+      </div>
+      <span class="status" id="chat-status">未连接</span>
+    </div>
+    <div class="chat-log" id="chat-log"></div>
+    <div class="chat-foot">
+      <textarea id="chat-input" rows="1" placeholder="给 Claude 发消息…（Enter 发送，Shift+Enter 换行）"></textarea>
+      <button class="btn btn-primary send" id="chat-send">发送</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
