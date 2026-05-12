@@ -520,6 +520,8 @@ function markPermissionResolved(evt) {
   else                       { label = "已失效"; sCls = "stale";   dotCls = "stale";   prefix = "· "; }
   status.className = "tool-status " + sCls;
   status.textContent = label;
+  // 禁用按钮 + 隐藏整个 actions 区（hidden 配 CSS [hidden] 规则才会真消失）
+  card.querySelectorAll(".perm-btn").forEach(b => b.disabled = true);
   card.querySelector(".perm-actions").hidden = true;
   const resolved = card.querySelector(".perm-resolved");
   resolved.hidden = false;

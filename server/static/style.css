@@ -370,6 +370,7 @@ input:focus, textarea:focus { border-color: #58a6ff; }
   background: #161b22aa;
   flex-wrap: wrap;
 }
+.perm-actions[hidden] { display: none; }   /* 覆盖上面 display:flex，让 HTML hidden 属性真正生效 */
 .perm-btn {
   flex: 1 1 auto; min-width: 0;
   padding: 8px 12px;
