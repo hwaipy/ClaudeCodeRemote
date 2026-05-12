@@ -492,3 +492,73 @@ input:focus, textarea:focus { border-color: #58a6ff; }
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px; background: #161b22; color: #c9d1d9;
 }
+
+/* ============================================================
+ * 宽屏双栏：左 sidebar (会话列表) + 右 chat 区
+ * 窄屏 fallback 到原视图切换 (.view.active)
+ * ============================================================ */
+@media (min-width: 900px) {
+  body.stage-app {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    grid-template-rows: 100vh;
+    overflow: hidden;
+  }
+  body.stage-app #view-login { display: none; }
+  /* home / chat 都强制显示，不依赖 .active */
+  body.stage-app #view-home,
+  body.stage-app #view-chat {
+    display: flex !important;
+    flex-direction: column;
+    min-height: 0;
+    height: 100vh;
+  }
+  body.stage-app #view-home {
+    border-right: 1px solid #21262d;
+    background: #0d1117;
+    overflow: hidden;
+  }
+  /* sidebar：center-wrap 充满整列、内部滚动 */
+  body.stage-app #view-home .center-wrap {
+    flex: 1;
+    padding: 16px;
+    align-items: stretch;
+    justify-content: flex-start;
+    overflow-y: auto;
+  }
+  body.stage-app #view-home .card {
+    max-width: none;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    padding: 0;
+  }
+  body.stage-app #view-home h1 {
+    font-size: 13px;
+    color: #8b949e;
+    margin: 18px 0 8px;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    font-weight: 600;
+  }
+  body.stage-app #view-home h1:first-child { margin-top: 0; }
+  body.stage-app #view-home .session-list { margin-top: 10px; }
+  /* sidebar 紧凑：输入框小一号 */
+  body.stage-app #view-home input[type=text],
+  body.stage-app #view-home input[type=password] {
+    font-size: 14px;
+    padding: 9px 11px;
+  }
+  body.stage-app #view-home button.primary {
+    padding: 10px;
+    font-size: 14px;
+    margin-top: 12px;
+  }
+  /* 桌面下不需要 chat 顶部返回按钮（home 一直可见） */
+  body.stage-app .chat-head .back { display: none; }
+  /* 没选会话时 chat-head 显示占位 */
+  body.stage-app #view-chat .chat-head .info .name:empty::before {
+    content: "选择左侧会话或新建一个";
+    color: #6e7681;
+  }
+}

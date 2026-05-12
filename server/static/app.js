@@ -25,6 +25,9 @@ const presets = [
 function showView(name) {
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
   $("view-" + name).classList.add("active");
+  // body 阶段：登录前 / 登录后双栏（仅 CSS @media 大屏生效）
+  document.body.classList.remove("stage-login", "stage-app");
+  document.body.classList.add(name === "login" ? "stage-login" : "stage-app");
 }
 
 // ---------- HTTP helper ----------
