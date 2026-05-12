@@ -21,11 +21,12 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class Session:
-    id: str  # 临时本地 id；拿到 system/init 之后会用 claude session_id 替换
+    id: str            # 本地稳定 id（spawn 时生成，永不变）
     cwd: str
     name: str
     created_at: float
     proc: ClaudeProcess
+    claude_session_id: str | None = None  # 从 system/init 拿到
     events: list[dict[str, Any]] = field(default_factory=list)
     subscribers: set[asyncio.Queue[dict[str, Any]]] = field(default_factory=set)
     pump_task: asyncio.Task[None] | None = None
@@ -43,9 +44,9 @@ class SessionManager:
         self._lock = asyncio.Lock()
 
     async def spawn(self, cwd: str, name: str = "") -> Session:
-        # 先用本地临时 id；claude 启动后 system/init 给出 session_id 再切换映射。
-        local_id = "pending-" + uuid.uuid4().hex[:8]
-        proc = ClaudeProcess(cwd=cwd)
+        # 本地稳定 id（独立于 claude 自己的 session_id）。
+        local_id = "ccr-" + uuid.uuid4().hex[:12]
+        proc = ClaudeProcess(cwd=cwd, ccr_session_id=local_id)
         await proc.start()
         sess = Session(
             id=local_id,
@@ -65,16 +66,14 @@ class SessionManager:
             async for evt in sess.proc.events():
                 log.debug("pump got: type=%s subtype=%s", evt.get("type"),
                           evt.get("subtype") or (evt.get("event") or {}).get("type"))
-                # 拿到 claude 真实 session_id 后切换索引
+                # 抓 claude 真实 session_id 存到 sess（不再切换 sess.id）
                 if (evt.get("type") == "system" and evt.get("subtype") == "init"
-                        and sess.id.startswith("pending-")):
+                        and sess.claude_session_id is None):
                     real = evt.get("session_id")
                     if real:
-                        async with self._lock:
-                            self.sessions.pop(sess.id, None)
-                            sess.id = real
-                            self.sessions[real] = sess
-                        log.info("session id assigned: %s (cwd=%s)", real, sess.cwd)
+                        sess.claude_session_id = real
+                        log.info("claude session_id assigned: %s (sess=%s cwd=%s)",
+                                 real, sess.id, sess.cwd)
                 env = sess.envelope(evt)
                 sess.events.append(env)
                 # fan-out（拷一份 list 避免迭代时 set 变化）
@@ -103,6 +102,7 @@ class SessionManager:
         for s in items:
             out.append({
                 "id": s.id,
+                "claude_session_id": s.claude_session_id,
                 "name": s.name,
                 "cwd": s.cwd,
                 "created_at": s.created_at,
@@ -132,6 +132,17 @@ class SessionManager:
                     return
         finally:
             sess.subscribers.discard(q)
+
+    async def inject_event(self, sess: Session, event: dict[str, Any]) -> None:
+        """把一个自造事件注入会话流（走 envelope + fan-out + backlog）。
+        用于权限请求、桥接消息等不来自 claude stream 的事件。"""
+        env = sess.envelope(event)
+        sess.events.append(env)
+        for q in list(sess.subscribers):
+            try:
+                q.put_nowait(env)
+            except asyncio.QueueFull:
+                log.warning("subscriber queue full, dropping injected event for %s", sess.id)
 
     async def shutdown(self) -> None:
         async with self._lock:

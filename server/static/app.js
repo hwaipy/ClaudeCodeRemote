@@ -336,6 +336,69 @@ function attachToolResult(toolUseId, content, isError) {
   $("chat-log").scrollTop = $("chat-log").scrollHeight;
 }
 
+// ---------- 权限请求卡片 ----------
+function showPermissionRequest(evt) {
+  const log = $("chat-log");
+  const card = document.createElement("div");
+  card.className = "perm-card pending";
+  card.dataset.reqId = evt.req_id;
+  const icon = TOOL_ICONS[evt.tool_name] || "•";
+  const argsText = formatToolInput(evt.tool_name, evt.tool_input || {});
+  card.innerHTML = `
+    <div class="perm-head">
+      <span class="perm-warn">⚠</span>
+      <span class="tool-icon">${escHTML(icon)}</span>
+      <span class="tool-name">${escHTML(evt.tool_name || "tool")}</span>
+      <span class="tool-status pending">等待批准</span>
+    </div>
+    <div class="tool-args mono"></div>
+    <div class="perm-actions">
+      <button class="perm-btn allow"        data-decision="allow"  data-persist="">允许一次</button>
+      <button class="perm-btn allow-tool"   data-decision="allow"  data-persist="tool">始终允许此工具</button>
+      <button class="perm-btn allow-cmd"    data-decision="allow"  data-persist="command">始终允许此命令</button>
+      <button class="perm-btn deny"         data-decision="deny"   data-persist="">拒绝</button>
+    </div>
+    <div class="perm-resolved" hidden></div>`;
+  card.querySelector(".tool-args").textContent = argsText;
+  card.querySelectorAll(".perm-btn").forEach(b => {
+    b.addEventListener("click", () => sendDecision(evt.req_id, b.dataset.decision, b.dataset.persist));
+  });
+  log.appendChild(card);
+  log.scrollTop = log.scrollHeight;
+  setStatus("busy", "等待批准");
+}
+
+function sendDecision(req_id, decision, persist) {
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+  // 立即 disable 按钮，避免重复点
+  const card = document.querySelector(`.perm-card[data-req-id="${req_id}"]`);
+  if (card) {
+    card.classList.add("submitting");
+    card.querySelectorAll(".perm-btn").forEach(b => b.disabled = true);
+  }
+  state.ws.send(JSON.stringify({
+    type: "permission_decision",
+    req_id, decision,
+    persist: persist || null,
+    reason: decision === "deny" ? "user denied" : "user allowed",
+  }));
+}
+
+function markPermissionResolved(evt) {
+  const card = document.querySelector(`.perm-card[data-req-id="${evt.req_id}"]`);
+  if (!card) return;
+  card.classList.remove("pending", "submitting");
+  const status = card.querySelector(".tool-status");
+  const isAllow = evt.decision === "allow";
+  status.className = "tool-status " + (isAllow ? "done" : "error");
+  status.textContent = isAllow ? "已允许" : "已拒绝";
+  card.querySelector(".perm-actions").hidden = true;
+  const resolved = card.querySelector(".perm-resolved");
+  resolved.hidden = false;
+  resolved.textContent = (isAllow ? "✓ " : "✗ ") + (evt.message || "");
+  card.classList.add(isAllow ? "allowed" : "denied");
+}
+
 // ---------- 事件分发 ----------
 function handleEvent(evt) {
   const t = evt && evt.type;
@@ -346,6 +409,11 @@ function handleEvent(evt) {
   if (t === "user")         return handleUserMessage(evt.message || {});
   if (t === "system")       return handleSystem(evt);
   if (t === "result")       return handleResult(evt);
+  if (t === "_ccr") {
+    if (evt.subtype === "permission_request") return showPermissionRequest(evt);
+    if (evt.subtype === "permission_resolved") return markPermissionResolved(evt);
+    return;
+  }
   if (t === "_internal") {
     if (evt.subtype === "exit") {
       appendBubble("system", `claude 进程退出（rc=${evt.returncode}）`);
@@ -453,18 +521,18 @@ function handleUserMessage(msg) {
 function handleSystem(evt) {
   if (evt.subtype === "init") {
     setStatus("busy", "已就绪");
-    if (evt.session_id && evt.session_id !== state.sessionId) {
-      state.sessionId = evt.session_id;
-      $("chat-meta").textContent =
-        $("chat-meta").textContent.split(" · ")[0] + " · " + evt.session_id;
+    // claude 自身 session_id 只显示，不替换我们 state.sessionId（ccr- 永久 id）
+    if (evt.session_id) {
+      const base = $("chat-meta").textContent.split(" · ")[0];
+      $("chat-meta").textContent = `${base} · ${state.sessionId} · claude=${evt.session_id}`;
     }
     appendBubble("system", `init · model=${evt.model} · cwd=${evt.cwd}`);
   } else if (evt.subtype === "post_turn_summary") {
     setStatus("", "空闲");
   } else if (evt.subtype === "hook_started") {
-    // M3 才会真正用到；先简略
+    // hook 已开始执行：通常我们的桥接器在跑，可以忽略
   } else if (evt.subtype === "hook_response") {
-    // 同上
+    // hook 已返回：决定已经走完了；不额外渲染
   }
 }
 

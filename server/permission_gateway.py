@@ -1,0 +1,117 @@
+"""PermissionGateway：PreToolUse hook 桥接器调进来 → 推 WS 等用户决定 → 回桥接器。
+
+内存白名单（M3 范围；M4 持久化到 SQLite）：
+    {ccr_session_id: {"tools": set[str], "commands": set[str]}}
+"""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import logging
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import Any
+
+log = logging.getLogger(__name__)
+
+
+def cmd_fingerprint(tool_name: str, tool_input: dict[str, Any]) -> str:
+    """精确匹配指纹：tool_name + 关键参数。Bash 用 command；文件类用 file_path。"""
+    if tool_name == "Bash":
+        key = tool_input.get("command", "")
+    elif tool_name in ("Read", "Write", "Edit"):
+        key = tool_input.get("file_path", "")
+    else:
+        try:
+            key = json.dumps(tool_input, sort_keys=True, ensure_ascii=False)
+        except Exception:
+            key = repr(tool_input)
+    h = hashlib.sha256(f"{tool_name}\x00{key}".encode("utf-8")).hexdigest()[:16]
+    return f"{tool_name}:{h}"
+
+
+@dataclass
+class PermissionRequest:
+    req_id: str
+    ccr_session_id: str
+    tool_name: str
+    tool_input: dict[str, Any]
+    tool_use_id: str
+    claude_payload: dict[str, Any]
+    created_at: float = field(default_factory=time.time)
+    future: asyncio.Future = field(default_factory=lambda: asyncio.get_event_loop().create_future())
+
+
+class PermissionGateway:
+    def __init__(self) -> None:
+        self._pending: dict[str, PermissionRequest] = {}
+        # ccr_session_id -> {"tools": set[str], "commands": set[str (fingerprint)]}
+        self._allow: dict[str, dict[str, set[str]]] = {}
+        self._lock = asyncio.Lock()
+
+    def _allow_state(self, sid: str) -> dict[str, set[str]]:
+        if sid not in self._allow:
+            self._allow[sid] = {"tools": set(), "commands": set()}
+        return self._allow[sid]
+
+    def is_preapproved(self, sid: str, tool_name: str, tool_input: dict[str, Any]) -> bool:
+        st = self._allow.get(sid)
+        if not st:
+            return False
+        if tool_name in st["tools"]:
+            return True
+        if cmd_fingerprint(tool_name, tool_input) in st["commands"]:
+            return True
+        return False
+
+    async def open_request(self, *, ccr_session_id: str, claude_payload: dict[str, Any]) -> PermissionRequest:
+        tool_name = claude_payload.get("tool_name", "")
+        tool_input = claude_payload.get("tool_input") or {}
+        tool_use_id = claude_payload.get("tool_use_id", "")
+        req = PermissionRequest(
+            req_id="prm-" + uuid.uuid4().hex[:10],
+            ccr_session_id=ccr_session_id,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            tool_use_id=tool_use_id,
+            claude_payload=claude_payload,
+        )
+        async with self._lock:
+            self._pending[req.req_id] = req
+        return req
+
+    async def resolve(self, req_id: str, decision: dict[str, Any],
+                      persist: str | None = None) -> bool:
+        """前端 / 自动批准把决定 set 给 future。persist ∈ {None, 'tool', 'command'}。"""
+        async with self._lock:
+            req = self._pending.pop(req_id, None)
+        if req is None:
+            return False
+        if persist in ("tool", "command") and decision.get("behavior") == "allow":
+            self.remember(req.ccr_session_id, persist, req.tool_name, req.tool_input)
+        if not req.future.done():
+            req.future.set_result(decision)
+        return True
+
+    def remember(self, sid: str, scope: str, tool_name: str, tool_input: dict[str, Any]) -> None:
+        st = self._allow_state(sid)
+        if scope == "tool":
+            st["tools"].add(tool_name)
+        elif scope == "command":
+            st["commands"].add(cmd_fingerprint(tool_name, tool_input))
+
+    def get_pending(self, sid: str) -> list[PermissionRequest]:
+        return [r for r in self._pending.values() if r.ccr_session_id == sid]
+
+    async def cancel_for_session(self, sid: str) -> None:
+        async with self._lock:
+            to_drop = [rid for rid, r in self._pending.items() if r.ccr_session_id == sid]
+            for rid in to_drop:
+                req = self._pending.pop(rid)
+                if not req.future.done():
+                    req.future.set_result({"behavior": "deny", "message": "session ended"})
+
+
+gateway = PermissionGateway()

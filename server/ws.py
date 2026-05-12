@@ -14,10 +14,29 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from .auth import check_ws_token
+from .permission_gateway import gateway
 from .session_manager import manager
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _handle_permission_decision(sess_id: str, msg: dict) -> None:
+    req_id = msg.get("req_id")
+    decision = (msg.get("decision") or "").strip()
+    persist = msg.get("persist")  # None / "tool" / "command"
+    reason = msg.get("reason") or ("user " + decision)
+    if decision not in ("allow", "deny") or not req_id:
+        log.warning("bad permission_decision payload: %r", msg)
+        return
+    payload = {"behavior": decision, "message": reason}
+    if decision == "allow":
+        # 工具白名单要 input 透传，让 claude 真正执行（updatedInput 可省略）
+        pass
+    ok = await gateway.resolve(req_id, payload, persist=persist)
+    if not ok:
+        log.warning("permission_decision for unknown req: %s (sess=%s)",
+                    req_id, sess_id)
 
 
 @router.websocket("/ws/{session_id}")
@@ -55,6 +74,8 @@ async def ws_session(ws: WebSocket, session_id: str) -> None:
                         log.debug("ws->claude: user_message %d chars sess=%s",
                                   len(content), session_id)
                         await sess.proc.send_user_message(content)
+                elif kind == "permission_decision":
+                    await _handle_permission_decision(sess.id, msg)
                 elif kind == "ping":
                     await ws.send_json({"type": "pong", "ts": msg.get("ts")})
                 else:

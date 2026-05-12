@@ -5,9 +5,11 @@ M1 范围：起进程、收事件、发 user message。不接 PreToolUse hook（
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
+import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -25,14 +27,36 @@ class ClaudeProcess:
     """
 
     def __init__(self, cwd: str, *, resume_session_id: str | None = None,
+                 ccr_session_id: str | None = None,
                  extra_args: list[str] | None = None) -> None:
         self.cwd = cwd
         self.resume_session_id = resume_session_id
+        self.ccr_session_id = ccr_session_id
         self.extra_args = list(extra_args or [])
         self.proc: asyncio.subprocess.Process | None = None
         self.session_id: str | None = None  # 由 system/init 事件填充
         self._stderr_buf: list[str] = []
         self._stderr_task: asyncio.Task[None] | None = None
+        self._settings_path: Path | None = None
+
+    def _write_hook_settings(self) -> Path:
+        """生成临时 settings.json，挂 PreToolUse hook 指向桥接器。"""
+        settings = {
+            "permissions": {"defaultMode": "default"},
+            "hooks": {
+                "PreToolUse": [{
+                    "matcher": ".*",
+                    "hooks": [{
+                        "type": "command",
+                        "command": config.HOOK_BRIDGE,
+                    }],
+                }],
+            },
+        }
+        fd, p = tempfile.mkstemp(prefix="ccr-settings-", suffix=".json")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(settings, f, ensure_ascii=False)
+        return Path(p)
 
     def _build_cmd(self) -> list[str]:
         cmd = [
@@ -43,7 +67,10 @@ class ClaudeProcess:
             "--include-partial-messages",
             "--include-hook-events",
             "--verbose",
+            "--permission-mode", "default",
         ]
+        if self._settings_path:
+            cmd += ["--settings", str(self._settings_path)]
         if self.resume_session_id:
             cmd += ["--resume", self.resume_session_id]
         cmd += self.extra_args
@@ -52,17 +79,25 @@ class ClaudeProcess:
     async def start(self) -> None:
         if self.proc is not None:
             raise RuntimeError("ClaudeProcess already started")
-        cmd = self._build_cmd()
-        log.info("spawn claude cwd=%s cmd=%s", self.cwd, " ".join(cmd))
         if not Path(self.cwd).is_dir():
             raise FileNotFoundError(f"cwd not a directory: {self.cwd}")
+        self._settings_path = self._write_hook_settings()
+        cmd = self._build_cmd()
+        log.info("spawn claude cwd=%s cmd=%s", self.cwd, " ".join(cmd))
+
+        env = {**os.environ}
+        env["CCR_BRIDGE_URL"] = config.BRIDGE_URL
+        env["CCR_TOKEN"] = config.TOKEN
+        if self.ccr_session_id:
+            env["CCR_SESSION_ID"] = self.ccr_session_id
+
         self.proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=self.cwd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env={**os.environ},
+            env=env,
         )
         self._stderr_task = asyncio.create_task(self._drain_stderr())
 
@@ -135,3 +170,6 @@ class ClaudeProcess:
                 pass
         if self._stderr_task:
             self._stderr_task.cancel()
+        if self._settings_path and self._settings_path.exists():
+            with contextlib.suppress(OSError):
+                self._settings_path.unlink()

@@ -40,3 +40,12 @@ PORT: int = int(os.environ.get("CCR_PORT", "1881"))
 DEFAULT_CWD: str = os.environ.get("CCR_DEFAULT_CWD", str(Path.home() / "codes"))
 
 STATIC_DIR: Path = Path(__file__).parent / "static"
+
+# hook 桥接器调本机 server 走 127.0.0.1（不出环回）
+BRIDGE_URL: str = os.environ.get(
+    "CCR_BRIDGE_URL", f"http://127.0.0.1:{PORT}/api/permission/wait"
+)
+HOOK_BRIDGE: str = os.environ.get(
+    "CCR_HOOK_BRIDGE",
+    str(Path(__file__).resolve().parents[1] / "scripts" / "hook_bridge.py"),
+)
