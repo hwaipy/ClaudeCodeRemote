@@ -7,11 +7,13 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="CCR">
-<link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" type="image/svg+xml" href="/icon.svg">
-<link rel="apple-touch-icon" href="/icon.svg">
+<!-- 反代场景下 __ROOT__ 会被 server 替换为 /remote 等前缀；本地直跑就是空 -->
+<base href="__ROOT__/">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="apple-touch-icon" href="icon.svg">
 <title>ClaudeCodeRemote</title>
-<link rel="stylesheet" href="/static/style.css?v=__BUILD_ID__">
+<link rel="stylesheet" href="static/style.css?v=__BUILD_ID__">
 </head>
 <body>
 
@@ -73,6 +75,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=__BUILD_ID__"></script>
+<script src="static/app.js?v=__BUILD_ID__"></script>
 </body>
 </html>

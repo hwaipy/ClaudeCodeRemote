@@ -41,6 +41,13 @@ DEFAULT_CWD: str = os.environ.get("CCR_DEFAULT_CWD", str(Path.home() / "codes"))
 
 STATIC_DIR: Path = Path(__file__).parent / "static"
 
+# 反代场景下的根路径前缀。例：CCR_ROOT_PATH=/remote 表示对外是
+# https://host/remote/。空表示挂在根上。前端会注入到 <base href> 里。
+ROOT_PATH: str = os.environ.get("CCR_ROOT_PATH", "").rstrip("/")
+if ROOT_PATH and not ROOT_PATH.startswith("/"):
+    sys.stderr.write("FATAL: CCR_ROOT_PATH must start with /, got: %r\n" % ROOT_PATH)
+    raise SystemExit(2)
+
 # 资源版本号：取 static 目录下 app.js + style.css 的 mtime 较大值。
 # index.html 引用静态资源时附 ?v=BUILD_ID，让浏览器强缓存自动失效。
 def _build_id() -> str:

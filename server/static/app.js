@@ -28,10 +28,16 @@ function showView(name) {
 }
 
 // ---------- HTTP helper ----------
+// 所有路径都用相对（不带前导 /），让 <base href> 拼前缀；反代到 /remote/
+// 下时自动变 /remote/api/xxx。
+function apiPath(p) {
+  return p.replace(/^\/+/, "");  // 兼容老调用方传 "/api/..."
+}
+
 async function api(path, opts = {}) {
   const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
   if (state.token) headers["Authorization"] = "Bearer " + state.token;
-  const res = await fetch(path, { ...opts, headers });
+  const res = await fetch(apiPath(path), { ...opts, headers });
   let body = null;
   try { body = await res.json(); } catch (_) {}
   if (!res.ok) {
@@ -41,6 +47,13 @@ async function api(path, opts = {}) {
     throw err;
   }
   return body;
+}
+
+// WS 必须用绝对 URL；基于 <base href> 解析相对路径，再切 ws/wss 协议
+function wsURL(relPath) {
+  const u = new URL(relPath, document.baseURI);
+  u.protocol = (u.protocol === "https:") ? "wss:" : "ws:";
+  return u.toString();
 }
 
 // ---------- 登录 ----------
@@ -215,8 +228,7 @@ function enterHome() {
 
 function connectGlobalWS() {
   if (state.globalWS && state.globalWS.readyState === WebSocket.OPEN) return;
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  const url = `${proto}://${location.host}/ws-global?token=${encodeURIComponent(state.token)}`;
+  const url = wsURL("ws-global?token=" + encodeURIComponent(state.token));
   const ws = new WebSocket(url);
   state.globalWS = ws;
   ws.addEventListener("message", (ev) => {
@@ -325,8 +337,8 @@ function setStatus(cls, text) {
 }
 
 function connectWS() {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  const url = `${proto}://${location.host}/ws/${encodeURIComponent(state.sessionId)}?token=${encodeURIComponent(state.token)}`;
+  const url = wsURL("ws/" + encodeURIComponent(state.sessionId)
+                    + "?token=" + encodeURIComponent(state.token));
   const ws = new WebSocket(url);
   state.ws = ws;
   ws.addEventListener("open", () => setStatus("", "已连接"));
@@ -915,9 +927,12 @@ $("chat-input").addEventListener("input", e => {
 renderPresets();
 setupAttachmentInput();
 // PWA service worker（只在 secure context 下有效；http 公网会静默失败，不影响功能）
+// register 路径基于 <base href>，scope 同前缀
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js")
+    const swURL = new URL("sw.js", document.baseURI).pathname;
+    const swScope = new URL("./", document.baseURI).pathname;
+    navigator.serviceWorker.register(swURL, { scope: swScope })
       .catch(err => console.warn("SW register failed (expected on http):", err.message));
   });
 }
