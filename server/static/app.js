@@ -461,6 +461,8 @@ function attachToolResult(toolUseId, content, isError) {
 // ---------- 权限请求卡片 ----------
 function showPermissionRequest(evt) {
   const log = $("chat-log");
+  // 兜底：如果同一 req_id 卡片已经在 DOM 上了（比如 backlog 已显示，server 又重 push 一份），不重复创建
+  if (log.querySelector(`.perm-card[data-req-id="${evt.req_id}"]`)) return;
   const card = document.createElement("div");
   card.className = "perm-card pending";
   card.dataset.reqId = evt.req_id;
@@ -511,14 +513,18 @@ function markPermissionResolved(evt) {
   if (!card) return;
   card.classList.remove("pending", "submitting");
   const status = card.querySelector(".tool-status");
-  const isAllow = evt.decision === "allow";
-  status.className = "tool-status " + (isAllow ? "done" : "error");
-  status.textContent = isAllow ? "已允许" : "已拒绝";
+  const dec = evt.decision;
+  let label, sCls, dotCls, prefix;
+  if (dec === "allow")      { label = "已允许"; sCls = "done";    dotCls = "allowed"; prefix = "✓ "; }
+  else if (dec === "deny")  { label = "已拒绝"; sCls = "error";   dotCls = "denied";  prefix = "✗ "; }
+  else                       { label = "已失效"; sCls = "stale";   dotCls = "stale";   prefix = "· "; }
+  status.className = "tool-status " + sCls;
+  status.textContent = label;
   card.querySelector(".perm-actions").hidden = true;
   const resolved = card.querySelector(".perm-resolved");
   resolved.hidden = false;
-  resolved.textContent = (isAllow ? "✓ " : "✗ ") + (evt.message || "");
-  card.classList.add(isAllow ? "allowed" : "denied");
+  resolved.textContent = prefix + (evt.message || "");
+  card.classList.add(dotCls);
 }
 
 // ---------- 事件分发 ----------

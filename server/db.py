@@ -217,3 +217,30 @@ async def load_perms(sess_id: str) -> list[tuple[str, str]]:
         )
         return list(cur.fetchall())
     return await _run(_w)
+
+
+# ---------- 启动清理 ----------
+
+async def find_orphan_perm_reqs(sess_id: str) -> list[str]:
+    """该 session 中没有对应 perm_resolved 的 perm_req 的 req_id 列表。"""
+    def _w() -> list[str]:
+        reqs = []
+        resolved = set()
+        for (p,) in _conn.execute(
+            "SELECT payload FROM messages WHERE sess_id=? AND kind='perm_req'",
+            (sess_id,),
+        ):
+            try:
+                reqs.append(json.loads(p).get("req_id"))
+            except Exception:
+                pass
+        for (p,) in _conn.execute(
+            "SELECT payload FROM messages WHERE sess_id=? AND kind='perm_resolved'",
+            (sess_id,),
+        ):
+            try:
+                resolved.add(json.loads(p).get("req_id"))
+            except Exception:
+                pass
+        return [r for r in reqs if r and r not in resolved]
+    return await _run(_w)

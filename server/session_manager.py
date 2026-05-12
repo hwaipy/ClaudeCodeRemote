@@ -146,6 +146,20 @@ class SessionManager:
             async with self._lock:
                 self.sessions[sess.id] = sess
             await gateway.load_for_session(sess.id)
+            # 清理孤儿 perm_req（server 上次重启时 hook 桥接器留下，gateway 已丢）
+            orphans = await db.find_orphan_perm_reqs(sess.id)
+            for rid in orphans:
+                sess.seq += 1
+                stale_evt = {
+                    "type": "_ccr", "subtype": "permission_resolved",
+                    "req_id": rid, "decision": "stale",
+                    "message": "会话恢复时此请求已失效（server 重启）",
+                }
+                await db.append_message(sess.id, sess.seq, time.time(),
+                                         "perm_resolved", stale_evt)
+            if orphans:
+                log.info("marked %d orphan perm_req(s) as stale for %s",
+                         len(orphans), sess.id)
         self._hibernate_task = asyncio.create_task(
             self._hibernate_loop(), name="hibernate-scheduler",
         )
@@ -311,19 +325,33 @@ class SessionManager:
     # ---------- subscribe ----------
 
     async def subscribe(self, sess: Session) -> AsyncIterator[dict[str, Any]]:
-        """先重放 DB 里的历史，再发一个 backlog_done 分界，再走实时队列。"""
+        """先重放 DB 里的历史，再发一个 backlog_done 分界 + 补一份 pending perm_req
+        快照（防前端漏渲），再走实时队列。"""
+        from .permission_gateway import gateway
         q: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1024)
         sess.subscribers.add(q)
         try:
             history = await db.load_messages(sess.id)
             for seq, ts, kind, payload in history:
                 yield {"seq": seq, "ts": ts, "event": payload}
-            # backlog 完成分界：不入 DB，仅作 UI 信号
             yield {
                 "seq": -1, "ts": time.time(),
                 "event": {"type": "_ccr", "subtype": "backlog_done",
                           "history_count": len(history)},
             }
+            # 补：当前 gateway 里仍 pending 的请求重发一遍（前端兜底渲染）
+            for req in gateway.get_pending(sess.id):
+                yield {
+                    "seq": -1, "ts": time.time(),
+                    "event": {
+                        "type": "_ccr", "subtype": "permission_request",
+                        "req_id": req.req_id,
+                        "tool_name": req.tool_name,
+                        "tool_input": req.tool_input,
+                        "tool_use_id": req.tool_use_id,
+                        "replay": True,
+                    },
+                }
             while True:
                 env = await q.get()
                 yield env
