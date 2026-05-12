@@ -91,8 +91,18 @@ async def ws_session(ws: WebSocket, session_id: str) -> None:
                 msg = await ws.receive_json()
                 kind = msg.get("type")
                 if kind == "user_message":
-                    content = (msg.get("content") or "").strip()
-                    if not content:
+                    raw = msg.get("content")
+                    # 支持 str 或 [{type:text|image, ...}, ...]
+                    if isinstance(raw, str):
+                        content = raw.strip()
+                        if not content:
+                            continue
+                    elif isinstance(raw, list):
+                        content = [b for b in raw
+                                   if isinstance(b, dict) and b.get("type")]
+                        if not content:
+                            continue
+                    else:
                         continue
                     if sess.proc is None:
                         # 自动 resume
@@ -101,9 +111,9 @@ async def ws_session(ws: WebSocket, session_id: str) -> None:
                         if resumed is None or resumed.proc is None:
                             log.error("auto-resume failed for %s", sess.id)
                             continue
-                    log.debug("ws->claude: user_message %d chars sess=%s",
-                              len(content), session_id)
-                    # 先注入一份 user_input 事件让流（含 DB 持久化和前端 echo）
+                    log.debug("ws->claude: user_message sess=%s type=%s",
+                              session_id, type(content).__name__)
+                    # 先注入一份 user_input 事件入流（DB 持久化 + 前端 echo）
                     await manager.inject_event(sess, {
                         "type": "user_input", "content": content,
                     })

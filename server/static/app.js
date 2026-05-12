@@ -123,6 +123,7 @@ const STATE_BADGES = {
 // 主页状态板：按 sess.id 缓存当前快照
 state.sessionsById = new Map();   // id -> session payload
 state.globalWS = null;
+state.attachments = [];           // 待发送附件列表：[{kind, media_type, base64, dataUrl}]
 
 function relTime(ts) {
   if (!ts) return "";
@@ -401,7 +402,13 @@ function ensureToolCard(toolUseId, name) {
 }
 
 function renderToolArgs(entry) {
-  // 优先用 finalInput（解析过的 dict），否则用 partialInput 原文
+  // Edit 走 DOM diff 视图；其它走纯文本 formatToolInput
+  if (entry.name === "Edit"
+      && entry.finalInput && typeof entry.finalInput === "object"
+      && entry.finalInput.file_path) {
+    renderEditDiff(entry);
+    return;
+  }
   let body;
   if (entry.finalInput && typeof entry.finalInput === "object") {
     body = formatToolInput(entry.name, entry.finalInput);
@@ -409,6 +416,63 @@ function renderToolArgs(entry) {
     body = entry.partialInput || "";
   }
   entry.argsEl.textContent = body;
+}
+
+// 行级 unified diff（简单 LCS DP）
+function unifiedDiff(oldText, newText) {
+  const a = String(oldText).split("\n");
+  const b = String(newText).split("\n");
+  const m = a.length, n = b.length;
+  // dp[i][j] = LCS length of a[i..m-1] and b[j..n-1]
+  const dp = Array.from({ length: m + 1 }, () => new Int32Array(n + 1));
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = n - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j]
+        ? dp[i + 1][j + 1] + 1
+        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const ops = [];
+  let i = 0, j = 0;
+  while (i < m && j < n) {
+    if (a[i] === b[j]) { ops.push({ op: " ", text: a[i] }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { ops.push({ op: "-", text: a[i] }); i++; }
+    else                                     { ops.push({ op: "+", text: b[j] }); j++; }
+  }
+  while (i < m) { ops.push({ op: "-", text: a[i] }); i++; }
+  while (j < n) { ops.push({ op: "+", text: b[j] }); j++; }
+  return ops;
+}
+
+function renderEditDiff(entry) {
+  const inp = entry.finalInput;
+  entry.argsEl.innerHTML = "";
+  const header = document.createElement("div");
+  header.className = "diff-header";
+  const path = String(inp.file_path);
+  header.innerHTML = `<span class="diff-path">${escHTML(path)}</span>`;
+  // VS Code 跳转链接：vscode://file/<abs>
+  if (path.startsWith("/")) {
+    const a = document.createElement("a");
+    a.href = "vscode://file" + path;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.className = "diff-link";
+    a.textContent = "↗ VS Code";
+    header.appendChild(a);
+  }
+  entry.argsEl.appendChild(header);
+
+  const body = document.createElement("div");
+  body.className = "diff-body";
+  const ops = unifiedDiff(inp.old_string || "", inp.new_string || "");
+  for (const o of ops) {
+    const row = document.createElement("div");
+    row.className = "diff-row " + (o.op === "-" ? "del" : o.op === "+" ? "ins" : "ctx");
+    row.textContent = (o.op === " " ? "  " : o.op + " ") + o.text;
+    body.appendChild(row);
+  }
+  entry.argsEl.appendChild(body);
 }
 
 function formatToolInput(name, input) {
@@ -654,7 +718,26 @@ function handleUserMessage(msg) {
 }
 
 function handleUserInput(evt) {
-  appendBubble("user", evt.content || "");
+  const c = evt.content;
+  if (typeof c === "string") {
+    appendBubble("user", c);
+    return;
+  }
+  if (!Array.isArray(c)) return;
+  const bubble = appendBubble("user", "");
+  bubble.textContent = "";
+  for (const block of c) {
+    if (block && block.type === "image" && block.source && block.source.data) {
+      const img = document.createElement("img");
+      img.src = `data:${block.source.media_type || "image/png"};base64,${block.source.data}`;
+      img.className = "att-thumb-bubble";
+      bubble.appendChild(img);
+    } else if (block && block.type === "text" && block.text) {
+      const span = document.createElement("div");
+      span.textContent = block.text;
+      bubble.appendChild(span);
+    }
+  }
 }
 
 function handleSystem(evt) {
@@ -685,12 +768,135 @@ function handleResult(evt) {
 function sendUserMessage() {
   const ta = $("chat-input");
   const text = ta.value.trim();
-  if (!text || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
-  state.ws.send(JSON.stringify({ type: "user_message", content: text }));
+  if ((!text && state.attachments.length === 0)
+      || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+  let content;
+  if (state.attachments.length) {
+    content = state.attachments.map(a => ({
+      type: "image",
+      source: { type: "base64", media_type: a.media_type, data: a.base64 },
+    }));
+    if (text) content.push({ type: "text", text });
+  } else {
+    content = text;
+  }
+  state.ws.send(JSON.stringify({ type: "user_message", content }));
   // user bubble 等 server 注入 user_input echo 时再渲染（保证刷新/resume 也能看到）
   ta.value = "";
   ta.style.height = "auto";
+  clearAttachments();
   setStatus("busy", "等待回复…");
+}
+
+// ---------- 附件 ----------
+function clearAttachments() {
+  state.attachments = [];
+  renderAttachmentBar();
+}
+
+function renderAttachmentBar() {
+  const bar = $("chat-attachments");
+  bar.innerHTML = "";
+  if (state.attachments.length === 0) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  state.attachments.forEach((a, idx) => {
+    const card = document.createElement("div");
+    card.className = "att-card";
+    if (a.kind === "image") {
+      const img = document.createElement("img");
+      img.src = a.dataUrl;
+      img.className = "att-thumb";
+      card.appendChild(img);
+    } else {
+      const s = document.createElement("span");
+      s.textContent = a.label || "(附件)";
+      card.appendChild(s);
+    }
+    const x = document.createElement("button");
+    x.className = "att-x";
+    x.type = "button";
+    x.textContent = "✕";
+    x.addEventListener("click", () => {
+      state.attachments.splice(idx, 1);
+      renderAttachmentBar();
+    });
+    card.appendChild(x);
+    bar.appendChild(card);
+  });
+}
+
+function addImageAttachment(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = reader.result;
+    // 拆 data:<mime>;base64,<b64>
+    const m = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+    if (!m) return;
+    state.attachments.push({
+      kind: "image",
+      media_type: m[1],
+      base64: m[2],
+      dataUrl,
+    });
+    renderAttachmentBar();
+  };
+  reader.readAsDataURL(file);
+}
+
+function setupAttachmentInput() {
+  const ta = $("chat-input");
+  // 粘贴
+  ta.addEventListener("paste", (e) => {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    for (const it of items) {
+      if (it.kind === "file" && it.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = it.getAsFile();
+        if (file) addImageAttachment(file);
+      }
+    }
+  });
+  // 拖拽到整个 chat 视图
+  const dropZone = document.querySelector("#view-chat");
+  ["dragover", "dragenter"].forEach(ev => {
+    dropZone.addEventListener(ev, (e) => {
+      if (e.dataTransfer && [...e.dataTransfer.types].includes("Files")) {
+        e.preventDefault();
+        dropZone.classList.add("drag-over");
+      }
+    });
+  });
+  ["dragleave", "drop"].forEach(ev => {
+    dropZone.addEventListener(ev, () => dropZone.classList.remove("drag-over"));
+  });
+  dropZone.addEventListener("drop", (e) => {
+    if (!e.dataTransfer) return;
+    const files = Array.from(e.dataTransfer.files || []);
+    if (!files.length) return;
+    e.preventDefault();
+    for (const f of files) {
+      if (f.type.startsWith("image/")) {
+        addImageAttachment(f);
+      } else if (f.size < 200 * 1024
+                 && (/\.(txt|md|py|js|ts|tsx|jsx|json|html|css|sh|yml|yaml|toml|ini|conf|c|cc|cpp|h|hpp|rs|go|java|kt|swift)$/i.test(f.name)
+                     || f.type.startsWith("text/"))) {
+        // 小文本：追加到输入框
+        const r = new FileReader();
+        r.onload = () => {
+          const ta = $("chat-input");
+          ta.value += (ta.value ? "\n\n" : "") + "// " + f.name + "\n" + r.result;
+          ta.dispatchEvent(new Event("input"));
+        };
+        r.readAsText(f);
+      } else {
+        alert(`暂不支持的文件类型：${f.name}（${f.type || "unknown"}）`);
+      }
+    }
+  });
 }
 
 $("chat-send").addEventListener("click", sendUserMessage);
@@ -707,6 +913,7 @@ $("chat-input").addEventListener("input", e => {
 
 // ---------- 启动 ----------
 renderPresets();
+setupAttachmentInput();
 if (state.token) {
   tryLogin(state.token).then(enterHome).catch(() => {
     state.token = "";

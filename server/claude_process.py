@@ -116,12 +116,13 @@ class ClaudeProcess:
     def stderr_tail(self) -> list[str]:
         return list(self._stderr_buf[-30:])
 
-    async def send_user_message(self, text: str) -> None:
+    async def send_user_message(self, content) -> None:
+        """content 可以是 str（纯文本）或 list of block dict（text / image 等）。"""
         if not self.proc or not self.proc.stdin:
             raise RuntimeError("ClaudeProcess not started")
         payload = {
             "type": "user",
-            "message": {"role": "user", "content": text},
+            "message": {"role": "user", "content": content},
         }
         line = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
         log.debug("send_user_message %d bytes to pid=%s",

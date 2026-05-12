@@ -246,6 +246,51 @@ input:focus, textarea:focus { border-color: #58a6ff; }
   background: transparent;
 }
 
+/* 附件预览栏：chat-foot 之上 */
+.chat-attachments {
+  flex: 0 0 auto;
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 8px clamp(12px, 4vw, 16px);
+  border-top: 1px dashed #21262d;
+  background: #0d1117;
+}
+.chat-attachments[hidden] { display: none; }
+.att-card {
+  position: relative;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  background: #161b22;
+  padding: 2px;
+}
+.att-thumb {
+  display: block;
+  max-width: 96px; max-height: 96px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+.att-x {
+  position: absolute; top: -8px; right: -8px;
+  width: 20px; height: 20px; padding: 0;
+  border: 1px solid #30363d;
+  border-radius: 50%;
+  background: #21262d; color: #e6edf3;
+  cursor: pointer; font-size: 11px; line-height: 1;
+}
+.att-x:hover { background: #2d1115; color: #ffa198; }
+.att-thumb-bubble {
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: 8px;
+  display: block;
+  margin: 4px 0;
+}
+
+/* 拖入高亮 */
+#view-chat.drag-over .chat-log {
+  outline: 2px dashed #58a6ff;
+  outline-offset: -8px;
+}
+
 .chat-foot {
   flex: 0 0 auto;
   padding: 10px clamp(12px, 4vw, 16px) max(10px, env(safe-area-inset-bottom));
@@ -339,6 +384,44 @@ input:focus, textarea:focus { border-color: #58a6ff; }
   background: #2d111522;
   color: #ffa198;
 }
+
+/* Edit 工具的 unified diff 视图 */
+.diff-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 4px 0 6px;
+  border-bottom: 1px dashed #21262d;
+  margin-bottom: 6px;
+  font-size: 12.5px;
+}
+.diff-path {
+  color: #c9d1d9;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  flex: 1; min-width: 0;
+  word-break: break-all;
+}
+.diff-link {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: #58a6ff;
+  text-decoration: none;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid #30363d;
+}
+.diff-link:hover { background: #21262d; text-decoration: none; }
+.diff-body {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.diff-row {
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 0 4px;
+}
+.diff-row.ctx { color: #6e7681; }
+.diff-row.del { color: #ffa198; background: #2d111533; }
+.diff-row.ins { color: #7ee787; background: #0f2e1a55; }
 
 /* Permission request card (M3) */
 .perm-card {
