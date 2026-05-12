@@ -427,11 +427,48 @@ function renderMarkdown(text) {
   if (!text) return "";
   if (typeof marked === "undefined") return escHTML(text).replace(/\n/g, "<br>");
   try {
-    return sanitizeMD(marked.parse(String(text)));
+    // 公式占位：避免 marked 把 $a*b$ 里的 * 解析成 emphasis
+    const stash = [];
+    const stashIt = (s) => { stash.push(s); return `@@CCRMATH${stash.length - 1}@@`; };
+    let s = String(text);
+    s = s.replace(/\$\$([\s\S]+?)\$\$/g, m => stashIt(m));
+    s = s.replace(/\\\[([\s\S]+?)\\\]/g, m => stashIt(m));
+    s = s.replace(/\\\(([\s\S]+?)\\\)/g, m => stashIt(m));
+    s = s.replace(/\$([^$\n]+?)\$/g, m => stashIt(m));
+    let html = sanitizeMD(marked.parse(s));
+    // 还原（escHTML 是 KaTeX-safe 的：< / > 会被还原为字符）
+    html = html.replace(/@@CCRMATH(\d+)@@/g, (_, i) => escHTML(stash[Number(i)]));
+    return html;
   } catch (e) {
     console.warn("markdown parse failed:", e);
     return escHTML(text).replace(/\n/g, "<br>");
   }
+}
+
+// KaTeX 数学公式：marked 渲染后再扫描元素里的 $...$ / $$...$$ / \(...\) / \[...\]
+function renderMathIn(el) {
+  if (typeof renderMathInElement === "undefined" || !el) return;
+  try {
+    renderMathInElement(el, {
+      delimiters: [
+        { left: "$$", right: "$$", display: true },
+        { left: "\\[", right: "\\]", display: true },
+        { left: "\\(", right: "\\)", display: false },
+        { left: "$",  right: "$",  display: false },
+      ],
+      throwOnError: false,
+      errorColor: "var(--danger-fg, #d70015)",
+      ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code"],
+    });
+  } catch (e) {
+    console.warn("katex render failed:", e);
+  }
+}
+
+// markdown + 数学的复合渲染（DOM 写入 + 公式重排）
+function renderMDIntoBubble(bubble, text) {
+  bubble.innerHTML = renderMarkdown(text);
+  renderMathIn(bubble);
 }
 
 // ---------- Tool 卡片 ----------
@@ -738,7 +775,7 @@ function handleStreamEvent(ev) {
       const msg = state.msgById.get(block.msgId);
       if (msg) {
         msg.text += d.text || "";
-        msg.bubble.innerHTML = renderMarkdown(msg.text);
+        renderMDIntoBubble(msg.bubble, msg.text);
         $("chat-log").scrollTop = $("chat-log").scrollHeight;
       }
     } else if (d.type === "input_json_delta" && block.type === "tool_use") {
@@ -773,10 +810,10 @@ function handleAssistantMessage(msg) {
       const cur = id && state.msgById.get(id);
       if (cur) {
         cur.text = b.text;
-        cur.bubble.innerHTML = renderMarkdown(b.text);
+        renderMDIntoBubble(cur.bubble, b.text);
       } else if (b.text) {
         const bubble = appendBubble("assistant", "");
-        bubble.innerHTML = renderMarkdown(b.text);
+        renderMDIntoBubble(bubble, b.text);
         if (id) state.msgById.set(id, { bubble, text: b.text });
       }
     } else if (b.type === "tool_use") {
