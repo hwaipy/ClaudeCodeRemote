@@ -14,21 +14,24 @@
 
 ## 关键发现（设计前必须知道的几件事）
 
-1. **`--print` 模式下 `permissionMode` 默认是 `bypassPermissions`**（L2 `system.init`）。
-   也就是说不显式传 `--permission-mode`，所有工具直接放行——M3 必须显式传别的。
-2. **`--print` + `default` permission-mode 不会产生权限事件**。在 stream 上既没收到权限请求，也没人拦
-   工具，Bash 直接执行了（场景 perm_default，L93 tool_result `is_error=false`）。
-   结论：**运行期权限拦截不能靠 `--permission-mode`，要走 MCP `permission_prompt_tool` 通道
-   或 stream-json control protocol**。M3 开工前需要一次专门 spike 验证此路径。
-3. **`--disallowedTools` / `--allowedTools` 是启动期黑/白名单**，不是运行期拦截。
+1. **默认 `permissionMode=bypassPermissions` 来自用户 settings.json**（不是 `--print` 的内建默认）。
+   `~/.claude/settings.json` 里 `permissions.defaultMode` 决定，传 `--permission-mode <mode>`
+   覆盖之。**M3 必须显式 `--permission-mode default` 才有可能拦截**。
+2. **`--permission-mode default` 单独不够**，必须配 PreToolUse hook 才会拦。场景 `perm_default`
+   只传 mode 不配 hook，Bash 仍直接放行。
+3. **运行期权限拦截的官方路径是 PreToolUse hook**（M0.5 实证）。
+   `--permission-prompt-tool` 这个隐藏 flag 在 `--print` 模式下被忽略（MCP server 只收到
+   `initialize`+`tools/list`，从不收 `tools/call`，场景 `perm_mcp_strict`）。详见
+   §权限通道（M0.5 落地）。
+4. **`--disallowedTools` / `--allowedTools` 是启动期黑/白名单**，不是运行期拦截。
    场景 `perm_disallowed`：模型 init 时拿到的工具列表里就没有 Bash，自然不会调用
    （L112 assistant text："Bash isn't in my available tools this session"）。
-4. **每个事件都带 `session_id` (UUID) + 自身 `uuid`**。session_id 由 CLI 生成，对应
+5. **每个事件都带 `session_id` (UUID) + 自身 `uuid`**。session_id 由 CLI 生成，对应
    `~/.claude/projects/<slug>/<session_id>.jsonl`，可用 `--resume <session_id>` 恢复。
-5. **高层事件 `assistant` / `user` 是 `stream_event` 的聚合视图**（冗余但好用）：
+6. **高层事件 `assistant` / `user` 是 `stream_event` 的聚合视图**（冗余但好用）：
    - 流式 UI 用 `stream_event/*`（打字效果、partial_json 拼工具参数）。
    - 持久化只存 `assistant` / `user`（拿到完整 message 一次性入库）。
-6. **`system.post_turn_summary` 给出 `status_category`**（`review_ready` / `needs_action` 等），
+7. **`system.post_turn_summary` 给出 `status_category`**（`review_ready` / `needs_action` 等），
    对应基线 `app.py` 的 idle/busy/needs-input 概念。M5 状态板用这个。
 
 ## 输入协议（stdin）
@@ -205,26 +208,141 @@ M5 状态板可拿这个驱动 UI 状态机。
 
 ---
 
+## 权限通道（M0.5 落地）
+
+### 走通的路：PreToolUse hook
+
+**结论先行**：M3 走 **PreToolUse hook**，命令同步阻塞等后端决定。MCP `permission_prompt_tool`
+路径在 `--print` 模式下不可用，放弃。
+
+#### 启动配置
+
+`--permission-mode default` + `--settings <file>` 指向一份 settings JSON，含：
+
+```json
+{
+  "permissions": {"defaultMode": "default"},
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "Bash",
+      "hooks": [{"type": "command", "command": "/abs/path/to/hook_bridge"}]
+    }]
+  }
+}
+```
+
+`matcher` 是正则 / 工具名通配（实测 `"Bash"` 命中 Bash；用 `".*"` 应该能拦所有）。
+
+#### Hook 命令的 IO 合约
+
+**stdin**：claude 写一份 JSON（实测见 `docs/hook-calls.jsonl`）：
+
+```json
+{
+  "session_id": "06b9bd5f-...",
+  "transcript_path": "/home/.../<sid>.jsonl",
+  "cwd": "<process cwd>",
+  "permission_mode": "default",
+  "effort": {"level": "xhigh"},
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {"command": "date", "description": "..."},
+  "tool_use_id": "toolu_01..."
+}
+```
+
+附带的环境变量：`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PROJECT_DIR`,
+`CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_AGENT_SDK_VERSION`, 等。
+
+**stdout**：JSON 决定（exit 0 即可）：
+
+- 允许：
+  ```json
+  {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                          "permissionDecision": "allow",
+                          "permissionDecisionReason": "<可选 reason>"}}
+  ```
+- 拒绝：
+  ```json
+  {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                          "permissionDecision": "deny",
+                          "permissionDecisionReason": "<显示给模型的原因>"}}
+  ```
+
+#### Stream 上的副作用
+
+- **`system/hook_started`**（新事件类型，由 `--include-hook-events` 启用）：
+  `{hook_id, hook_name: "PreToolUse:Bash", hook_event: "PreToolUse", session_id}`
+- **`system/hook_response`**：同上 + `output / stdout / stderr / exit_code / outcome`。
+  整条 stdout 字符串原样含在 `output` 字段——后端可以从这判断 hook 实际返回了什么。
+- **Deny 路径**：`tool_result.is_error=true`，`content` 就是 `permissionDecisionReason`；
+  模型看到 deny 后正常继续推理。`result.permission_denials` 数组末尾追加
+  `{tool_name, tool_use_id, tool_input}`。
+- **Allow 路径**：跟正常工具调用一样，无额外标记，差别只是中间多了两条 hook 事件。
+
+事件序列实测（hook_deny 场景 L177-205，hook_allow L206-234）：
+
+```
+message_start
+content_block_start(tool_use=Bash)
+content_block_delta × N   # 流出 tool input
+assistant(tool_use)
+system/hook_started        ← hook 执行中
+content_block_stop
+message_delta(stop=tool_use)
+message_stop
+system/hook_response       ← hook 返回
+user(tool_result)          ← is_error 取决于 hook 决定
+…（下一轮 message_start，模型继续）
+```
+
+#### M3 设计映射
+
+| 前端按钮 | hook 输出 + 后端记忆 |
+|---|---|
+| 允许一次 | `{permissionDecision: "allow"}` |
+| 始终允许此工具 | 后端先写白名单 → 下次 hook 命中前缀匹配直接 allow，不弹 UI |
+| 始终允许此命令 | 后端按 `tool_name + tool_input` hash 精确匹配，同上 |
+| 拒绝 | `{permissionDecision: "deny", permissionDecisionReason: "user denied"}` |
+
+桥接器（`hook_bridge`）的工作：从 stdin 读 payload → 通过 unix socket / HTTP 把请求送给主
+后端 → 等后端决定（前端 WS push + 用户点击）→ 输出 JSON 决定 → 退出。
+
+### 走不通的路：MCP `permission_prompt_tool`
+
+`--permission-prompt-tool mcp__ccr__permission_prompt` 是隐藏 flag（`--help` 不列）。设置后
+MCP server 起进程、初始化、列工具都正常（init 报告 `mcp_servers: [{name: "ccr", status: "connected"}]`），
+但工具的 `tools/call` 从不被触发——Bash 直接放行。
+
+可能原因（未验证，先记下不再追究）：此 flag 设计给 SDK 的非 `--print` 模式或别的入口，
+CLI 的 `--print` 跑这条路径时不调用 MCP 权限工具。
+
+走 hook 已经够用，不再回头。
+
+---
+
 ## 已覆盖的场景
 
-| Scenario | 起始行 | 说明 |
+| Scenario | 行号 | 说明 |
 |---|---|---|
-| `plain_chat` (L1-15) | 纯文本回复，无工具 |
-| `tools_basic` (L16-78) | Write → Read → Edit → Bash 四工具串行 |
-| `perm_default` (L79-104) | `--permission-mode default` —— **未触发权限事件**（Bash 直接放行） |
-| `perm_disallowed` (L105-121) | `--disallowedTools Bash` —— **启动期黑名单**，模型不知 Bash 存在 |
+| `plain_chat` | L1-15 | 纯文本回复，无工具 |
+| `tools_basic` | L16-78 | Write → Read → Edit → Bash 四工具串行 |
+| `perm_default` | L79-104 | `--permission-mode default` 不配 hook —— **直接放行** |
+| `perm_disallowed` | L105-121 | `--disallowedTools Bash` —— 启动期黑名单 |
+| `perm_mcp_allow` | L122-148 | MCP permission_prompt_tool（`--setting-sources=`） —— **MCP 不被调用，Bash 放行** |
+| `perm_mcp_strict` | L149-176 | MCP path 第二次确认 —— 仍不调 MCP |
+| `hook_deny` | L177-205 | PreToolUse hook 输出 deny —— **拦截成功**，is_error=true，permission_denials 填充 |
+| `hook_allow` | L206-234 | PreToolUse hook 输出 allow —— Bash 正常执行 |
 
-## 开放问题（M0 未覆盖，影响后续设计）
+## 开放问题（影响后续设计）
 
-- [ ] **运行期权限拦截的真正通道**：是 MCP `--permission-prompt-tool` 吗？还是 stream-json
-  stdin 上有 `control_request` 之类的消息？需要在 M3 开工前做专门 spike：起一个最小 MCP server
-  实现一个权限 tool，看 claude 怎么调它、传什么字段、期望什么返回。
+- [x] ~~**运行期权限拦截的真正通道**~~ → M0.5 落地：走 PreToolUse hook，详见 §权限通道。
+- [x] ~~**`--include-hook-events` 触发的钩子事件**~~ → M0.5 落地：`system/hook_started`、
+  `system/hook_response`。
 - [ ] **`assistant` 事件相对 `stream_event/message_stop` 的精确顺序**：实测显示 `assistant`
   在 `content_block_stop` 之前就发了（L9 vs L10）——有点反直觉，后端解析时不能假设 message
   完整=stream 结束。
 - [ ] **图片 / 附件输入**：stdin user message 里 `content` 是数组时的 image block 形态，留到 M6。
-- [ ] **`--include-hook-events` 触发的钩子事件**：M0 场景里没看到一条 hook 事件，可能因为
-  当前用户 `~/.claude/settings.json` 没配 hook。需要刻意配一个 PreToolUse hook 复测。
 - [ ] **长会话 / 多轮 `--resume`**：恢复后是否会重发 `system.init`？session_id 是否变化？
   M4 开工前抓一遍。
 - [ ] **`parent_tool_use_id` 非 None 的情形**：本轮全为 None，应该是 Task agent / subagent 调
@@ -232,7 +350,7 @@ M5 状态板可拿这个驱动 UI 状态机。
 - [ ] **rate-limit 触发时的事件形态**：`rate_limit_event.status="allowed"`，没看到限流真实发
   生时的样子。
 - [ ] **错误路径**：API 出错 / 模型拒答 / Bash 命令失败时的事件差异。tool_result `is_error=true`
-  下的 content 形态没采集到。
+  下的 content 形态除 hook deny 外没采集到。
 
 ## 设计决策落地（写给 M1+）
 
@@ -247,5 +365,7 @@ M5 状态板可拿这个驱动 UI 状态机。
    - 收到 `system.status` → 取 `status` 字段映射
    - 收到 `system.post_turn_summary` → state = `idle` 或 `needs_action`
    - 收到 `result` → state = `done`
-5. **权限门（M3）暂记**：默认起进程不传 permission-mode（拿到 `bypassPermissions`）；
-   M3 spike 后改成 MCP permission tool 模式，由 backend 中转。
+5. **权限门（M3）落地路径**（M0.5 spike 后定稿）：起进程时传
+   `--permission-mode default` + `--settings <file>`；settings 里挂 PreToolUse hook 指向桥接器
+   命令。桥接器从 stdin 拿 payload，转给后端等待用户决定，按 hook 协议输出 JSON。具体 IO 合约见
+   §权限通道（M0.5 落地）。

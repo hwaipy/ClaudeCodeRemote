@@ -42,6 +42,10 @@ def main() -> int:
     )
     ap.add_argument("--allowed-tools", default=None, help="逗号/空格分隔")
     ap.add_argument("--disallowed-tools", default=None)
+    ap.add_argument("--mcp-config", default=None, help="JSON string 或文件路径")
+    ap.add_argument("--permission-prompt-tool", default=None, help="如 mcp__ccr__permission_prompt")
+    ap.add_argument("--setting-sources", default=None, help='传给 --setting-sources，例如 "" 完全不加载')
+    ap.add_argument("--settings", default=None, help="--settings：JSON 字符串或文件路径")
     ap.add_argument("--timeout", type=float, default=120.0)
     ap.add_argument(
         "--model",
@@ -72,6 +76,14 @@ def main() -> int:
         cmd += ["--disallowedTools", args.disallowed_tools]
     if args.model:
         cmd += ["--model", args.model]
+    if args.mcp_config:
+        cmd += ["--mcp-config", args.mcp_config]
+    if args.permission_prompt_tool:
+        cmd += ["--permission-prompt-tool", args.permission_prompt_tool]
+    if args.setting_sources is not None:
+        cmd += [f"--setting-sources={args.setting_sources}"]
+    if args.settings:
+        cmd += ["--settings", args.settings]
 
     print(f"[probe] scenario={args.scenario} cwd={cwd}")
     print(f"[probe] cmd={' '.join(cmd)}")
