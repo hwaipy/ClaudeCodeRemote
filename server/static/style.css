@@ -1,113 +1,115 @@
 /* ============================================================
  * 主题变量：默认 light（GitHub primer 风），data-theme="dark" 切换
  * ============================================================ */
-/* 配色取自 Sphinx Furo 主题（github.com/pradyunsg/furo）：浅灰底 + 纯白
-   卡片 + 蓝色 brand。映射保存在 docs/refs/furo-colors.scss。 */
+/* 配色来自 docs/refs/pytimetag-DESIGN.md（Apple Design System Inspired）：
+   纯白/浅灰底 + Apple Blue 单一 accent + 极少 shadow + tight letter-spacing。
+   ok/warn/danger 取 Apple system colors（green/orange/red）。 */
 :root,
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg-page:        #ffffff;     /* Furo background-primary */
-  --bg-elev:        #f8f9fb;     /* Furo background-secondary（sidebar/header/foot） */
+  --bg-page:        #ffffff;        /* light section: pure white */
+  --bg-elev:        #f5f5f7;        /* Apple light gray: sidebar/header/foot */
   --bg-card:        #ffffff;
-  --bg-input:       #ffffff;
-  --bg-hover:       #efeff4;     /* Furo background-hover */
-  --bg-soft:        #f8f9fb;
-  --border:         #eeebee;     /* Furo background-border */
-  --border-soft:    #f1f1f3;
-  --text:           #0e0e0e;     /* Furo foreground-primary ~ black */
-  --text-muted:     #5a5c63;     /* Furo foreground-secondary */
-  --text-dim:       #6b6f76;     /* Furo foreground-muted */
-  --code-fg:        #0e0e0e;
-  --link:           #2757dd;     /* Furo brand-content */
+  --bg-input:       #fafafc;        /* Apple filter/search bg */
+  --bg-hover:       #ededf2;        /* Apple button-active */
+  --bg-soft:        #f5f5f7;
+  --border:         #d2d2d7;        /* Apple input border */
+  --border-soft:    #e8e8ed;
+  --text:           #1d1d1f;        /* Apple near-black for body */
+  --text-muted:     rgba(0,0,0,0.80);
+  --text-dim:       rgba(0,0,0,0.48);
+  --code-fg:        #1d1d1f;
+  --link:           #0066cc;        /* Apple light-bg link */
 
-  --accent:         #0a4bff;     /* Furo brand-primary */
-  --accent-fg:      #2757dd;
-  --accent-bg:      #ddeeff;     /* Furo guilabel-background base */
-  --accent-border:  #bedaf5;
-  --accent-hover:   #cae3f6;
+  --accent:         #0071e3;        /* Apple Blue — singular accent */
+  --accent-fg:      #0066cc;
+  --accent-bg:      rgba(0,113,227,0.08);
+  --accent-border:  #0071e3;
+  --accent-hover:   rgba(0,113,227,0.14);
 
-  --primary-btn:       #0a4bff;
-  --primary-btn-hover: #2757dd;
+  --primary-btn:       #0071e3;
+  --primary-btn-hover: #0077ed;
 
-  --ok-fg:          #21632c;     /* Furo api-added */
-  --ok-bg:          rgba(56,168,77,0.12);
-  --ok-border:      #38a84d;
-  --ok-btn:         #21632c;
-  --ok-btn-hover:   #18491f;
+  --ok-fg:          #248a3d;        /* darker green for text contrast on white */
+  --ok-bg:          rgba(52,199,89,0.13);
+  --ok-border:      #34c759;        /* Apple system green */
+  --ok-btn:         #248a3d;
+  --ok-btn-hover:   #1d6e30;
 
-  --warn-fg:        #605706;     /* Furo api-deprecated */
-  --warn-bg:        rgba(240,217,15,0.20);
-  --warn-border:    #f0d90f;
-  --warn-glow:      rgba(240,217,15,0.45);
+  --warn-fg:        #a85100;
+  --warn-bg:        rgba(255,149,0,0.13);
+  --warn-border:    #ff9500;        /* Apple system orange */
+  --warn-glow:      rgba(255,149,0,0.32);
 
-  --danger-fg:      #b30000;     /* Furo problematic */
-  --danger-bg:      #ffe5e5;
-  --danger-border:  #ff5c5c;
+  --danger-fg:      #d70015;
+  --danger-bg:      rgba(255,59,48,0.10);
+  --danger-border:  #ff3b30;        /* Apple system red */
 
-  --bubble-user-bg:     #ddeeff;
-  --bubble-user-border: #bedaf5;
-  --bubble-asst-bg:     #ffffff;
-  --bubble-asst-border: #eeebee;
+  --bubble-user-bg:     rgba(0,113,227,0.08);
+  --bubble-user-border: transparent;
+  --bubble-asst-bg:     #f5f5f7;
+  --bubble-asst-border: transparent;
 
-  --diff-add-bg:    rgba(56,168,77,0.12);
-  --diff-del-bg:    #ffe5e5;
+  --diff-add-bg:    rgba(52,199,89,0.13);
+  --diff-del-bg:    rgba(255,59,48,0.10);
 
-  --shadow-card:    0 1px 2px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.06);
-  --shadow-soft:    0 1px 3px rgba(0,0,0,0.06);
-  --shadow-toast:   0 8px 24px rgba(0,0,0,0.18);
+  /* Apple uses one soft diffused shadow OR none */
+  --shadow-card:    rgba(0,0,0,0.06) 0 1px 3px;
+  --shadow-soft:    rgba(0,0,0,0.04) 0 1px 2px;
+  --shadow-toast:   rgba(0,0,0,0.22) 3px 5px 30px 0;
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg-page:        #131416;     /* Furo dark background-primary */
-  --bg-elev:        #1a1c1e;     /* Furo dark background-secondary */
-  --bg-card:        #18181a;     /* Furo dark card-background */
-  --bg-input:       #131416;
-  --bg-hover:       #1e2124;
-  --bg-soft:        #1a1c1e;
-  --border:         #303335;     /* Furo dark background-border */
-  --border-soft:    #25282a;
-  --text:           #cfd0d0;
-  --text-muted:     #9ca0a5;
-  --text-dim:       #81868d;
-  --code-fg:        #cfd0d0;
-  --link:           #5ca5ff;     /* Furo dark brand-content */
+  --bg-page:        #000000;        /* Apple dark section: pure black */
+  --bg-elev:        #1d1d1f;        /* Apple near-black for sidebar/head/foot */
+  --bg-card:        #272729;        /* Apple dark surface 1 */
+  --bg-input:       #1d1d1f;
+  --bg-hover:       #2a2a2d;        /* Apple dark surface 4 */
+  --bg-soft:        #1d1d1f;
+  --border:         rgba(255,255,255,0.12);
+  --border-soft:    rgba(255,255,255,0.06);
+  --text:           #ffffff;
+  --text-muted:     rgba(255,255,255,0.80);
+  --text-dim:       rgba(255,255,255,0.48);
+  --code-fg:        #ffffff;
+  --link:           #2997ff;        /* Apple bright blue for dark bg */
 
-  --accent:         #3d94ff;     /* Furo dark brand-primary */
-  --accent-fg:      #5ca5ff;
-  --accent-bg:      rgba(8,53,99,0.5);
-  --accent-border:  rgba(61,148,255,0.4);
-  --accent-hover:   #1e2124;
+  --accent:         #2997ff;
+  --accent-fg:      #2997ff;
+  --accent-bg:      rgba(41,151,255,0.13);
+  --accent-border:  #2997ff;
+  --accent-hover:   rgba(41,151,255,0.22);
 
-  --primary-btn:       #3d94ff;
-  --primary-btn-hover: #5ca5ff;
+  --primary-btn:       #0071e3;
+  --primary-btn-hover: #0077ed;
 
-  --ok-fg:          #3db854;     /* Furo dark api-added */
-  --ok-bg:          rgba(38,115,52,0.20);
-  --ok-border:      #267334;
-  --ok-btn:         #267334;
-  --ok-btn-hover:   #3db854;
+  --ok-fg:          #30d158;        /* Apple system green dark variant */
+  --ok-bg:          rgba(48,209,88,0.15);
+  --ok-border:      #30d158;
+  --ok-btn:         #248a3d;
+  --ok-btn-hover:   #30d158;
 
-  --warn-fg:        #b1a10b;
-  --warn-bg:        rgba(177,161,11,0.15);
-  --warn-border:    #6e6407;
-  --warn-glow:      rgba(177,161,11,0.5);
+  --warn-fg:        #ff9f0a;
+  --warn-bg:        rgba(255,159,10,0.15);
+  --warn-border:    #ff9f0a;
+  --warn-glow:      rgba(255,159,10,0.42);
 
-  --danger-fg:      #ff7575;     /* Furo dark api-removed */
-  --danger-bg:      rgba(176,59,59,0.25);
-  --danger-border:  #b03b3b;
+  --danger-fg:      #ff453a;
+  --danger-bg:      rgba(255,69,58,0.13);
+  --danger-border:  #ff453a;
 
-  --bubble-user-bg:     rgba(8,53,99,0.5);
-  --bubble-user-border: rgba(19,57,95,0.6);
-  --bubble-asst-bg:     #18181a;
-  --bubble-asst-border: #303335;
+  --bubble-user-bg:     rgba(41,151,255,0.13);
+  --bubble-user-border: transparent;
+  --bubble-asst-bg:     #1d1d1f;
+  --bubble-asst-border: transparent;
 
-  --diff-add-bg:    rgba(56,168,77,0.20);
-  --diff-del-bg:    rgba(176,59,59,0.30);
+  --diff-add-bg:    rgba(48,209,88,0.18);
+  --diff-del-bg:    rgba(255,69,58,0.16);
 
-  --shadow-card:    0 1px 3px rgba(0,0,0,0.6);
-  --shadow-soft:    0 1px 2px rgba(0,0,0,0.4);
-  --shadow-toast:   0 10px 28px rgba(0,0,0,0.5);
+  --shadow-card:    rgba(0,0,0,0.4) 0 1px 3px;
+  --shadow-soft:    rgba(0,0,0,0.3) 0 1px 2px;
+  --shadow-toast:   rgba(0,0,0,0.5) 0 10px 30px;
 }
 
 * { box-sizing: border-box; }
@@ -115,10 +117,13 @@ html, body { margin: 0; height: 100%; }
 body {
   background: var(--bg-page);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  /* SF Pro on Apple devices; fall back to system on others */
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   font-size: 15px;
-  line-height: 1.55;
+  line-height: 1.47;                  /* Apple body line-height */
+  letter-spacing: -0.014em;           /* tight tracking universal */
+  -webkit-font-smoothing: antialiased;
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -165,7 +170,7 @@ input[type=text], input[type=password], textarea {
   padding: 11px 13px;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 8px;
   outline: none;
   color: var(--text);
 }
@@ -175,7 +180,7 @@ input:focus, textarea:focus { border-color: var(--accent); }
   display: inline-block;
   padding: 11px 16px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 8px;
   cursor: pointer;
   font-weight: 600;
 }
@@ -209,12 +214,15 @@ input:focus, textarea:focus { border-color: var(--accent); }
 
 .session-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
 .session-card {
-  background: var(--bg-card); border: 1px solid var(--border);
-  border-radius: 10px; padding: 11px 13px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);   /* Apple: barely-there divider, no harsh border */
+  border-radius: 12px;
+  padding: 12px 14px;
   cursor: pointer;
   display: flex; flex-direction: column; gap: 4px;
+  transition: background 0.15s ease;
 }
-.session-card:hover { border-color: var(--accent); }
+.session-card:hover { background: var(--bg-hover); border-color: var(--border); }
 .session-card .session-row1 {
   display: flex; align-items: center; gap: 8px;
 }
@@ -338,7 +346,8 @@ input:focus, textarea:focus { border-color: var(--accent); }
 }
 .bubble.user {
   background: var(--bubble-user-bg);
-  border: 1px solid var(--bubble-user-border);
+  border: 1px solid var(--bubble-user-border);   /* transparent in Apple themes */
+  color: var(--text);
   align-self: flex-end;
 }
 .bubble.assistant {
