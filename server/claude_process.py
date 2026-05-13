@@ -91,6 +91,10 @@ class ClaudeProcess:
         if self.ccr_session_id:
             env["CCR_SESSION_ID"] = self.ccr_session_id
 
+        # limit=16MB：claude stream-json 单行可能很长（图片 base64、大段 tool_result、
+        # 长 system message 等）。asyncio 默认 64KB 时 readline 会抛
+        # ValueError "Separator is found, but chunk is longer than limit"，
+        # pump 任务挂掉。改大避免长行崩 pump。
         self.proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=self.cwd,
@@ -98,6 +102,7 @@ class ClaudeProcess:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
+            limit=16 * 1024 * 1024,
         )
         self._stderr_task = asyncio.create_task(self._drain_stderr())
 
@@ -140,7 +145,23 @@ class ClaudeProcess:
     async def events(self) -> AsyncIterator[dict[str, Any]]:
         if not self.proc or not self.proc.stdout:
             raise RuntimeError("ClaudeProcess not started")
-        async for raw in self.proc.stdout:
+        stdout = self.proc.stdout
+        while True:
+            try:
+                raw = await stdout.readline()
+            except (asyncio.LimitOverrunError, ValueError) as e:
+                # 超 buffer 限制 / asyncio 抛 ValueError("Separator is found...")
+                # 都不杀 pump：丢这行继续读，下行接得上
+                log.warning("stdout readline error (%s); skipping line", e)
+                try:
+                    # 把剩余的"行"内容吞掉直到换行，下次接力
+                    await stdout.readuntil(b"\n")
+                except Exception:
+                    pass
+                yield {"type": "_internal", "subtype": "line_too_long"}
+                continue
+            if not raw:
+                break  # EOF
             line = raw.decode("utf-8", errors="replace").rstrip("\n")
             if not line:
                 continue
