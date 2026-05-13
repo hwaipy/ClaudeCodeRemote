@@ -408,6 +408,13 @@ async function enterChat(id, name, cwd, sessionState) {
   state.toolById.clear();
   state.activeMsgId = null;
   state.blocksByIdx.clear();
+  // 切 session 必须把翻页状态一并重置：不然 chat-log.innerHTML="" 触发的 scroll 事件会
+  // 用旧 session 的 firstSeq + 新 session 的 sessionId 调一次野的 loadEarlierHistory
+  state.firstSeq = null;
+  state.hasMoreHistory = false;
+  state.loadingHistory = false;
+  state.suppressScrollLoad = true;
+  setTimeout(() => { state.suppressScrollLoad = false; }, 500);
   // 清掉上一次可能残留的 inline transform/transition，避免影响这次滑入动画
   const _chatView = $("view-chat");
   _chatView.style.transform = "";
@@ -550,6 +557,24 @@ function setStatus(cls, text) {
   el.textContent = text;
 }
 
+// 不在底端时显示的"回到最新"按钮：位置跟随 chat-log 右下角（避开 chat-foot）
+function syncScrollToBottomBtn() {
+  const log = $("chat-log");
+  const btn = $("scroll-to-bottom");
+  if (!btn) return;
+  const distFromBottom = log.scrollHeight - log.scrollTop - log.clientHeight;
+  const atBottom = distFromBottom < 40;
+  btn.hidden = atBottom;
+  if (atBottom) return;
+  const r = log.getBoundingClientRect();
+  btn.style.left = (r.right - 16 - 36) + "px";
+  btn.style.top = (r.bottom - 16 - 36) + "px";
+}
+$("scroll-to-bottom").addEventListener("click", () => {
+  const log = $("chat-log");
+  log.scrollTo({ top: log.scrollHeight, behavior: "smooth" });
+});
+
 function setHistoryLoader(text) {
   // loader 是 view-chat 内的 fixed 元素，跟 chat-log 完全无关，不影响其 layout/scroll
   const el = $("history-loader");
@@ -645,9 +670,12 @@ async function loadEarlierHistory() {
 
 // chat-log 滚到顶部附近时拉更早历史；wheel/touch 顶部继续上拉也触发（chat-log 不可滚时兜底）
 $("chat-log").addEventListener("scroll", () => {
+  syncScrollToBottomBtn();
   if (state.suppressScrollLoad) return;
   if ($("chat-log").scrollTop < 100) loadEarlierHistory();
 });
+window.addEventListener("resize", syncScrollToBottomBtn);
+window.addEventListener("orientationchange", syncScrollToBottomBtn);
 $("chat-log").addEventListener("wheel", (e) => {
   if (state.suppressScrollLoad) return;
   if (e.deltaY < 0 && $("chat-log").scrollTop < 100) loadEarlierHistory();
@@ -688,6 +716,8 @@ function connectWS() {
       state.firstSeq = null;
       state.hasMoreHistory = false;
       state.loadingHistory = false;
+      // ws 重连场景：等接下来的 backlog_done 重新贴底（revealChat 是 enterChat 一次性的，不够用）
+      state.pendingScrollToBottomOnBacklog = true;
     });
     ws.addEventListener("close", () => {
       if (!isCurrent()) return;
@@ -1127,10 +1157,14 @@ function handleEvent(evt) {
   if (t === "result")       return handleResult(evt);
   if (t === "_ccr") {
     if (evt.subtype === "backlog_done") {
-      // 记录翻页起点：用于"向上滚动加载更早"
       state.firstSeq = evt.first_seq;
       state.hasMoreHistory = !!evt.has_more;
+      // 每次 backlog 完成都强制贴底：覆盖首次进入 + ws 重连两种 case
+      const log = $("chat-log");
+      setScrollTopInstant(log, log.scrollHeight);
+      requestAnimationFrame(() => setScrollTopInstant(log, log.scrollHeight));
       if (state.revealChat) state.revealChat();
+      state.pendingScrollToBottomOnBacklog = false;
       return;
     }
     if (evt.subtype === "permission_request") return showPermissionRequest(evt);

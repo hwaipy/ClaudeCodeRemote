@@ -475,6 +475,8 @@ input:focus, textarea:focus { border-color: var(--accent); }
   -webkit-overflow-scrolling: touch;
 }
 .chat-log > * { flex-shrink: 0; min-width: 0; }
+/* 不足一屏时让内容贴底排（顶端留白，最新消息在底）；溢出后此规则自动失效，scroll 正常 */
+.chat-log > *:first-child { margin-top: auto; }
 
 /* 向上滚动拉取历史的加载提示：fixed 浮在 chat-log 顶端，完全脱离 chat-log layout 和 scroll，
    不影响 scrollHeight / scrollTop 计算，杜绝抖动。位置由 JS 用 getBoundingClientRect 算出。 */
@@ -496,6 +498,27 @@ input:focus, textarea:focus { border-color: var(--accent); }
   pointer-events: none;
 }
 .history-loader[hidden] { display: none; }
+
+/* 不在底端时显示的回到最新按钮：位置由 JS 同步到 chat-log 右下角，避开 chat-foot */
+.scroll-to-bottom {
+  position: fixed;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.12);
+  z-index: 6;
+  padding: 0;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+.scroll-to-bottom:hover { background: var(--bg-hover); }
+.scroll-to-bottom:active { transform: scale(0.94); }
+.scroll-to-bottom[hidden] { display: none; }
 .history-spinner {
   width: 14px; height: 14px;
   border: 2px solid var(--border);
