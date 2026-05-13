@@ -62,6 +62,19 @@ class Session:
     needs_action_detail: str | None = None  # post_turn_summary 报告的待办（None=无）
     # 一轮对话激活中：用户发出 → result 之间（含工具调用），用作"工作中"判定
     active_turn: bool = False
+    # 工具实时状态缓存：tool_use_id -> {name, partial_input, input, result, is_error, completed}
+    # 用于前端展开"进行中"的工具卡时按需轮询拉当前累积状态（包括流到一半的 input_json_delta）
+    live_tools: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # 当前 message 内 content_block index → tool_use_id 的映射（message_start 时清空）
+    block_to_tool: dict[int, str] = field(default_factory=dict)
+    # 当前/上一轮对话的运行时状态（后端维护、前端只读，前端刷新/重连不丢）
+    turn_started_at: float | None = None   # 最近一次 user_input 的 envelope ts
+    turn_ended_at:   float | None = None   # 最近一次 result 的 envelope ts；下一轮 user_input 时清
+    turn_output_tokens: int = 0             # 当前轮已累积的 output tokens
+    turn_prior_output:  int = 0             # 当前 message 之前的累积量（跨 message 用）
+    cur_model:        str = ""
+    cur_input_tokens: int = 0               # 最近 message 的 fresh input_tokens
+    cur_input_total:  int = 0               # input_tokens + cache_read + cache_creation（用于 ctx%）
 
     def envelope(self, evt: dict[str, Any]) -> dict[str, Any]:
         self.seq += 1
@@ -286,10 +299,17 @@ class SessionManager:
                     pass
 
     async def _deliver(self, sess: Session, evt: dict[str, Any]) -> None:
+        from .tool_lazy import strip_live_event, update_live_tools
+        # 先把 raw 事件灌进 live_tools，给 /tool/{id} 查最新累积状态用
+        try:
+            update_live_tools(sess, evt)
+        except Exception:
+            log.exception("update_live_tools failed for %s", sess.id)
         env = sess.envelope(evt)
         kind = _classify(evt)
         if kind is not None:
             try:
+                # DB 始终入全量原文；前端按需走 /tool/{id} 拉回
                 await db.append_message(sess.id, env["seq"], env["ts"], kind, evt)
                 await db.update_activity(sess.id, env["ts"])
             except Exception:
@@ -298,13 +318,99 @@ class SessionManager:
         # 状态变化检测（必须在 envelope/落库之后；并在 fan-out 之前确定，
         # 以便 broadcast_status 时拿到最新值）
         state_dirty = self._apply_state_signals(sess, evt)
+        # 维护 turn state（轮次起止时间、output tokens、当前 model / input total）
+        # 后端是这些值的唯一源，前端刷新/重连不会丢
+        self._update_turn_state(sess, evt, env["ts"])
+        # 起止时刻立刻推一份给所有 WS 客户端，前端不再自己算 turnStartAt/turnEndAt
+        _t = evt.get("type")
+        if _t == "user_input":
+            # 新一轮开始：只更新 turnStartAt（不发 token，避免可见的"骤降为 0"）
+            self._broadcast_turn_state(sess, include_tokens=False)
+        elif _t == "result":
+            self._broadcast_turn_state(sess, include_tokens=True)
+        # 广播前瘦身：工具调用的 input / result 用占位代替，input_json_delta 整段丢
+        stripped = strip_live_event(evt)
+        if stripped is not None:
+            broadcast_env = env if stripped is evt else {**env, "event": stripped}
+            for q in list(sess.subscribers):
+                try:
+                    q.put_nowait(broadcast_env)
+                except asyncio.QueueFull:
+                    log.warning("subscriber queue full, dropping event for %s", sess.id)
+        if state_dirty:
+            self._broadcast_status(sess)
+
+    def _broadcast_turn_state(self, sess: Session, *, include_tokens: bool = True) -> None:
+        """推 turn_state 给所有订阅者。`include_tokens=False` 时不带 token 字段——用于
+        user_input 时机：让前端的计时器更新，但 token 显示保持上一轮终值，等 message_start 再刷新。"""
+        evt = {
+            "type": "_ccr",
+            "subtype": "turn_state",
+            "turn_started_at": sess.turn_started_at,
+            "turn_ended_at":   sess.turn_ended_at,
+            "model":           sess.cur_model,
+        }
+        if include_tokens:
+            evt["output_tokens"] = sess.turn_output_tokens
+            evt["input_tokens"]  = sess.cur_input_tokens
+            evt["input_total"]   = sess.cur_input_total
+        env = sess.envelope(evt)
         for q in list(sess.subscribers):
             try:
                 q.put_nowait(env)
             except asyncio.QueueFull:
-                log.warning("subscriber queue full, dropping event for %s", sess.id)
-        if state_dirty:
-            self._broadcast_status(sess)
+                pass
+
+    def _update_turn_state(self, sess: Session, evt: dict[str, Any], env_ts: float) -> None:
+        """维护后端轮次状态：起止时间 / output tokens / 当前 model & input_total。
+        逻辑对齐前端 handleUserInput / handleResult / handleStreamEvent。"""
+        t = evt.get("type")
+        if t == "user_input":
+            sess.turn_started_at = env_ts
+            sess.turn_ended_at = None
+            sess.turn_output_tokens = 0
+            sess.turn_prior_output = 0
+            return
+        if t == "result":
+            sess.turn_ended_at = env_ts
+            u = evt.get("usage") or {}
+            ot = u.get("output_tokens")
+            if isinstance(ot, int):
+                sess.turn_output_tokens = max(sess.turn_output_tokens, ot)
+            return
+        if t == "stream_event":
+            ev = evt.get("event") or {}
+            et = ev.get("type")
+            if et == "message_start":
+                msg = ev.get("message") or {}
+                m = msg.get("model")
+                if isinstance(m, str) and m:
+                    sess.cur_model = m
+                u = msg.get("usage") or {}
+                inp = u.get("input_tokens")
+                if isinstance(inp, int):
+                    sess.cur_input_tokens = inp
+                    sess.cur_input_total = (inp
+                                          + (u.get("cache_read_input_tokens") or 0)
+                                          + (u.get("cache_creation_input_tokens") or 0))
+                # 跨 message 累加：把上一条 message 的产出滚成 prior，下一条用 prior + 当条 output 算 cur
+                sess.turn_prior_output = sess.turn_output_tokens
+                ot = u.get("output_tokens")
+                if isinstance(ot, int):
+                    sess.turn_output_tokens = sess.turn_prior_output + ot
+            elif et == "message_delta":
+                u = ev.get("usage") or {}
+                ot = u.get("output_tokens")
+                if isinstance(ot, int):
+                    sess.turn_output_tokens = sess.turn_prior_output + ot
+                inp = u.get("input_tokens")
+                if isinstance(inp, int):
+                    sess.cur_input_tokens = inp
+                    sess.cur_input_total = (inp
+                                          + (u.get("cache_read_input_tokens") or 0)
+                                          + (u.get("cache_creation_input_tokens") or 0))
+            elif et == "message_stop":
+                sess.turn_prior_output = sess.turn_output_tokens
 
     def _apply_state_signals(self, sess: Session, evt: dict[str, Any]) -> bool:
         """根据事件更新 sess 状态字段；返回是否有变化（影响 compute_state）。"""
@@ -346,24 +452,56 @@ class SessionManager:
         q: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1024)
         sess.subscribers.add(q)
         try:
-            INITIAL_MIN = 50
-            tail = await db.load_messages_tail(sess.id, INITIAL_MIN)
+            INITIAL_MIN = 200
+            RECENT_TAIL = 30            # 没 user_input 兜底时的"最近"批大小
             last_user_seq = await db.find_last_user_seq(sess.id)
-            # 如果"最后一次 user_input"在 tail 之前，扩展到 last_user_seq 起的所有消息
-            if last_user_seq is not None and tail and tail[0][0] > last_user_seq:
-                history = await db.load_messages_from(sess.id, last_user_seq)
+            # 第一批 = 最近一轮（user_input → ...）；没有则退化为 tail
+            if last_user_seq is not None:
+                recent = await db.load_messages_from(sess.id, last_user_seq)
             else:
-                history = tail
-            first_seq = history[0][0] if history else None
-            has_more = await db.count_messages_before(sess.id, first_seq) > 0 if first_seq is not None else False
-            for seq, ts, kind, payload in history:
-                yield {"seq": seq, "ts": ts, "event": payload}
+                recent = await db.load_messages_tail(sess.id, RECENT_TAIL)
+            # 第二批 = recent 之前的，总数控制在 INITIAL_MIN
+            remaining = max(0, INITIAL_MIN - len(recent))
+            if recent and remaining > 0:
+                earlier = await db.load_messages_before(sess.id, recent[0][0], remaining)
+            else:
+                earlier = []
+            history_count = len(earlier) + len(recent)
+            first_seq = (earlier[0][0] if earlier
+                         else (recent[0][0] if recent else None))
+            has_more = (await db.count_messages_before(sess.id, first_seq) > 0
+                        if first_seq is not None else False)
+
+            from .tool_lazy import strip_payload_for_backlog
+            # 第一批：最新的一轮（让前端尽快揭幕）
+            for seq, ts, kind, payload in recent:
+                yield {"seq": seq, "ts": ts, "event": strip_payload_for_backlog(payload)}
+            turn_state = None
+            if sess.turn_started_at is not None:
+                turn_state = {
+                    "turn_started_at": sess.turn_started_at,
+                    "turn_ended_at":   sess.turn_ended_at,
+                    "output_tokens":   sess.turn_output_tokens,
+                    "model":           sess.cur_model,
+                    "input_tokens":    sess.cur_input_tokens,
+                    "input_total":     sess.cur_input_total,
+                }
+            # first_paint：前端收到这条就揭幕（recent 已渲染好），后续 earlier 渲到屏外 buffer
+            yield {
+                "seq": -1, "ts": time.time(),
+                "event": {"type": "_ccr", "subtype": "first_paint",
+                          "turn_state": turn_state},
+            }
+            # 第二批：更早的历史（按 seq 升序），前端会缓冲到 fragment 一次性 prepend
+            for seq, ts, kind, payload in earlier:
+                yield {"seq": seq, "ts": ts, "event": strip_payload_for_backlog(payload)}
             yield {
                 "seq": -1, "ts": time.time(),
                 "event": {"type": "_ccr", "subtype": "backlog_done",
-                          "history_count": len(history),
+                          "history_count": history_count,
                           "first_seq": first_seq,
-                          "has_more": has_more},
+                          "has_more": has_more,
+                          "turn_state": turn_state},
             }
             # 补：当前 gateway 里仍 pending 的请求重发一遍（前端兜底渲染）
             for req in gateway.get_pending(sess.id):

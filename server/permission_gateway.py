@@ -44,11 +44,16 @@ class PermissionRequest:
     future: asyncio.Future = field(default_factory=lambda: asyncio.get_event_loop().create_future())
 
 
+VALID_MODES = ("manual", "allow_all")
+
+
 class PermissionGateway:
     def __init__(self) -> None:
         self._pending: dict[str, PermissionRequest] = {}
         # ccr_session_id -> {"tools": set[str], "commands": set[str (fingerprint)]}
         self._allow: dict[str, dict[str, set[str]]] = {}
+        # ccr_session_id -> "manual" | "allow_all"  (per-session permission mode)
+        self._modes: dict[str, str] = {}
         self._lock = asyncio.Lock()
 
     def _allow_state(self, sid: str) -> dict[str, set[str]]:
@@ -56,7 +61,25 @@ class PermissionGateway:
             self._allow[sid] = {"tools": set(), "commands": set()}
         return self._allow[sid]
 
+    def get_mode(self, sid: str) -> str:
+        return self._modes.get(sid, "manual")
+
+    async def set_mode(self, sid: str, mode: str) -> None:
+        if mode not in VALID_MODES:
+            raise ValueError(f"invalid mode: {mode}")
+        self._modes[sid] = mode
+        try:
+            from . import db
+            await db.save_permission_mode(sid, mode)
+        except Exception:
+            log.exception("save_permission_mode failed for sess=%s", sid)
+
+    def pending_for_session(self, sid: str) -> list[PermissionRequest]:
+        return [r for r in self._pending.values() if r.ccr_session_id == sid]
+
     def is_preapproved(self, sid: str, tool_name: str, tool_input: dict[str, Any]) -> bool:
+        if self._modes.get(sid) == "allow_all":
+            return True
         st = self._allow.get(sid)
         if not st:
             return False
@@ -103,19 +126,26 @@ class PermissionGateway:
         return True
 
     async def load_for_session(self, sid: str) -> None:
-        """server 启动时按需把 DB 里该 session 的白名单加载进内存。"""
+        """server 启动时按需把 DB 里该 session 的白名单 + 权限模式加载进内存。"""
+        from . import db
         try:
-            from . import db
             rows = await db.load_perms(sid)
         except Exception:
             log.exception("load_perms failed for sess=%s", sid)
-            return
+            rows = []
         st = self._allow_state(sid)
         for scope, key in rows:
             if scope == "tool":
                 st["tools"].add(key)
             elif scope == "command":
                 st["commands"].add(key)
+        try:
+            mode = await db.load_permission_mode(sid)
+        except Exception:
+            log.exception("load_permission_mode failed for sess=%s", sid)
+            mode = "manual"
+        if mode in VALID_MODES and mode != "manual":
+            self._modes[sid] = mode
 
     def remember(self, sid: str, scope: str, tool_name: str, tool_input: dict[str, Any]) -> None:
         st = self._allow_state(sid)

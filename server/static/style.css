@@ -144,9 +144,7 @@ body {
   -webkit-font-smoothing: antialiased;
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  /* iOS standalone 用 dvh 跟随真实可视高度 */
-  height: 100dvh;
+  /* 不设 height，fixed+inset:0 直接占满 layout viewport（iOS PWA 中 100vh 会算 852 含 safe-area，反而出错） */
   position: fixed;
   inset: 0;
   width: 100%;
@@ -161,6 +159,15 @@ a:hover { text-decoration: underline; }
 
 .view { flex: 1; display: none; flex-direction: column; min-height: 0; }
 .view.active { display: flex; }
+
+/* 软键盘弹出时让 view-chat 底部留键盘高度，chat-foot 跟着上移；chat-head 在顶部不动。
+   --kb-inset 由 JS 实测 visualViewport 计算（iOS PWA 第一次 focus 时 env(keyboard-inset-height)
+   会失灵，所以用 max 取两者较大值作兜底）。 */
+#view-chat {
+  padding-bottom: max(env(keyboard-inset-height, 0px), var(--kb-inset, 0px));
+  transition: padding-bottom 160ms ease;
+}
+
 
 
 /* 窄屏单栏：chat 视图常驻覆盖在 home 上，靠 transform 在右侧外/在屏 之间滑动 */
@@ -356,6 +363,12 @@ input:focus, textarea:focus { border-color: var(--accent); }
   transition: background 0.15s ease;
 }
 .session-card:hover { background: var(--bg-hover); border-color: var(--border); }
+/* 工作中 session：荧光绿边框 + 微光晕（参考 baseline app.py） */
+.session-card.session-busy {
+  border-color: #2ea043;
+  box-shadow: 0 0 10px rgba(46, 160, 67, 0.35);
+}
+.session-card.session-busy:hover { border-color: #2ea043; }
 .session-card .session-row1 {
   display: flex; align-items: center; gap: 8px;
 }
@@ -389,6 +402,17 @@ input:focus, textarea:focus { border-color: var(--accent); }
   box-shadow: 0 0 12px var(--accent-hover);
 }
 .session-card.state-busy { border-color: var(--ok-border); }
+/* 当前正在打开的 session：左侧加蓝色色条，整体加微高亮，提示用户"这就是当前会话" */
+/* 当前打开的 session 高亮：只在宽屏双栏（session list 常驻可见）才需要 */
+@media (min-width: 900px) {
+  .session-card.is-current {
+    background: var(--accent-bg);
+    border-color: var(--accent-border);
+    box-shadow: inset 3px 0 0 var(--accent);
+    cursor: default;
+  }
+  .session-card.is-current:hover { background: var(--accent-bg); }
+}
 @keyframes ccr-pulse-yellow {
   0%, 100% { box-shadow: 0 0 0 1px var(--warn-border), 0 0 12px var(--warn-glow); }
   50%      { box-shadow: 0 0 0 2px var(--warn-border), 0 0 18px var(--warn-glow); }
@@ -433,12 +457,21 @@ input:focus, textarea:focus { border-color: var(--accent); }
   flex: 1; min-height: 0;
 }
 .chat-head {
-  flex: 0 0 auto;
+  /* fixed 钉在 layout viewport 顶；脱离 view-chat 的 transform 影响，键盘弹出不动 */
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 50;
   padding: max(12px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right))
            12px max(14px, env(safe-area-inset-left));
   border-bottom: 1px solid var(--border-soft);
-  display: flex; align-items: center; gap: 12px;
+  display: none;   /* 默认隐藏，body.has-session 时才显示 */
+  align-items: center; gap: 12px;
   background: var(--bg-elev);
+}
+body.has-session .chat-head { display: flex; }
+/* 宽屏双栏：chat-head 只占右栏，让出 sidebar 320px */
+@media (min-width: 900px) {
+  .chat-head { left: 320px; }
 }
 .chat-head .back {
   background: transparent; border: 0; color: var(--accent);
@@ -455,18 +488,138 @@ input:focus, textarea:focus { border-color: var(--accent); }
   padding: 3px 8px; border-radius: 999px;
   background: var(--bg-hover); color: var(--text-muted); border: 1px solid var(--border);
 }
+.chat-head .status:empty { display: none; }   /* 没有文字时整个徽章消失 */
 .chat-head .status.busy {
   background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-border);
 }
 .chat-head .status.error {
   background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-border);
 }
+.chat-head .conn-dot {
+  flex: 0 0 auto;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: transparent;
+}
+.chat-head .conn-dot.error { background: #d70015; }   /* 红：断线/错误 */
+
+/* 输入框上方常驻状态栏：黑/蓝点 + 上下行 token + 持续时间 + ctx 占用 */
+.conv-status {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 10px;
+  padding: 4px clamp(12px, 4vw, 16px);
+  background: var(--bg-page);   /* 跟聊天区域同色，无边框 */
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+/* Claude Code CLI 风格的 thinking 星号：idle 隐藏；busy 时 JS 循环帧字符 + 透明度脉冲。
+   颜色取 Claude 的暖橙（peach）。 */
+.conv-status .cs-spark {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.1em;                          /* 固定宽避免字符切换抖动 */
+  height: 1em;                           /* 跟兄弟文字同高，整行 baseline 对齐 */
+  font-size: inherit;                    /* 跟 .conv-status (11px) 同字号 */
+  line-height: 1;
+  color: #cc785c;
+  font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  visibility: hidden;
+}
+.conv-status .cs-spark.shown { visibility: visible; }
+.conv-status .cs-spark.pending {
+  animation: cs-sparkle 1.1s ease-in-out infinite;
+}
+@keyframes cs-sparkle {
+  0%, 100% { opacity: .55; }
+  50%      { opacity: 1; }
+}
+body.theme-dark .conv-status .cs-spark { color: #e8a690; }
+.conv-status .cs-tokens { flex: 0 0 auto; }
+.conv-status .cs-time   { flex: 0 0 auto; color: var(--text-dim); }
+.conv-status .cs-ctx    { flex: 1 1 auto; color: var(--text-dim); text-align: right; }
+
+/* chat-head 上的打断按钮：仅 busy 时显示（JS 控制 hidden 属性） */
+.chat-head .chat-interrupt {
+  flex: 0 0 auto;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.chat-head .chat-interrupt[hidden] { display: none; }
+.chat-head .chat-interrupt:hover { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-border); }
+
+/* chat-head 上的权限模式按钮：跟返回箭头同色 (var(--accent))，无边框 */
+.chat-head .chat-perm {
+  flex: 0 0 auto;
+  width: 28px; height: 28px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  transition: opacity 160ms ease;
+}
+.chat-head .chat-perm[hidden] { display: none; }
+.chat-head .chat-perm:hover { opacity: .7; }
+.chat-head .chat-perm.allow-all {
+  animation: perm-bolt-pulse 1.8s ease-in-out infinite;
+}
+.chat-head .chat-perm.allow-all:hover { animation: none; opacity: .7; }
+@keyframes perm-bolt-pulse {
+  0%, 100% { opacity: .75; }
+  50%      { opacity: 1; }
+}
+
+/* 默认显示 manual 图标；切到 allow-all 时切换可见 svg */
+.chat-head .chat-perm .perm-svg-allowall { display: none; }
+.chat-head .chat-perm.allow-all .perm-svg-manual   { display: none; }
+.chat-head .chat-perm.allow-all .perm-svg-allowall { display: inline-block; }
+
+/* 权限模式选择 popover */
+.perm-menu {
+  position: fixed;
+  top: 56px; right: 12px;
+  z-index: 60;
+  min-width: 240px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .15);
+  padding: 4px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.perm-menu[hidden] { display: none; }
+.perm-menu-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  background: transparent; border: 0; border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+}
+.perm-menu-item:hover { background: var(--bg-hover); }
+.perm-menu-icon { flex: 0 0 auto; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; }
+.perm-menu-icon-manual   { color: var(--accent); }
+.perm-menu-icon-allowall { color: var(--accent); }
+.perm-menu-label { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.perm-menu-title { font-size: 13px; font-weight: 600; }
+.perm-menu-sub { font-size: 11px; color: var(--text-dim); }
+.perm-menu-check { flex: 0 0 auto; color: var(--accent); opacity: 0; font-weight: 700; }
+.perm-menu-item.active .perm-menu-check { opacity: 1; }
 
 .chat-log {
   flex: 1; min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;   /* 内容兜底：任何超宽元素被裁，不撑大 chat-log */
-  padding: 16px clamp(12px, 4vw, 24px);
+  /* 顶端留 chat-head 高度，因为 chat-head 是 fixed 脱离了流 */
+  padding: calc(56px + env(safe-area-inset-top, 0px)) clamp(12px, 4vw, 24px) 16px;
   display: flex; flex-direction: column; gap: 12px;
   background: var(--bg-page);
   position: relative;   /* 让 .history-loader 绝对定位相对 chat-log */
@@ -475,8 +628,6 @@ input:focus, textarea:focus { border-color: var(--accent); }
   -webkit-overflow-scrolling: touch;
 }
 .chat-log > * { flex-shrink: 0; min-width: 0; }
-/* 不足一屏时让内容贴底排（顶端留白，最新消息在底）；溢出后此规则自动失效，scroll 正常 */
-.chat-log > *:first-child { margin-top: auto; }
 
 /* 向上滚动拉取历史的加载提示：fixed 浮在 chat-log 顶端，完全脱离 chat-log layout 和 scroll，
    不影响 scrollHeight / scrollTop 计算，杜绝抖动。位置由 JS 用 getBoundingClientRect 算出。 */
@@ -552,6 +703,41 @@ input:focus, textarea:focus { border-color: var(--accent); }
   border: 1px solid var(--bubble-asst-border);
   align-self: flex-start;
 }
+
+/* assistant bubble 头部 meta：默认隐藏，仅在 .is-tool（决定工具调用的中间 message）时显示成卡片 */
+.bubble.assistant .msg-meta { display: none; }
+.bubble.assistant.is-tool {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+}
+.bubble.assistant.is-tool .msg-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -2px 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.bubble.assistant .msg-icon  { color: var(--accent); flex: 0 0 auto; }
+.bubble.assistant .msg-model { font-weight: 600; color: var(--text); flex: 0 0 auto; }
+.bubble.assistant .msg-tokens { flex: 1 1 auto; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bubble.assistant .msg-status {
+  flex: 0 0 auto;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: transparent;   /* 默认 idle 不显示 */
+}
+.bubble.assistant .msg-status.pending {
+  background: var(--accent);
+  animation: tool-pulse 1.2s ease-in-out infinite;
+}
+.bubble.assistant .msg-status.error { background: #d70015; }
 
 /* Markdown 内容样式（用在 .bubble.assistant 内）*/
 .bubble.assistant > :first-child { margin-top: 0; }
@@ -729,7 +915,8 @@ input:focus, textarea:focus { border-color: var(--accent); }
 }
 .chat-foot .btn-att {
   flex: 0 0 auto;
-  width: 34px; height: 34px;
+  /* 跟单行 textarea 同高（line-height 22 + padding 16 = 38px），flex-end 时两者底端对齐 = 中心也对齐 */
+  width: 38px; height: 38px;
   border-radius: 50%;
   background: transparent;
   border: 1px solid var(--border);
@@ -743,6 +930,48 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .chat-foot .btn-att:active { transform: scale(0.94); }
 
 /* Tool card：默认展开（运行中可见进度），完成后自动 .collapsed，仅显示一行 */
+/* 连续工具调用合并到一个 group 中：默认折叠成一行，点击展开看每个 tool-card */
+.tool-group {
+  align-self: flex-start;
+  width: min(720px, 100%);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 12.5px;
+}
+.tool-group-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-muted);
+}
+.tool-group-head:hover { background: var(--bg-hover); }
+.tool-group .group-icon { color: var(--accent); flex: 0 0 auto; }
+.tool-group .group-count { flex: 0 0 auto; font-weight: 600; color: var(--text); }
+.tool-group .group-summary {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.tool-group .group-status {
+  flex: 0 0 auto;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: transparent;
+}
+.tool-group .group-status.pending { background: var(--accent); animation: tool-pulse 1.2s ease-in-out infinite; }
+.tool-group .group-status.error   { background: #d70015; }
+.tool-group-body {
+  border-top: 1px solid var(--border-soft);
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 4px;
+}
+.tool-group.collapsed .tool-group-body { display: none; }
+/* group 内的 tool-card 撤掉外边框（统一靠 group 包） */
+.tool-group-body .tool-card { border: none; border-radius: 6px; }
+.tool-group-body .tool-card + .tool-card { border-top: 1px solid var(--border-soft); border-radius: 0; }
+
 .tool-card {
   align-self: flex-start;
   width: min(720px, 100%);
@@ -754,12 +983,15 @@ input:focus, textarea:focus { border-color: var(--accent); }
 }
 .tool-card.error { border-color: var(--danger-border); }
 .tool-head {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: flex-start; gap: 8px;
   padding: 6px 10px;
   cursor: pointer;
   user-select: none;
   color: var(--text-muted);
 }
+.tool-head .tool-icon,
+.tool-head .tool-name,
+.tool-head .tool-status { margin-top: 2px; }   /* 跟 summary 第一行视觉对齐 */
 .tool-head:hover { background: var(--bg-hover); }
 .tool-icon {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -777,24 +1009,29 @@ input:focus, textarea:focus { border-color: var(--accent); }
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;          /* 最多 3 行；超出再省略 */
+  line-clamp: 3;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--text-muted);
   font-size: 12px;
+  line-height: 1.45;
 }
 .tool-status {
   flex: 0 0 auto;
   width: 8px; height: 8px;
   border-radius: 50%;
-  background: var(--border);
+  background: transparent;
 }
 .tool-status.pending {
   background: var(--accent);
   animation: tool-pulse 1.2s ease-in-out infinite;
 }
-.tool-status.done  { background: var(--ok-fg, #2ea043); }
-.tool-status.error { background: var(--danger-fg, #d70015); }
+.tool-status.error { background: #d70015; }
 @keyframes tool-pulse {
   0%, 100% { opacity: .4; }
   50%      { opacity: 1; }
@@ -803,17 +1040,53 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .tool-card.collapsed .tool-body { display: none; }
 .tool-args, .tool-result {
   padding: 8px 12px;
-  white-space: pre-wrap;
-  word-break: break-word;
+  white-space: pre;             /* 保留换行但不换行裁词；超宽出横向滚动条 */
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   line-height: 1.5;
   max-height: 320px;
-  overflow-y: auto;
+  overflow: auto;               /* 横纵都按需出滚动条 */
 }
 .tool-args   { color: var(--code-fg); }
 .tool-result { border-top: 1px dashed var(--border-soft); color: var(--text-muted); }
 .tool-result.error { background: var(--danger-bg); color: var(--danger-fg); }
+
+/* session 初次加载 overlay：放在 #view-chat 内，跟它一起滑入/滑出。
+   chat-head 走 position: fixed 在根 stacking context，所以会自然盖在 overlay 上方。 */
+#view-chat { position: relative; }   /* 让 overlay 的 absolute 锚到 view-chat */
+.chat-loading {
+  position: absolute; inset: 0;
+  z-index: 5;                   /* 高于 chat-log/chat-foot，低于根 stacking 里的 chat-head (fixed) */
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-page);
+  pointer-events: auto;
+  opacity: 1;
+  transition: opacity 200ms ease;
+}
+.chat-loading.fade-out { opacity: 0; }   /* JS 加这个 class 触发淡出，结束后再设 hidden */
+.chat-loading[hidden] { display: none; }
+.chat-loading-spinner {
+  width: 32px; height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: tool-spin 0.8s linear infinite;
+  opacity: .85;
+}
+
+/* lazy 加载占位：spinner + 文字 */
+.tool-spinner {
+  display: inline-block;
+  width: 11px; height: 11px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: tool-spin 0.7s linear infinite;
+  vertical-align: -2px;
+  margin-right: 7px;
+}
+.tool-lazy-hint { color: var(--text-dim); font-style: italic; font-size: 11.5px; }
+@keyframes tool-spin { to { transform: rotate(360deg); } }
 
 /* Edit 工具的 unified diff 视图 */
 .diff-header {
@@ -867,8 +1140,26 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .perm-card.allowed { box-shadow: none; border-color: var(--ok-border); }
 .perm-card.denied  { box-shadow: none; border-color: var(--danger-border); }
 .perm-card.stale   { box-shadow: none; border-color: var(--border); opacity: 0.65; }
-.tool-status.stale { background: var(--bg-hover); color: var(--text-dim); border-color: var(--border); }
 .perm-card.submitting { opacity: 0.7; }
+/* 权限卡片头部的状态徽章：文字 + 圆角背景；区别于 tool-card 的 8x8 圆点 */
+.perm-status {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.perm-status.pending {
+  background: var(--accent-bg);
+  color: var(--accent-fg);
+  border-color: var(--accent-border);
+}
+.perm-status.done  { background: var(--ok-bg);     color: var(--ok-fg);     border-color: var(--ok-border); }
+.perm-status.error { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-border); }
+.perm-status.stale { background: var(--bg-hover);  color: var(--text-dim);  border-color: var(--border); }
 .perm-head {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 12px;

@@ -88,15 +88,154 @@ async def stderr_tail(session_id: str) -> dict[str, Any]:
 async def get_messages(session_id: str, before_seq: int, limit: int = 20) -> dict[str, Any]:
     """向前翻页拉历史：返回 seq < before_seq 的最近 limit 条（按 seq 升序）。"""
     from . import db
+    from .tool_lazy import strip_payload_for_backlog
     sess = await manager.get(session_id)
     if not sess:
         raise HTTPException(404, "session not found")
     limit = max(1, min(100, limit))
     rows = await db.load_messages_before(session_id, before_seq, limit)
-    messages = [{"seq": s, "ts": t, "event": p} for s, t, _k, p in rows]
+    messages = [{"seq": s, "ts": t, "event": strip_payload_for_backlog(p)}
+                for s, t, _k, p in rows]
     first_seq = messages[0]["seq"] if messages else None
     has_more = (await db.count_messages_before(session_id, first_seq) > 0) if first_seq is not None else False
     return {"messages": messages, "first_seq": first_seq, "has_more": has_more}
+
+
+def _read_last_assistant_usage(jsonl: Path) -> dict[str, Any] | None:
+    """从 ~/.claude/projects/<cwd>/<sid>.jsonl 末尾扒最新一条 assistant message 的 usage。
+    用于进 session 时立即显示 ctx，而不用等下次 message_start。"""
+    import json as _json
+    try:
+        sz = jsonl.stat().st_size
+    except FileNotFoundError:
+        return None
+    read_size = min(sz, 100 * 1024)   # 最后 100 KB 应该足以找到最近一条 assistant
+    with jsonl.open("rb") as f:
+        f.seek(max(0, sz - read_size))
+        data = f.read().decode("utf-8", errors="ignore")
+    for raw in reversed(data.split("\n")):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            d = _json.loads(raw)
+        except _json.JSONDecodeError:
+            continue
+        if d.get("type") != "assistant":
+            continue
+        if d.get("isSidechain"):
+            continue   # subagent 的 usage 不是主对话的
+        msg = d.get("message") or {}
+        u = msg.get("usage") or {}
+        if not u:
+            continue
+        return {
+            "model": msg.get("model", ""),
+            "input_tokens": u.get("input_tokens", 0),
+            "cache_read_input_tokens": u.get("cache_read_input_tokens", 0),
+            "cache_creation_input_tokens": u.get("cache_creation_input_tokens", 0),
+            "output_tokens": u.get("output_tokens", 0),
+        }
+    return None
+
+
+@router.get("/sessions/{session_id}/ctx")
+async def session_ctx(session_id: str) -> dict[str, Any]:
+    """读 Claude CLI 的 session jsonl 拿当前 context 用量（不用等下次模型调用）。"""
+    sess = await manager.get(session_id)
+    if not sess:
+        raise HTTPException(404, "session not found")
+    if not sess.claude_session_id:
+        return {"available": False, "reason": "no claude session id yet"}
+    encoded = sess.cwd.replace("/", "-")
+    p = Path.home() / ".claude" / "projects" / encoded / f"{sess.claude_session_id}.jsonl"
+    loop = asyncio.get_event_loop()
+    usage = await loop.run_in_executor(None, _read_last_assistant_usage, p)
+    if not usage:
+        return {"available": False, "reason": "no usage found"}
+    return {"available": True, **usage}
+
+
+@router.get("/sessions/{session_id}/tool/{tool_use_id}")
+async def get_tool_payload(session_id: str, tool_use_id: str) -> dict[str, Any]:
+    """前端展开折叠卡时按需拉工具调用内容。
+    优先从内存 live_tools 取（含运行中的 partial_input）；找不到再回退到 DB。"""
+    sess = await manager.get(session_id)
+    if not sess:
+        raise HTTPException(404, "session not found")
+    live = sess.live_tools.get(tool_use_id) if sess.live_tools else None
+    if live is not None:
+        return {
+            "name": live.get("name", ""),
+            "input": live.get("input"),
+            "partial_input": live.get("partial_input") or "",
+            "result": live.get("result"),
+            "is_error": bool(live.get("is_error")),
+            "has_result": bool(live.get("completed")),
+            "completed": bool(live.get("completed")),
+        }
+    from .tool_lazy import find_tool_payload
+    data = await find_tool_payload(session_id, tool_use_id)
+    if data["input"] is None and not data["has_result"]:
+        raise HTTPException(404, "tool not found")
+    return {**data, "partial_input": "", "completed": True}
+
+
+class PermissionModeRequest(BaseModel):
+    mode: str
+
+
+@router.get("/sessions/{session_id}/permission_mode")
+async def get_permission_mode(session_id: str) -> dict[str, Any]:
+    sess = await manager.get(session_id)
+    if not sess:
+        raise HTTPException(404, "session not found")
+    return {"mode": gateway.get_mode(session_id)}
+
+
+@router.put("/sessions/{session_id}/permission_mode")
+async def set_permission_mode(session_id: str, req: PermissionModeRequest) -> dict[str, Any]:
+    sess = await manager.get(session_id)
+    if not sess:
+        raise HTTPException(404, "session not found")
+    try:
+        await gateway.set_mode(session_id, req.mode)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    log.info("permission mode set: sess=%s mode=%s", session_id, req.mode)
+    # 切到 allow_all → 把已经在等待的请求一律放行
+    resolved = 0
+    if req.mode == "allow_all":
+        for preq in gateway.pending_for_session(session_id):
+            ok = await gateway.resolve(preq.req_id,
+                                       {"behavior": "allow",
+                                        "updatedInput": preq.tool_input,
+                                        "message": "allow_all mode"})
+            if ok:
+                resolved += 1
+                await manager.inject_event(sess, {
+                    "type": "_ccr",
+                    "subtype": "permission_resolved",
+                    "req_id": preq.req_id,
+                    "decision": "allow",
+                    "message": "allow_all mode",
+                })
+    # 广播 mode 变更到 WS（其它窗口同步 UI）
+    await manager.inject_event(sess, {
+        "type": "_ccr",
+        "subtype": "permission_mode",
+        "mode": req.mode,
+    })
+    return {"mode": req.mode, "auto_resolved": resolved}
+
+
+@router.post("/sessions/{session_id}/interrupt")
+async def interrupt_session(session_id: str) -> dict[str, Any]:
+    """打断当前会话：杀掉子进程。下一次发消息或显式 resume 会自动重启。"""
+    ok = await manager.interrupt(session_id)
+    if not ok:
+        raise HTTPException(404, "session not running")
+    return {"ok": True}
 
 
 @router.post("/sessions/{session_id}/resume")

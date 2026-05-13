@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=resizes-content">
 <meta name="theme-color" content="#0e1117">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -21,15 +21,15 @@
 
 <!-- 登录 -->
 <div class="view" id="view-login">
-  <button class="theme-toggle theme-toggle-fab" id="theme-toggle-login" title="切换主题">🌗</button>
+  <button class="theme-toggle theme-toggle-fab" id="theme-toggle-login" title="Toggle theme">🌗</button>
   <div class="center-wrap">
     <div class="card">
       <h1>ClaudeCodeRemote</h1>
       <label for="login-token">Bearer Token</label>
       <input id="login-token" type="password" autocomplete="current-password" placeholder="CCR_TOKEN">
-      <button class="btn btn-primary btn-block" id="login-go">登录</button>
+      <button class="btn btn-primary btn-block" id="login-go">Sign in</button>
       <div class="err" id="login-err"></div>
-      <div class="hint">Token 设置在服务器环境变量 <span class="kbd">CCR_TOKEN</span>。</div>
+      <div class="hint">Token is set via the server env var <span class="kbd">CCR_TOKEN</span>.</div>
     </div>
   </div>
 </div>
@@ -38,54 +38,107 @@
 <div class="view" id="view-home">
   <div class="center-wrap">
     <div class="card">
-      <h1>新建会话</h1>
-      <label for="spawn-name">名称（可选）</label>
-      <input id="spawn-name" type="text" placeholder="例如：调试日志">
-      <label for="spawn-cwd">工作目录</label>
+      <h1>New session</h1>
+      <label for="spawn-name">Name (optional)</label>
+      <input id="spawn-name" type="text" placeholder="e.g. debug logs">
+      <label for="spawn-cwd">Working directory</label>
       <div class="path-row">
         <input id="spawn-cwd" type="text" placeholder="/abs/path">
-        <button type="button" class="btn btn-secondary path-browse" id="browse-btn">浏览…</button>
+        <button type="button" class="btn btn-secondary path-browse" id="browse-btn">Browse…</button>
       </div>
       <div class="chips" id="cwd-presets"></div>
-      <button class="btn btn-primary btn-block" id="spawn-go">启动</button>
+      <button class="btn btn-primary btn-block" id="spawn-go">Start</button>
       <div class="err" id="spawn-err"></div>
 
-      <h1 style="margin-top: 28px;">已有会话</h1>
+      <h1 style="margin-top: 28px;">Existing sessions</h1>
       <div class="session-list" id="session-list">
-        <div class="session-empty">加载中…</div>
+        <div class="session-empty">Loading…</div>
       </div>
       <div class="tiny" style="margin-top: 12px;">
-        <a href="#" id="logout">登出</a>
+        <a href="#" id="logout">Sign out</a>
         <span style="margin: 0 6px; opacity: .4;">·</span>
-        <a href="#" id="hard-reload">强制刷新</a>
+        <a href="#" id="hard-reload">Hard reload</a>
       </div>
     </div>
   </div>
 </div>
 
 <!-- 聊天 -->
+<div class="chat-head" id="chat-head">
+  <button class="back" id="chat-back" title="Back">←</button>
+  <div class="info">
+    <div class="name" id="chat-name"></div>
+    <div class="meta" id="chat-meta"></div>
+  </div>
+  <span class="conn-dot" id="conn-dot" title="Network status"></span>
+  <span class="status" id="chat-status"></span>
+  <button class="chat-perm" id="chat-perm" type="button" title="Permission mode" aria-label="Permission mode" hidden>
+    <svg class="perm-svg perm-svg-manual"   viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+      <path d="M7 11V8a5 5 0 0 1 10 0v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      <rect x="5" y="11" width="14" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <circle cx="12" cy="15.5" r="1.2" fill="currentColor"/>
+    </svg>
+    <svg class="perm-svg perm-svg-allowall" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+      <path d="M13.5 2.5 6 13h5.5l-1 8.5L18 11h-5.5l1-8.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+    </svg>
+  </button>
+  <button class="chat-interrupt" id="chat-interrupt" type="button" title="Interrupt current session" aria-label="Interrupt" hidden>⏹</button>
+</div>
+<div class="perm-menu" id="perm-menu" hidden>
+  <button class="perm-menu-item" data-mode="manual">
+    <span class="perm-menu-icon perm-menu-icon-manual">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path d="M7 11V8a5 5 0 0 1 10 0v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <rect x="5" y="11" width="14" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        <circle cx="12" cy="15.5" r="1.2" fill="currentColor"/>
+      </svg>
+    </span>
+    <span class="perm-menu-label">
+      <span class="perm-menu-title">Ask each time</span>
+      <span class="perm-menu-sub">Default — every tool call needs approval</span>
+    </span>
+    <span class="perm-menu-check">✓</span>
+  </button>
+  <button class="perm-menu-item" data-mode="allow_all">
+    <span class="perm-menu-icon perm-menu-icon-allowall">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path d="M13.5 2.5 6 13h5.5l-1 8.5L18 11h-5.5l1-8.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+      </svg>
+    </span>
+    <span class="perm-menu-label">
+      <span class="perm-menu-title">Allow all</span>
+      <span class="perm-menu-sub">Auto-approve every tool call</span>
+    </span>
+    <span class="perm-menu-check">✓</span>
+  </button>
+</div>
 <div class="view" id="view-chat">
+  <!-- session 初次加载 overlay：放在 view-chat 内，swipe-back 会跟着滑出 -->
+  <div class="chat-loading" id="chat-loading" hidden>
+    <div class="chat-loading-spinner"></div>
+  </div>
   <div class="chat">
-    <div class="chat-head">
-      <button class="back" id="chat-back" title="返回">←</button>
-      <div class="info">
-        <div class="name" id="chat-name"></div>
-        <div class="meta" id="chat-meta"></div>
-      </div>
-      <span class="status" id="chat-status"></span>
-      <button class="theme-toggle" id="theme-toggle" title="切换主题">🌗</button>
-    </div>
     <div class="chat-log" id="chat-log"></div>
     <div class="history-loader" id="history-loader" hidden>
       <span class="history-spinner"></span><span class="history-text"></span>
     </div>
-    <button class="scroll-to-bottom" id="scroll-to-bottom" type="button" aria-label="回到最新消息" hidden>↓</button>
+    <button class="scroll-to-bottom" id="scroll-to-bottom" type="button" aria-label="Scroll to latest" hidden>↓</button>
+    <div class="conv-status" id="conv-status">
+      <span class="cs-spark" id="cs-dot" aria-hidden="true">✶</span>
+      <span class="cs-tokens" id="cs-tokens">↓0</span>
+      <span class="cs-time" id="cs-time">0s</span>
+      <span class="cs-ctx" id="cs-ctx"></span>
+    </div>
     <div class="chat-attachments" id="chat-attachments" hidden></div>
     <div class="chat-foot">
-      <button class="btn-att" id="chat-att" type="button" title="添加附件" aria-label="添加附件">+</button>
       <input id="att-input" type="file" multiple hidden>
-      <textarea id="chat-input" rows="1"></textarea>
-      <button class="btn btn-primary send" id="chat-send">发送</button>
+      <textarea id="chat-input" rows="1" enterkeyhint="send"></textarea>
+      <button class="btn-att" id="chat-att" type="button" title="Add attachment" aria-label="Add attachment">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+      </button>
     </div>
   </div>
 </div>
@@ -99,8 +152,8 @@
     </div>
     <div class="modal-list" id="modal-list"></div>
     <div class="modal-foot">
-      <button class="btn btn-secondary" id="modal-cancel" type="button">取消</button>
-      <button class="btn btn-primary"   id="modal-confirm" type="button">选择此目录</button>
+      <button class="btn btn-secondary" id="modal-cancel" type="button">Cancel</button>
+      <button class="btn btn-primary"   id="modal-confirm" type="button">Choose this directory</button>
     </div>
   </div>
 </div>

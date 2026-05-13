@@ -276,9 +276,37 @@ async def save_perm(sess_id: str, scope: str, key: str) -> None:
 async def load_perms(sess_id: str) -> list[tuple[str, str]]:
     def _w() -> list[tuple[str, str]]:
         cur = _conn.execute(
-            "SELECT scope, key FROM permissions WHERE sess_id=?", (sess_id,),
+            "SELECT scope, key FROM permissions WHERE sess_id=? AND scope != 'mode'",
+            (sess_id,),
         )
         return list(cur.fetchall())
+    return await _run(_w)
+
+
+# permissions 表复用：scope="mode" 表示 session 级权限模式；只允许一行。
+# manual 模式 = 没有行。allow_all 模式 = 一行 ("mode", "allow_all")。
+async def save_permission_mode(sess_id: str, mode: str) -> None:
+    def _w() -> None:
+        _conn.execute(
+            "DELETE FROM permissions WHERE sess_id=? AND scope='mode'", (sess_id,),
+        )
+        if mode != "manual":
+            _conn.execute(
+                "INSERT OR REPLACE INTO permissions(sess_id, scope, key, ts) "
+                "VALUES (?,?,?,?)",
+                (sess_id, "mode", mode, time.time()),
+            )
+    await _run(_w)
+
+
+async def load_permission_mode(sess_id: str) -> str:
+    def _w() -> str:
+        cur = _conn.execute(
+            "SELECT key FROM permissions WHERE sess_id=? AND scope='mode' LIMIT 1",
+            (sess_id,),
+        )
+        row = cur.fetchone()
+        return row[0] if row else "manual"
     return await _run(_w)
 
 
