@@ -104,20 +104,39 @@ async def ws_session(ws: WebSocket, session_id: str) -> None:
                             continue
                     else:
                         continue
-                    if sess.proc is None:
-                        # 自动 resume
-                        log.info("sess %s hibernated; auto-resume", sess.id)
+
+                    def _proc_alive(s):
+                        return (s.proc is not None and s.proc.proc is not None
+                                and s.proc.proc.returncode is None)
+
+                    if not _proc_alive(sess):
+                        log.info("sess %s proc dead; auto-resume", sess.id)
                         resumed = await manager.resume(sess.id)
-                        if resumed is None or resumed.proc is None:
+                        if resumed is None or not _proc_alive(resumed):
                             log.error("auto-resume failed for %s", sess.id)
                             continue
                     log.debug("ws->claude: user_message sess=%s type=%s",
                               session_id, type(content).__name__)
-                    # 先注入一份 user_input 事件入流（DB 持久化 + 前端 echo）
+                    # 先注入 user_input 事件（DB 持久化 + 前端 echo）
                     await manager.inject_event(sess, {
                         "type": "user_input", "content": content,
                     })
-                    await sess.proc.send_user_message(content)
+                    # 写 stdin。如果 proc 是中断刚死的，drain 会抛 BrokenPipe /
+                    # ConnectionResetError；这种情况 resume 起新 proc 再 retry 一次
+                    try:
+                        await sess.proc.send_user_message(content)
+                    except (ConnectionResetError, BrokenPipeError, RuntimeError) as e:
+                        log.warning("send_user_message failed (%s); resume+retry",
+                                    type(e).__name__)
+                        resumed = await manager.resume(sess.id)
+                        if resumed is None or not _proc_alive(resumed):
+                            log.error("re-resume failed for %s", sess.id)
+                            continue
+                        try:
+                            await sess.proc.send_user_message(content)
+                        except Exception:
+                            log.exception("retry send_user_message still failed for %s",
+                                          sess.id)
                 elif kind == "permission_decision":
                     await _handle_permission_decision(sess.id, msg)
                 elif kind == "ping":

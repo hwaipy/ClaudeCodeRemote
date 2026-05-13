@@ -60,7 +60,8 @@ class Session:
     hibernated: bool = False
     pending_permissions: int = 0          # 当前等待用户决定的权限请求数
     needs_action_detail: str | None = None  # post_turn_summary 报告的待办（None=无）
-    busy: bool = False                     # 在 message_start 和 message_stop 之间
+    # 一轮对话激活中：用户发出 → result 之间（含工具调用），用作"工作中"判定
+    active_turn: bool = False
 
     def envelope(self, evt: dict[str, Any]) -> dict[str, Any]:
         self.seq += 1
@@ -72,7 +73,7 @@ class Session:
         if self.needs_action_detail:
             return "needs_input"
         if self.proc is not None and self.proc.proc and self.proc.proc.returncode is None:
-            return "busy" if self.busy else "running"
+            return "busy" if self.active_turn else "idle"
         if self.hibernated:
             return "hibernated"
         if self.finished:
@@ -211,11 +212,27 @@ class SessionManager:
         sess.hibernated = False
         sess.finished = False
         sess.last_activity_at = time.time()
+        # 旧 proc 被 interrupt / 崩溃时 message_start..message_stop 可能未配对，
+        # busy / needs_action 残留旧值；新 proc 干净起步，重置一下
+        sess.busy = False
+        sess.needs_action_detail = None
         await db.mark_resumed(sess_id)
         sess.pump_task = asyncio.create_task(self._pump(sess), name=f"pump-{sess_id}")
         log.info("resumed %s (claude=%s)", sess_id, sess.claude_session_id)
         self._broadcast_status(sess)
         return sess
+
+    async def interrupt(self, sess_id: str) -> bool:
+        """打断当前会话：杀掉子进程让其立即返回，session 进入 hibernated；下一次 send / resume 会重启。"""
+        async with self._lock:
+            sess = self.sessions.get(sess_id)
+        if not sess or sess.proc is None:
+            return False
+        try:
+            await sess.proc.terminate()
+        except Exception:
+            log.exception("terminate during interrupt failed for %s", sess_id)
+        return True
 
     async def delete(self, sess_id: str) -> bool:
         async with self._lock:
@@ -304,15 +321,13 @@ class SessionManager:
         elif t == "system" and sub == "post_turn_summary":
             detail = (evt.get("needs_action") or "").strip()
             sess.needs_action_detail = detail or None
-        elif t == "stream_event":
-            inner = (evt.get("event") or {}).get("type")
-            if inner == "message_start":
-                sess.busy = True
-            elif inner == "message_stop":
-                sess.busy = False
         elif t == "user_input":
-            # 新的用户输入：消除 needs_input 状态
+            # 新一轮开始：从用户发出消息到 result 之间都算"工作中"（覆盖 tool 调用整段）
+            sess.active_turn = True
             sess.needs_action_detail = None
+        elif t == "result":
+            # 一轮真正结束（claude --print 收尾事件）
+            sess.active_turn = False
 
         after = sess.compute_state()
         return (after != before
@@ -331,7 +346,7 @@ class SessionManager:
         q: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1024)
         sess.subscribers.add(q)
         try:
-            INITIAL_MIN = 20
+            INITIAL_MIN = 50
             tail = await db.load_messages_tail(sess.id, INITIAL_MIN)
             last_user_seq = await db.find_last_user_seq(sess.id)
             # 如果"最后一次 user_input"在 tail 之前，扩展到 last_user_seq 起的所有消息
