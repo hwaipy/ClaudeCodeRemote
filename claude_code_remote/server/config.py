@@ -70,5 +70,7 @@ BRIDGE_URL: str = os.environ.get(
 )
 HOOK_BRIDGE: str = os.environ.get(
     "CCR_HOOK_BRIDGE",
-    str(Path(__file__).resolve().parents[1] / "scripts" / "hook_bridge.py"),
+    # 包重命名后 hook_bridge.py 在 claude_code_remote/ 下
+    # __file__ = claude_code_remote/server/config.py，parents[1] = claude_code_remote/
+    str(Path(__file__).resolve().parents[1] / "hook_bridge.py"),
 )
