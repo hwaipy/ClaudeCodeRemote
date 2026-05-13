@@ -122,7 +122,16 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; }
+html, body {
+  margin: 0; height: 100%;
+  overflow: hidden;
+  /* 阻止 iOS 橡皮筋 / 整页上下拉动 */
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: auto;
+  /* 禁双指缩放 / 双击放大 */
+  touch-action: pan-x pan-y;
+  -webkit-text-size-adjust: 100%;
+}
 body {
   background: var(--bg-page);
   color: var(--text);
@@ -136,7 +145,11 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  overflow: hidden;
+  /* iOS standalone 用 dvh 跟随真实可视高度 */
+  height: 100dvh;
+  position: fixed;
+  inset: 0;
+  width: 100%;
 }
 button, input, textarea {
   font-family: inherit;
@@ -148,6 +161,31 @@ a:hover { text-decoration: underline; }
 
 .view { flex: 1; display: none; flex-direction: column; min-height: 0; }
 .view.active { display: flex; }
+
+
+/* 窄屏单栏：chat 视图常驻覆盖在 home 上，靠 transform 在右侧外/在屏 之间滑动 */
+@media (max-width: 899px) {
+  body.stage-app #view-home {
+    display: flex !important;        /* 让 chat 滑入/滑出时底下始终有 home */
+  }
+  body.stage-app #view-chat {
+    display: flex !important;
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    transform: translateX(100%);
+    /* 入场/默认 transition：偏长、前快后缓，丝滑且不会一闪而过 */
+    transition: transform 420ms cubic-bezier(0.25, 1, 0.5, 1);
+    will-change: transform;
+    background: var(--bg-page);
+    pointer-events: none;
+    box-shadow: -2px 0 12px rgba(0, 0, 0, 0.08);   /* iOS 风格：滑入时左侧轻投影 */
+  }
+  body.stage-app #view-chat.active {
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+}
 
 .center-wrap {
   flex: 1;
@@ -425,17 +463,57 @@ input:focus, textarea:focus { border-color: var(--accent); }
 }
 
 .chat-log {
-  flex: 1; min-height: 0; overflow-y: auto;
+  flex: 1; min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;   /* 内容兜底：任何超宽元素被裁，不撑大 chat-log */
   padding: 16px clamp(12px, 4vw, 24px);
   display: flex; flex-direction: column; gap: 12px;
   background: var(--bg-page);
+  position: relative;   /* 让 .history-loader 绝对定位相对 chat-log */
+  /* 追加消息时自动滚到底走平滑动画；手指滑动有 iOS 惯性 */
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
 }
-.chat-log > * { flex-shrink: 0; }
+.chat-log > * { flex-shrink: 0; min-width: 0; }
+
+/* 向上滚动拉取历史的加载提示：fixed 浮在 chat-log 顶端，完全脱离 chat-log layout 和 scroll，
+   不影响 scrollHeight / scrollTop 计算，杜绝抖动。位置由 JS 用 getBoundingClientRect 算出。 */
+.history-loader {
+  position: fixed;
+  top: 0;   /* JS 覆盖 */
+  left: 0;  /* JS 覆盖 */
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  color: var(--text-muted);
+  font-size: 12px;
+  user-select: none;
+  pointer-events: none;
+}
+.history-loader[hidden] { display: none; }
+.history-spinner {
+  width: 14px; height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: history-spin 720ms linear infinite;
+}
+@keyframes history-spin {
+  to { transform: rotate(360deg); }
+}
+/* markdown 渲染的图、表、长 URL 兜底，防撑宽 */
+.bubble.assistant img    { max-width: 100%; height: auto; }
+.bubble.assistant table  { max-width: 100%; display: block; overflow-x: auto; }
+.bubble.assistant a      { overflow-wrap: anywhere; }
 .bubble {
   max-width: min(720px, 92%);
   padding: 10px 14px;
   border-radius: 12px;
-  white-space: pre-wrap;
   word-wrap: break-word;
   line-height: 1.55;
 }
@@ -444,6 +522,7 @@ input:focus, textarea:focus { border-color: var(--accent); }
   border: 1px solid var(--bubble-user-border);   /* transparent in Apple themes */
   color: var(--text);
   align-self: flex-end;
+  white-space: pre-wrap;   /* 用户消息是纯文本，要保留换行 */
 }
 .bubble.assistant {
   background: var(--bubble-asst-bg);
@@ -454,7 +533,7 @@ input:focus, textarea:focus { border-color: var(--accent); }
 /* Markdown 内容样式（用在 .bubble.assistant 内）*/
 .bubble.assistant > :first-child { margin-top: 0; }
 .bubble.assistant > :last-child  { margin-bottom: 0; }
-.bubble.assistant p { margin: 0.4em 0; }
+.bubble.assistant p { margin: 0.25em 0; }
 .bubble.assistant h1,
 .bubble.assistant h2,
 .bubble.assistant h3,
@@ -606,98 +685,112 @@ input:focus, textarea:focus { border-color: var(--accent); }
 
 .chat-foot {
   flex: 0 0 auto;
-  padding: 10px clamp(12px, 4vw, 16px) max(10px, env(safe-area-inset-bottom));
+  /* 上下 padding 收紧；底部仅给 home indicator 必要的间距 */
+  padding: 6px clamp(12px, 4vw, 16px) max(4px, env(safe-area-inset-bottom));
   border-top: 1px solid var(--border-soft);
   background: var(--bg-elev);
-  display: flex; gap: 8px; align-items: flex-end;
+  display: flex; gap: 6px; align-items: flex-end;
 }
 .chat-foot textarea {
   flex: 1;
   resize: none;
   max-height: 160px;
-  min-height: 42px;
+  min-height: 36px;
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 8px 12px;
 }
 .chat-foot .send {
   flex: 0 0 auto;
-  padding: 10px 18px;
+  padding: 8px 16px;
   border-radius: 10px;
 }
+.chat-foot .btn-att {
+  flex: 0 0 auto;
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0;
+}
+.chat-foot .btn-att:hover { background: var(--bg-hover); color: var(--text); }
+.chat-foot .btn-att:active { transform: scale(0.94); }
 
-/* Tool card */
+/* Tool card：默认展开（运行中可见进度），完成后自动 .collapsed，仅显示一行 */
 .tool-card {
   align-self: flex-start;
-  width: min(720px, 92%);
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  width: min(720px, 100%);
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
   overflow: hidden;
-  font-size: 13px;
+  font-size: 12.5px;
 }
 .tool-card.error { border-color: var(--danger-border); }
 .tool-head {
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px;
-  background: var(--bg-soft);
-  border-bottom: 1px solid var(--border-soft);
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-muted);
 }
+.tool-head:hover { background: var(--bg-hover); }
 .tool-icon {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--accent);
   flex: 0 0 auto;
+  opacity: .9;
 }
 .tool-name {
-  flex: 1; font-weight: 600;
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.tool-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-muted);
+  font-size: 12px;
 }
 .tool-status {
   flex: 0 0 auto;
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--bg-hover);
-  color: var(--text-muted);
-  border: 1px solid var(--border);
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--border);
 }
 .tool-status.pending {
-  background: var(--accent-bg);
-  color: var(--accent-fg);
-  border-color: var(--accent-border);
+  background: var(--accent);
+  animation: tool-pulse 1.2s ease-in-out infinite;
 }
-.tool-status.done {
-  background: var(--ok-bg);
-  color: var(--ok-fg);
-  border-color: var(--ok-border);
+.tool-status.done  { background: var(--ok-fg, #2ea043); }
+.tool-status.error { background: var(--danger-fg, #d70015); }
+@keyframes tool-pulse {
+  0%, 100% { opacity: .4; }
+  50%      { opacity: 1; }
 }
-.tool-status.error {
-  background: var(--danger-bg);
-  color: var(--danger-fg);
-  border-color: var(--danger-border);
-}
+.tool-body { border-top: 1px solid var(--border-soft); }
+.tool-card.collapsed .tool-body { display: none; }
 .tool-args, .tool-result {
   padding: 8px 12px;
   white-space: pre-wrap;
   word-break: break-word;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12.5px;
+  font-size: 12px;
   line-height: 1.5;
   max-height: 320px;
   overflow-y: auto;
 }
-.tool-args {
-  color: var(--code-fg);
-  background: var(--bg-card);
-}
-.tool-result {
-  border-top: 1px dashed var(--border-soft);
-  background: var(--bg-soft);
-  color: var(--text-muted);
-}
-.tool-result.error {
-  background: var(--danger-bg);
-  color: var(--danger-fg);
-}
+.tool-args   { color: var(--code-fg); }
+.tool-result { border-top: 1px dashed var(--border-soft); color: var(--text-muted); }
+.tool-result.error { background: var(--danger-bg); color: var(--danger-fg); }
 
 /* Edit 工具的 unified diff 视图 */
 .diff-header {
@@ -835,7 +928,9 @@ input:focus, textarea:focus { border-color: var(--accent); }
 @media (min-width: 900px) {
   body.stage-app {
     display: grid;
-    grid-template-columns: 320px 1fr;
+    /* 用 minmax(0, 1fr) 而不是 1fr：默认 1fr 的 min-content 是内容最小宽度，
+       某条长 URL / 宽 table 会把右栏撑得超过剩余空间，导致聊天框溢出屏幕 */
+    grid-template-columns: 320px minmax(0, 1fr);
     grid-template-rows: 100vh;
     overflow: hidden;
   }
@@ -845,6 +940,7 @@ input:focus, textarea:focus { border-color: var(--accent); }
     display: flex !important;
     flex-direction: column;
     min-height: 0;
+    min-width: 0;   /* grid item 兜底，跟 minmax(0, 1fr) 一起防被内容撑大 */
     height: 100vh;
   }
   body.stage-app #view-home {
@@ -891,4 +987,8 @@ input:focus, textarea:focus { border-color: var(--accent); }
     content: "选择左侧会话或新建一个";
     color: var(--text-dim);
   }
+  /* 未选会话时不显示输入框 / 附件区 / 状态条；chat-log 留空 */
+  body.stage-app:not(.has-session) #view-chat .chat-foot,
+  body.stage-app:not(.has-session) #view-chat .chat-attachments,
+  body.stage-app:not(.has-session) #view-chat #chat-status { display: none; }
 }

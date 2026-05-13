@@ -325,19 +325,30 @@ class SessionManager:
     # ---------- subscribe ----------
 
     async def subscribe(self, sess: Session) -> AsyncIterator[dict[str, Any]]:
-        """先重放 DB 里的历史，再发一个 backlog_done 分界 + 补一份 pending perm_req
-        快照（防前端漏渲），再走实时队列。"""
+        """初次推送：仅"最近一次问答 OR 最近 20 条"取多者；剩余历史走 HTTP 按需拉。
+        然后发 backlog_done（带 first_seq + has_more），再走实时队列。"""
         from .permission_gateway import gateway
         q: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1024)
         sess.subscribers.add(q)
         try:
-            history = await db.load_messages(sess.id)
+            INITIAL_MIN = 20
+            tail = await db.load_messages_tail(sess.id, INITIAL_MIN)
+            last_user_seq = await db.find_last_user_seq(sess.id)
+            # 如果"最后一次 user_input"在 tail 之前，扩展到 last_user_seq 起的所有消息
+            if last_user_seq is not None and tail and tail[0][0] > last_user_seq:
+                history = await db.load_messages_from(sess.id, last_user_seq)
+            else:
+                history = tail
+            first_seq = history[0][0] if history else None
+            has_more = await db.count_messages_before(sess.id, first_seq) > 0 if first_seq is not None else False
             for seq, ts, kind, payload in history:
                 yield {"seq": seq, "ts": ts, "event": payload}
             yield {
                 "seq": -1, "ts": time.time(),
                 "event": {"type": "_ccr", "subtype": "backlog_done",
-                          "history_count": len(history)},
+                          "history_count": len(history),
+                          "first_seq": first_seq,
+                          "has_more": has_more},
             }
             # 补：当前 gateway 里仍 pending 的请求重发一遍（前端兜底渲染）
             for req in gateway.get_pending(sess.id):

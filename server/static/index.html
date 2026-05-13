@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0e1117">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -11,7 +11,8 @@
 <base href="__ROOT__/">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="icon.svg">
-<link rel="apple-touch-icon" href="icon.svg">
+<link rel="icon" type="image/png" sizes="192x192" href="static/icon-192.png">
+<link rel="apple-touch-icon" href="static/apple-touch-icon.png">
 <title>ClaudeCodeRemote</title>
 <link rel="stylesheet" href="static/lib/katex/katex.min.css?v=__BUILD_ID__">
 <link rel="stylesheet" href="static/style.css?v=__BUILD_ID__">
@@ -55,6 +56,8 @@
       </div>
       <div class="tiny" style="margin-top: 12px;">
         <a href="#" id="logout">登出</a>
+        <span style="margin: 0 6px; opacity: .4;">·</span>
+        <a href="#" id="hard-reload">强制刷新</a>
       </div>
     </div>
   </div>
@@ -73,9 +76,14 @@
       <button class="theme-toggle" id="theme-toggle" title="切换主题">🌗</button>
     </div>
     <div class="chat-log" id="chat-log"></div>
+    <div class="history-loader" id="history-loader" hidden>
+      <span class="history-spinner"></span><span class="history-text"></span>
+    </div>
     <div class="chat-attachments" id="chat-attachments" hidden></div>
     <div class="chat-foot">
-      <textarea id="chat-input" rows="1" placeholder="给 Claude 发消息…（Enter 发送，Shift+Enter 换行；可粘贴图片）"></textarea>
+      <button class="btn-att" id="chat-att" type="button" title="添加附件" aria-label="添加附件">+</button>
+      <input id="att-input" type="file" multiple hidden>
+      <textarea id="chat-input" rows="1"></textarea>
       <button class="btn btn-primary send" id="chat-send">发送</button>
     </div>
   </div>

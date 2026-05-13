@@ -190,6 +190,69 @@ async def load_messages(sess_id: str) -> list[tuple[int, float, str, dict[str, A
     return await _run(_w)
 
 
+async def load_messages_tail(sess_id: str, limit: int) -> list[tuple[int, float, str, dict[str, Any]]]:
+    """最后 limit 条，按 seq 升序返回。"""
+    def _w() -> list[tuple[int, float, str, dict[str, Any]]]:
+        cur = _conn.execute(
+            "SELECT seq, ts, kind, payload FROM messages WHERE sess_id=? "
+            "ORDER BY seq DESC LIMIT ?",
+            (sess_id, limit),
+        )
+        rows = list(cur.fetchall())
+        rows.reverse()
+        return [(r[0], r[1], r[2], json.loads(r[3])) for r in rows]
+    return await _run(_w)
+
+
+async def load_messages_before(sess_id: str, before_seq: int, limit: int) -> list[tuple[int, float, str, dict[str, Any]]]:
+    """seq < before_seq 的最后 limit 条，按 seq 升序返回（用于向前翻页）。"""
+    def _w() -> list[tuple[int, float, str, dict[str, Any]]]:
+        cur = _conn.execute(
+            "SELECT seq, ts, kind, payload FROM messages WHERE sess_id=? AND seq < ? "
+            "ORDER BY seq DESC LIMIT ?",
+            (sess_id, before_seq, limit),
+        )
+        rows = list(cur.fetchall())
+        rows.reverse()
+        return [(r[0], r[1], r[2], json.loads(r[3])) for r in rows]
+    return await _run(_w)
+
+
+async def load_messages_from(sess_id: str, from_seq: int) -> list[tuple[int, float, str, dict[str, Any]]]:
+    """seq >= from_seq 的全部消息，按 seq 升序返回。"""
+    def _w() -> list[tuple[int, float, str, dict[str, Any]]]:
+        cur = _conn.execute(
+            "SELECT seq, ts, kind, payload FROM messages WHERE sess_id=? AND seq >= ? "
+            "ORDER BY seq",
+            (sess_id, from_seq),
+        )
+        return [(r[0], r[1], r[2], json.loads(r[3])) for r in cur.fetchall()]
+    return await _run(_w)
+
+
+async def find_last_user_seq(sess_id: str) -> int | None:
+    """最后一条 user_input 的 seq；用于"最近一次问答"边界。"""
+    def _w() -> int | None:
+        cur = _conn.execute(
+            "SELECT seq FROM messages WHERE sess_id=? AND kind='user_input' "
+            "ORDER BY seq DESC LIMIT 1",
+            (sess_id,),
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+    return await _run(_w)
+
+
+async def count_messages_before(sess_id: str, before_seq: int) -> int:
+    def _w() -> int:
+        cur = _conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE sess_id=? AND seq < ?",
+            (sess_id, before_seq),
+        )
+        return int(cur.fetchone()[0])
+    return await _run(_w)
+
+
 async def max_seq(sess_id: str) -> int:
     def _w() -> int:
         cur = _conn.execute("SELECT MAX(seq) FROM messages WHERE sess_id=?",

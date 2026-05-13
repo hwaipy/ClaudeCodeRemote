@@ -42,21 +42,30 @@ app.mount("/static", StaticFiles(directory=str(config.STATIC_DIR)), name="static
 
 
 def _render(text: str) -> str:
+    # 每次实时算 BUILD_ID（文件 mtime），改静态资源不重启 server 也能拿到新版本
     return (text
-            .replace("__BUILD_ID__", config.BUILD_ID)
+            .replace("__BUILD_ID__", config._build_id())
             .replace("__ROOT__", config.ROOT_PATH))
 
 
-_INDEX_HTML = _render((config.STATIC_DIR / "index.html").read_text(encoding="utf-8"))
-_SW_JS      = _render((config.STATIC_DIR / "sw.js").read_text(encoding="utf-8"))
-_MANIFEST   = _render((config.STATIC_DIR / "manifest.webmanifest").read_text(encoding="utf-8"))
+def _read_index() -> str:
+    return _render((config.STATIC_DIR / "index.html").read_text(encoding="utf-8"))
+
+
+def _read_sw() -> str:
+    return _render((config.STATIC_DIR / "sw.js").read_text(encoding="utf-8"))
+
+
+def _read_manifest() -> str:
+    return _render((config.STATIC_DIR / "manifest.webmanifest").read_text(encoding="utf-8"))
 
 
 @app.get("/")
 async def index() -> "HTMLResponse":
     # 静态资源带 ?v=<BUILD_ID> 让浏览器强缓存按文件变更自动失效
+    # 每次读盘避免开发时改 index.html 后忘记重启导致 HTML / app.js 版本错位白屏
     return HTMLResponse(
-        _INDEX_HTML,
+        _read_index(),
         headers={"Cache-Control": "no-cache, must-revalidate"},
     )
 
@@ -68,7 +77,7 @@ from fastapi.responses import FileResponse, Response
 @app.get("/manifest.webmanifest")
 async def pwa_manifest() -> "Response":
     return Response(
-        _MANIFEST,
+        _read_manifest(),
         media_type="application/manifest+json",
         headers={"Cache-Control": "no-cache, must-revalidate"},
     )
@@ -82,7 +91,7 @@ async def pwa_icon() -> FileResponse:
 @app.get("/sw.js")
 async def pwa_sw() -> Response:
     return Response(
-        _SW_JS,
+        _read_sw(),
         media_type="application/javascript",
         headers={
             "Service-Worker-Allowed": (config.ROOT_PATH or "") + "/",

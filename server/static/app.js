@@ -115,8 +115,31 @@ $("login-token").addEventListener("keydown", e => {
 $("logout").addEventListener("click", (e) => {
   e.preventDefault();
   state.token = "";
+  state.sessionId = null;
   localStorage.removeItem("ccr.token");
+  document.body.classList.remove("has-session");
   showView("login");
+});
+
+const _hardReloadEl = $("hard-reload");
+if (_hardReloadEl) _hardReloadEl.addEventListener("click", async (e) => {
+  e.preventDefault();
+  try {
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+  } finally {
+    // 带 cache-busting query：iOS standalone 的 WebKit HTTP 缓存不归 SW 管，
+    // 改 URL 才能保证拿新 HTML
+    const u = new URL(location.href);
+    u.searchParams.set("_r", Date.now().toString());
+    location.replace(u.toString());
+  }
 });
 
 // ---------- Home ----------
@@ -298,23 +321,27 @@ function enterHome() {
   connectGlobalWS();
 }
 
+let _globalBackoff = 1000;
+let _globalTimer = null;
 function connectGlobalWS() {
-  if (state.globalWS && state.globalWS.readyState === WebSocket.OPEN) return;
+  if (state.globalWS
+      && (state.globalWS.readyState === WebSocket.OPEN
+          || state.globalWS.readyState === WebSocket.CONNECTING)) return;
+  if (!state.token) return;   // 未登录
+  if (_globalTimer) { clearTimeout(_globalTimer); _globalTimer = null; }
   const url = wsURL("ws-global?token=" + encodeURIComponent(state.token));
   const ws = new WebSocket(url);
   state.globalWS = ws;
+  ws.addEventListener("open", () => { _globalBackoff = 1000; });
   ws.addEventListener("message", (ev) => {
-    try {
-      const msg = JSON.parse(ev.data);
-      handleGlobalMsg(msg);
-    } catch (e) { console.warn("bad global ws msg", e); }
+    try { handleGlobalMsg(JSON.parse(ev.data)); }
+    catch (e) { console.warn("bad global ws msg", e); }
   });
   ws.addEventListener("close", () => {
-    state.globalWS = null;
-    // 重连：仅在 home view 时
-    if ($("view-home").classList.contains("active")) {
-      setTimeout(connectGlobalWS, 2000);
-    }
+    if (state.globalWS === ws) state.globalWS = null;
+    if (!state.token) return;
+    _globalTimer = setTimeout(connectGlobalWS, _globalBackoff);
+    _globalBackoff = Math.min(30000, _globalBackoff * 2);
   });
 }
 
@@ -370,17 +397,27 @@ $("spawn-go").addEventListener("click", async () => {
 
 // ---------- Chat ----------
 async function enterChat(id, name, cwd, sessionState) {
+  // 切 session 前必须先关旧 ws：否则旧 session 的事件会写到新 session 的 chat-log 上（串 session）
+  if (state.ws) {
+    try { state.ws.close(); } catch (_) {}
+    state.ws = null;
+  }
   state.sessionId = id;
+  document.body.classList.add("has-session");
   state.msgById.clear();
   state.toolById.clear();
   state.activeMsgId = null;
   state.blocksByIdx.clear();
+  // 清掉上一次可能残留的 inline transform/transition，避免影响这次滑入动画
+  const _chatView = $("view-chat");
+  _chatView.style.transform = "";
+  _chatView.style.transition = "";
   $("chat-name").textContent = name || "untitled";
-  $("chat-meta").textContent = cwd + " · " + id;
+  // 只显示 cwd 末尾两段，足够辨识又不啰嗦
+  $("chat-meta").textContent = (cwd || "").split("/").slice(-2).join("/") || cwd || "";
   $("chat-log").innerHTML = "";
   setStatus("connecting", "连接中…");
-  showView("chat");
-  // 若不是 running，先 resume 拉起子进程
+  // 注意：不立即 showView("chat")，先让 backlog 在屏外渲染完再揭幕
   if (sessionState && sessionState !== "running") {
     try {
       await api(`/api/sessions/${encodeURIComponent(id)}/resume`, { method: "POST" });
@@ -388,8 +425,22 @@ async function enterChat(id, name, cwd, sessionState) {
       appendBubble("system", `恢复失败：${e.message}`);
     }
   }
+  // 收到 backlog_done 后才滑入；800ms 兜底防 server 异常不发标记
+  let revealed = false;
+  const ownId = id;
+  const reveal = () => {
+    if (revealed) return;
+    revealed = true;
+    if (state.sessionId !== ownId) return;   // 用户已切到别的 session，不要错误揭幕
+    const log = $("chat-log");
+    setScrollTopInstant(log, log.scrollHeight);   // 进场前瞬时贴底，避免被 smooth 化看到滚动过程
+    showView("chat");
+    // 移动端不 auto-focus：软键盘弹出与滑入动画同时进行，WebKit 会渲染异常导致卡在半屏
+    if (window.innerWidth >= 900) $("chat-input").focus();
+  };
+  state.revealChat = reveal;
+  setTimeout(reveal, 800);
   connectWS();
-  $("chat-input").focus();
 }
 
 $("chat-back").addEventListener("click", () => {
@@ -397,8 +448,99 @@ $("chat-back").addEventListener("click", () => {
     state.ws.close();
     state.ws = null;
   }
+  state.sessionId = null;
+  document.body.classList.remove("has-session");
   enterHome();
 });
+
+// 左边缘右滑返回：跟手实时拖 chat 视图，松手按位移判定。仿 iOS 原生手势，窄屏单栏才启用
+(function setupSwipeBack() {
+  const view = $("view-chat");
+  if (!view) return;
+  const EDGE = 24;            // 起手必须在距左边 24px 以内
+  const SLOP = 8;              // 决定方向前的容差
+  const COMMIT_FRAC = 0.35;    // 松手时位移超过这个比例 → 继续滑出返回
+  const COMMIT_VELOCITY = 0.5; // px/ms，速度足够也直接返回
+  let armed = false;           // 起手在边缘内，但还没确定是横向手势
+  let dragging = false;        // 已确认是横向手势，跟手中
+  let startX = 0, startY = 0, startT = 0, lastX = 0, lastT = 0, width = 0;
+
+  function endTransition(target, onEnd) {
+    // 跟手松手后的回弹/滑完用一个偏短的 transition，保持利落
+    view.style.transition = "transform 260ms cubic-bezier(0.25, 1, 0.5, 1)";
+    let done = false;
+    const fire = () => {
+      if (done) return;
+      done = true;
+      view.removeEventListener("transitionend", fire);
+      view.style.transition = "";   // 恢复 CSS 默认（用于下次自动滑入/出）
+      onEnd && onEnd();
+    };
+    view.addEventListener("transitionend", fire);
+    setTimeout(fire, 320);          // 兜底：transitionend 偶尔不触发
+    view.style.transform = target;
+  }
+
+  view.addEventListener("touchstart", e => {
+    if (window.innerWidth >= 900) return;
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    if (t.clientX > EDGE) return;
+    armed = true; dragging = false;
+    startX = lastX = t.clientX;
+    startY = t.clientY;
+    startT = lastT = e.timeStamp;
+    width = view.offsetWidth || window.innerWidth;
+  }, { passive: true });
+
+  view.addEventListener("touchmove", e => {
+    if (!armed) return;
+    const t = e.touches[0];
+    const dx = t.clientX - startX;
+    const dy = t.clientY - startY;
+    if (!dragging) {
+      if (Math.abs(dy) > SLOP && Math.abs(dy) > Math.abs(dx)) { armed = false; return; }
+      if (Math.abs(dx) <= SLOP) return;
+      dragging = true;
+      view.style.transition = "none";   // 跟手阶段禁用过渡
+    }
+    // 一旦确认是右滑返回手势，吃掉所有 touchmove，避免手指上下动时 chat-log 同时滚动
+    if (e.cancelable) e.preventDefault();
+    const tx = Math.max(0, dx);
+    view.style.transform = `translateX(${tx}px)`;
+    lastX = t.clientX;
+    lastT = e.timeStamp;
+  }, { passive: false });
+
+  function release(e) {
+    if (!armed) return;
+    armed = false;
+    if (!dragging) return;
+    dragging = false;
+    const t = (e.changedTouches && e.changedTouches[0]) || { clientX: lastX, timeStamp: lastT };
+    const dx = t.clientX - startX;
+    const dt = Math.max(1, (e.timeStamp || lastT) - lastT);
+    const v = (t.clientX - lastX) / dt;  // px/ms，最后一段速度
+    const commit = dx > width * COMMIT_FRAC || v > COMMIT_VELOCITY;
+    if (commit) {
+      // 继续滑到 100%，结束后 leaveChat 切回 home（chat 已经在外，无视觉跳跃）
+      endTransition(`translateX(${width}px)`, () => {
+        // 顺序：先移除 .active（CSS 默认 transform:100%），再清 inline；
+        // 反过来会让 chat 瞬间跳回 0（有 .active）再滑出去，看起来像"卡在中间"
+        $("chat-back").click();
+        view.style.transform = "";
+      });
+    } else {
+      endTransition("translateX(0)", () => { view.style.transform = ""; });
+    }
+  }
+  view.addEventListener("touchend", release, { passive: true });
+  view.addEventListener("touchcancel", () => {
+    // 取消视为回原位
+    if (dragging) endTransition("translateX(0)", () => { view.style.transform = ""; });
+    armed = false; dragging = false;
+  }, { passive: true });
+})();
 
 function setStatus(cls, text) {
   const el = $("chat-status");
@@ -408,22 +550,172 @@ function setStatus(cls, text) {
   el.textContent = text;
 }
 
-function connectWS() {
-  const url = wsURL("ws/" + encodeURIComponent(state.sessionId)
-                    + "?token=" + encodeURIComponent(state.token));
-  const ws = new WebSocket(url);
-  state.ws = ws;
-  ws.addEventListener("open", () => setStatus("", "已连接"));
-  ws.addEventListener("close", (e) => setStatus("error", "断开 " + e.code));
-  ws.addEventListener("error", () => setStatus("error", "连接错误"));
-  ws.addEventListener("message", (ev) => {
-    try {
-      const env = JSON.parse(ev.data);
-      handleEvent(env.event);
-    } catch (e) {
-      console.warn("bad ws msg", e, ev.data);
-    }
+function setHistoryLoader(text) {
+  // loader 是 view-chat 内的 fixed 元素，跟 chat-log 完全无关，不影响其 layout/scroll
+  const el = $("history-loader");
+  if (!el) return;
+  if (text == null) { el.hidden = true; return; }
+  el.hidden = false;
+  el.querySelector(".history-text").textContent = text;
+  const r = $("chat-log").getBoundingClientRect();
+  el.style.top = (r.top + 8) + "px";
+  el.style.left = (r.left + r.width / 2) + "px";
+}
+
+// chat-log 有 scroll-behavior: smooth；某些场景（保持位置、进场贴底）必须瞬时
+function setScrollTopInstant(el, value) {
+  const prev = el.style.scrollBehavior;
+  el.style.scrollBehavior = "auto";
+  el.scrollTop = value;
+  el.style.scrollBehavior = prev;
+}
+
+function waitForScrollIdle(el, idleMs = 200, maxWait = 2000) {
+  return new Promise(resolve => {
+    let idleTimer, maxTimer;
+    const done = () => {
+      el.removeEventListener("scroll", onScroll);
+      clearTimeout(idleTimer);
+      clearTimeout(maxTimer);
+      resolve();
+    };
+    const onScroll = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(done, idleMs);
+    };
+    el.addEventListener("scroll", onScroll);
+    idleTimer = setTimeout(done, idleMs);   // 已经静止：直接完成
+    maxTimer = setTimeout(done, maxWait);   // 兜底：极端情况下也不会卡死
   });
+}
+
+async function loadEarlierHistory() {
+  if (!state.sessionId || !state.hasMoreHistory || state.loadingHistory) return;
+  if (state.firstSeq == null) return;
+  const log = $("chat-log");
+  const beforeSeq = state.firstSeq;
+  state.loadingHistory = true;
+  state.suppressScrollLoad = true;   // 整个加载期间屏蔽 scroll listener 触发；纠偏 set scrollTop 会触发 scroll
+  setHistoryLoader("加载更早的消息…");
+  const savedBehavior = log.style.scrollBehavior;
+  log.style.scrollBehavior = "auto";
+  void log.offsetHeight;
+  const firstExisting = log.firstChild;
+  try {
+    const data = await api(`/api/sessions/${encodeURIComponent(state.sessionId)}/messages?before_seq=${beforeSeq}&limit=20`);
+    const earlier = data.messages || [];
+    if (earlier.length === 0) {
+      state.hasMoreHistory = false;
+      setHistoryLoader(null);
+      return;
+    }
+    // 等滑动惯性彻底停下再渲染：iOS momentum 期间 set scrollTop 会被覆盖
+    await waitForScrollIdle(log);
+    // idle 之后 anchor 用最新的视口位置（用户可能在等待期间滚到了别处）
+    const idleRect = firstExisting ? firstExisting.getBoundingClientRect() : null;
+    const existing = [];
+    while (log.firstChild) existing.push(log.removeChild(log.firstChild));
+    for (const env of earlier) {
+      try { handleEvent(env.event); } catch (e) { console.warn("history render error", e); }
+    }
+    for (const node of existing) log.appendChild(node);
+    state.firstSeq = data.first_seq != null ? data.first_seq : earlier[0].seq;
+    state.hasMoreHistory = !!data.has_more;
+    void log.offsetHeight;
+    // 同步纠偏到 sub-pixel
+    if (firstExisting && idleRect) {
+      for (let i = 0; i < 6; i++) {
+        void log.offsetHeight;
+        const drift = firstExisting.getBoundingClientRect().top - idleRect.top;
+        if (Math.abs(drift) < 0.05) break;
+        log.scrollTop += drift;
+      }
+    }
+    setHistoryLoader(null);
+  } catch (e) {
+    console.warn("loadEarlierHistory failed", e);
+    setHistoryLoader("加载失败，下拉重试");
+  } finally {
+    state.loadingHistory = false;
+    log.style.scrollBehavior = savedBehavior;
+    // 延后再开放 scroll 触发：让 set scrollTop 排队的 scroll event 处理完不会被当成新的滑到顶
+    setTimeout(() => { state.suppressScrollLoad = false; }, 300);
+  }
+}
+
+// chat-log 滚到顶部附近时拉更早历史；wheel/touch 顶部继续上拉也触发（chat-log 不可滚时兜底）
+$("chat-log").addEventListener("scroll", () => {
+  if (state.suppressScrollLoad) return;
+  if ($("chat-log").scrollTop < 100) loadEarlierHistory();
+});
+$("chat-log").addEventListener("wheel", (e) => {
+  if (state.suppressScrollLoad) return;
+  if (e.deltaY < 0 && $("chat-log").scrollTop < 100) loadEarlierHistory();
+});
+let _touchStartY = 0;
+$("chat-log").addEventListener("touchstart", e => { _touchStartY = e.touches[0].clientY; }, { passive: true });
+$("chat-log").addEventListener("touchmove", e => {
+  if (state.suppressScrollLoad) return;
+  if ($("chat-log").scrollTop < 5 && e.touches[0].clientY > _touchStartY + 40) loadEarlierHistory();
+}, { passive: true });
+
+function connectWS() {
+  const ownSessionId = state.sessionId;     // 闭包捕获：用户切到别的 session 时旧实例自动失效
+  const url = wsURL("ws/" + encodeURIComponent(ownSessionId)
+                    + "?token=" + encodeURIComponent(state.token));
+  let backoff = 1000;
+  let timer = null;
+  const isOwn = () => state.sessionId === ownSessionId;
+
+  function start() {
+    if (!isOwn()) return;
+    if (state.ws
+        && (state.ws.readyState === WebSocket.OPEN
+            || state.ws.readyState === WebSocket.CONNECTING)) return;
+    const ws = new WebSocket(url);
+    state.ws = ws;
+    const isCurrent = () => state.ws === ws && isOwn();
+    ws.addEventListener("open", () => {
+      if (!isCurrent()) return;
+      setStatus("", "已连接");
+      backoff = 1000;
+      // 重连后服务端会重发初始 history + backlog_done，先清显示避免重复
+      $("chat-log").innerHTML = "";
+      state.msgById.clear();
+      state.toolById.clear();
+      state.activeMsgId = null;
+      state.blocksByIdx.clear();
+      state.firstSeq = null;
+      state.hasMoreHistory = false;
+      state.loadingHistory = false;
+    });
+    ws.addEventListener("close", () => {
+      if (!isCurrent()) return;
+      const secs = Math.round(backoff / 1000);
+      setStatus("error", `断开，${secs}s 后重连`);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(start, backoff);
+      backoff = Math.min(30000, backoff * 2);
+    });
+    ws.addEventListener("error", () => { if (isCurrent()) setStatus("error", "连接错误"); });
+    ws.addEventListener("message", (ev) => {
+      if (!isCurrent()) return;
+      try { handleEvent(JSON.parse(ev.data).event); }
+      catch (e) { console.warn("bad ws msg", e, ev.data); }
+    });
+  }
+
+  // 暴露立即重连入口给 visibilitychange / online 等主动唤醒源使用
+  state.reconnectChatNow = () => {
+    if (!isOwn()) return;
+    backoff = 1000;
+    if (timer) { clearTimeout(timer); timer = null; }
+    const ws = state.ws;
+    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+      start();
+    }
+  };
+  start();
 }
 
 function appendBubble(kind, text) {
@@ -541,19 +833,28 @@ function ensureToolCard(toolUseId, name) {
   if (entry) return entry;
   const log = $("chat-log");
   const card = document.createElement("div");
-  card.className = "tool-card";
+  card.className = "tool-card collapsed";   // 全部默认收起，包括运行中的
   card.dataset.toolUseId = toolUseId;
   const icon = TOOL_ICONS[name] || "•";
   card.innerHTML = `
-    <div class="tool-head">
+    <div class="tool-head" role="button" tabindex="0">
       <span class="tool-icon">${escHTML(icon)}</span>
       <span class="tool-name">${escHTML(name || "tool")}</span>
-      <span class="tool-status pending">运行中…</span>
+      <span class="tool-summary"></span>
+      <span class="tool-status pending"></span>
     </div>
-    <div class="tool-args mono"></div>
-    <div class="tool-result" hidden></div>`;
+    <div class="tool-body">
+      <div class="tool-args mono"></div>
+      <div class="tool-result" hidden></div>
+    </div>`;
   log.appendChild(card);
   log.scrollTop = log.scrollHeight;
+  const headEl = card.querySelector(".tool-head");
+  const toggle = () => card.classList.toggle("collapsed");
+  headEl.addEventListener("click", toggle);
+  headEl.addEventListener("keydown", e => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+  });
   entry = {
     card,
     name: name || "tool",
@@ -562,12 +863,61 @@ function ensureToolCard(toolUseId, name) {
     argsEl: card.querySelector(".tool-args"),
     resultEl: card.querySelector(".tool-result"),
     statusEl: card.querySelector(".tool-status"),
+    summaryEl: card.querySelector(".tool-summary"),
   };
   state.toolById.set(toolUseId, entry);
   return entry;
 }
 
+function toolSummary(name, input) {
+  if (!input || typeof input !== "object") return "";
+  if (name === "Bash") return (input.command || "").split("\n")[0];
+  if (name === "Read" || name === "Write" || name === "Edit") {
+    const p = input.file_path || "";
+    return p.split("/").slice(-2).join("/");
+  }
+  if (name === "Glob" || name === "Grep") return input.pattern || "";
+  if (name === "WebFetch") return input.url || "";
+  if (name === "WebSearch") return input.query || "";
+  if (name === "TodoWrite") {
+    const n = Array.isArray(input.todos) ? input.todos.length : 0;
+    return n ? `${n} 项` : "";
+  }
+  return "";
+}
+
+// 从尚未完整的 partial_json 里用正则提取关键字段，让 tool 卡头在流式参数收集阶段也能显示路径/命令
+function partialSummary(name, partial) {
+  if (!partial) return "";
+  const grab = (key) => {
+    // 简化匹配：value 是一段不含未转义引号的字符；JSON 转义还原最常见的 \" \\ \n
+    const m = new RegExp('"' + key + '"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"').exec(partial);
+    if (!m) return null;
+    return m[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\").replace(/\\n/g, "\n");
+  };
+  if (name === "Bash") {
+    const v = grab("command"); return v ? v.split("\n")[0] : "";
+  }
+  if (name === "Read" || name === "Write" || name === "Edit") {
+    const v = grab("file_path"); return v ? v.split("/").slice(-2).join("/") : "";
+  }
+  if (name === "Glob" || name === "Grep") return grab("pattern") || "";
+  if (name === "WebFetch") return grab("url") || "";
+  if (name === "WebSearch") return grab("query") || "";
+  return "";
+}
+
 function renderToolArgs(entry) {
+  // 一行摘要：优先用 finalInput；finalInput 还没好就从 partialInput 用正则提
+  if (entry.summaryEl) {
+    let s = "";
+    if (entry.finalInput && typeof entry.finalInput === "object") {
+      s = toolSummary(entry.name, entry.finalInput);
+    } else {
+      s = partialSummary(entry.name, entry.partialInput);
+    }
+    entry.summaryEl.textContent = s;
+  }
   // Edit 走 DOM diff 视图；其它走纯文本 formatToolInput
   if (entry.name === "Edit"
       && entry.finalInput && typeof entry.finalInput === "object"
@@ -683,8 +1033,9 @@ function attachToolResult(toolUseId, content, isError) {
   entry.resultEl.hidden = false;
   entry.resultEl.classList.toggle("error", !!isError);
   entry.resultEl.textContent = body;
-  entry.statusEl.textContent = isError ? "失败" : "完成";
   entry.statusEl.className = "tool-status " + (isError ? "error" : "done");
+  entry.statusEl.textContent = "";   // 完成后只用一个色点表示状态
+  // 不再自动改 collapsed：默认就收起，用户想看详情自行点击展开（出错用红点提示）
   $("chat-log").scrollTop = $("chat-log").scrollHeight;
 }
 
@@ -775,15 +1126,19 @@ function handleEvent(evt) {
   if (t === "system")       return handleSystem(evt);
   if (t === "result")       return handleResult(evt);
   if (t === "_ccr") {
+    if (evt.subtype === "backlog_done") {
+      // 记录翻页起点：用于"向上滚动加载更早"
+      state.firstSeq = evt.first_seq;
+      state.hasMoreHistory = !!evt.has_more;
+      if (state.revealChat) state.revealChat();
+      return;
+    }
     if (evt.subtype === "permission_request") return showPermissionRequest(evt);
     if (evt.subtype === "permission_resolved") return markPermissionResolved(evt);
     return;
   }
   if (t === "_internal") {
-    if (evt.subtype === "exit") {
-      appendBubble("system", `claude 进程退出（rc=${evt.returncode}）`);
-      setStatus("error", "已退出");
-    }
+    if (evt.subtype === "exit") setStatus("error", `已退出 rc=${evt.returncode}`);
     return;
   }
 }
@@ -910,25 +1265,13 @@ function handleUserInput(evt) {
 function handleSystem(evt) {
   if (evt.subtype === "init") {
     setStatus("busy", "已就绪");
-    // claude 自身 session_id 只显示，不替换我们 state.sessionId（ccr- 永久 id）
-    if (evt.session_id) {
-      const base = $("chat-meta").textContent.split(" · ")[0];
-      $("chat-meta").textContent = `${base} · ${state.sessionId} · claude=${evt.session_id}`;
-    }
-    appendBubble("system", `init · model=${evt.model} · cwd=${evt.cwd}`);
   } else if (evt.subtype === "post_turn_summary") {
     setStatus("", "空闲");
-  } else if (evt.subtype === "hook_started") {
-    // hook 已开始执行：通常我们的桥接器在跑，可以忽略
-  } else if (evt.subtype === "hook_response") {
-    // hook 已返回：决定已经走完了；不额外渲染
   }
+  // init/result 的 model/cwd/cost 不再灌到聊天流；chat-meta 已显示 cwd，状态条显示忙闲
 }
 
 function handleResult(evt) {
-  const cost = (evt.total_cost_usd || 0).toFixed(4);
-  appendBubble("system",
-    `result · stop=${evt.stop_reason} · turns=${evt.num_turns} · $${cost}`);
   setStatus("", "完成");
 }
 
@@ -937,15 +1280,27 @@ function sendUserMessage() {
   const text = ta.value.trim();
   if ((!text && state.attachments.length === 0)
       || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+  if (state.attachments.some(a => a.uploading)) {
+    alert("有文件正在上传，请稍候");
+    return;
+  }
+  const images = state.attachments.filter(a => a.kind === "image");
+  const files  = state.attachments.filter(a => a.kind === "file" && a.path);
+  // 文件附件以路径形式拼到文本里，Claude 会自行 Read
+  let combinedText = text;
+  if (files.length) {
+    const lines = files.map(f => `📎 ${f.name}\n${f.path}`).join("\n\n");
+    combinedText = text ? `${text}\n\n${lines}` : lines;
+  }
   let content;
-  if (state.attachments.length) {
-    content = state.attachments.map(a => ({
+  if (images.length) {
+    content = images.map(a => ({
       type: "image",
       source: { type: "base64", media_type: a.media_type, data: a.base64 },
     }));
-    if (text) content.push({ type: "text", text });
+    if (combinedText) content.push({ type: "text", text: combinedText });
   } else {
-    content = text;
+    content = combinedText;
   }
   state.ws.send(JSON.stringify({ type: "user_message", content }));
   // user bubble 等 server 注入 user_input echo 时再渲染（保证刷新/resume 也能看到）
@@ -979,8 +1334,9 @@ function renderAttachmentBar() {
       card.appendChild(img);
     } else {
       const s = document.createElement("span");
-      s.textContent = a.label || "(附件)";
+      s.textContent = (a.uploading ? "⏳ " : "📎 ") + (a.name || a.label || "(附件)");
       card.appendChild(s);
+      if (a.uploading) card.classList.add("uploading");
     }
     const x = document.createElement("button");
     x.className = "att-x";
@@ -1013,19 +1369,78 @@ function addImageAttachment(file) {
   reader.readAsDataURL(file);
 }
 
+// 文件处理路由：图片 → image attachment；小文本 → 追加到输入框；其它 → 上传到 session.cwd 作为 file attachment
+function handleSelectedFile(f) {
+  if (f.type.startsWith("image/")) {
+    addImageAttachment(f);
+    return;
+  }
+  const isTextLike = f.type.startsWith("text/")
+    || /\.(txt|md|py|js|ts|tsx|jsx|json|html|css|sh|yml|yaml|toml|ini|conf|c|cc|cpp|h|hpp|rs|go|java|kt|swift|log|csv|xml)$/i.test(f.name);
+  if (isTextLike && f.size < 200 * 1024) {
+    const r = new FileReader();
+    r.onload = () => {
+      const ta = $("chat-input");
+      ta.value += (ta.value ? "\n\n" : "") + "// " + f.name + "\n" + r.result;
+      ta.dispatchEvent(new Event("input"));
+    };
+    r.readAsText(f);
+    return;
+  }
+  uploadFileAttachment(f);
+}
+
+async function uploadFileAttachment(f) {
+  if (!state.sessionId) { alert("请先打开一个 session"); return; }
+  const slot = { kind: "file", name: f.name, size: f.size, uploading: true };
+  state.attachments.push(slot);
+  renderAttachmentBar();
+  try {
+    const fd = new FormData();
+    fd.append("file", f);
+    const headers = state.token ? { "Authorization": "Bearer " + state.token } : {};
+    const res = await fetch(
+      apiPath(`/api/sessions/${encodeURIComponent(state.sessionId)}/upload`),
+      { method: "POST", headers, body: fd },
+    );
+    if (!res.ok) {
+      let detail = res.statusText;
+      try { detail = (await res.json()).detail || detail; } catch (_) {}
+      throw new Error(`${res.status} ${detail}`);
+    }
+    const data = await res.json();
+    slot.path = data.path;
+    slot.uploading = false;
+    renderAttachmentBar();
+  } catch (e) {
+    const idx = state.attachments.indexOf(slot);
+    if (idx >= 0) state.attachments.splice(idx, 1);
+    renderAttachmentBar();
+    alert(`上传失败：${e.message}`);
+  }
+}
+
 function setupAttachmentInput() {
   const ta = $("chat-input");
-  // 粘贴
+  // 附件按钮 → 隐藏 input（不限类型，回调里统一分类）
+  const attInput = $("att-input");
+  $("chat-att").addEventListener("click", () => attInput.click());
+  attInput.addEventListener("change", e => {
+    for (const f of e.target.files) handleSelectedFile(f);
+    e.target.value = "";   // 允许同一文件再选一次
+  });
+  // 粘贴：任意类型的文件都接（图片、PDF、文本…），交给同一个路由
   ta.addEventListener("paste", (e) => {
     const items = e.clipboardData && e.clipboardData.items;
     if (!items) return;
+    let handled = false;
     for (const it of items) {
-      if (it.kind === "file" && it.type.startsWith("image/")) {
-        e.preventDefault();
-        const file = it.getAsFile();
-        if (file) addImageAttachment(file);
+      if (it.kind === "file") {
+        const f = it.getAsFile();
+        if (f) { handleSelectedFile(f); handled = true; }
       }
     }
+    if (handled) e.preventDefault();
   });
   // 拖拽到整个 chat 视图
   const dropZone = document.querySelector("#view-chat");
@@ -1045,29 +1460,16 @@ function setupAttachmentInput() {
     const files = Array.from(e.dataTransfer.files || []);
     if (!files.length) return;
     e.preventDefault();
-    for (const f of files) {
-      if (f.type.startsWith("image/")) {
-        addImageAttachment(f);
-      } else if (f.size < 200 * 1024
-                 && (/\.(txt|md|py|js|ts|tsx|jsx|json|html|css|sh|yml|yaml|toml|ini|conf|c|cc|cpp|h|hpp|rs|go|java|kt|swift)$/i.test(f.name)
-                     || f.type.startsWith("text/"))) {
-        // 小文本：追加到输入框
-        const r = new FileReader();
-        r.onload = () => {
-          const ta = $("chat-input");
-          ta.value += (ta.value ? "\n\n" : "") + "// " + f.name + "\n" + r.result;
-          ta.dispatchEvent(new Event("input"));
-        };
-        r.readAsText(f);
-      } else {
-        alert(`暂不支持的文件类型：${f.name}（${f.type || "unknown"}）`);
-      }
-    }
+    for (const f of files) handleSelectedFile(f);
   });
 }
 
 $("chat-send").addEventListener("click", sendUserMessage);
 $("chat-input").addEventListener("keydown", e => {
+  // IME 候选 / 拼写阶段按 Enter 是上屏确认，不应触发发送：
+  //   - e.isComposing: 现代浏览器
+  //   - keyCode === 229: 仅 Safari 旧版兜底（isComposing 不可靠时）
+  if (e.isComposing || e.keyCode === 229) return;
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     sendUserMessage();
@@ -1081,6 +1483,25 @@ $("chat-input").addEventListener("input", e => {
 // ---------- 启动 ----------
 renderPresets();
 setupAttachmentInput();
+// 回到前台 / 网络恢复时立即重连两条 ws：iOS 切换 app 后 ws 通常已被运营商或 iOS 关掉，
+// 但 onclose 可能延迟触发，等指数退避要好久。这里主动 poke 一下。
+function kickReconnect() {
+  if (!state.token) return;
+  // 全局 ws
+  if (!state.globalWS
+      || state.globalWS.readyState === WebSocket.CLOSED
+      || state.globalWS.readyState === WebSocket.CLOSING) {
+    _globalBackoff = 1000;   // 重置退避
+    connectGlobalWS();
+  }
+  // 当前 session 的 chat ws
+  if (state.sessionId && state.reconnectChatNow) state.reconnectChatNow();
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") kickReconnect();
+});
+window.addEventListener("online", kickReconnect);
+window.addEventListener("pageshow", () => kickReconnect());   // 从 bfcache 唤回也算
 // 主题切换按钮
 document.querySelectorAll("#theme-toggle, #theme-toggle-login").forEach(b => {
   b.addEventListener("click", toggleTheme);
