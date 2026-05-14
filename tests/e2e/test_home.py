@@ -32,8 +32,9 @@ def test_spawned_session_appears_as_card(logged_in_page, spawned_session):
     expect(hp.card_by_id(sid).locator(".name")).to_have_text("fixture-session")
 
 
-def test_delete_card_removes_it(logged_in_page, spawned_session):
-    """Click the card's del-btn, accept confirm, verify the card disappears."""
+def test_delete_inactive_card_removes_it(logged_in_page, spawned_session):
+    """Soft-delete pipeline: active card → deactivate → expand inactive →
+    confirm delete → card gone from both sections."""
     sid = spawned_session(name="to-delete")
 
     hp = HomePage(logged_in_page)
@@ -41,8 +42,20 @@ def test_delete_card_removes_it(logged_in_page, spawned_session):
     card = hp.card_by_id(sid)
     expect(card).to_be_visible(timeout=5000)
 
+    # 1. Move from Active to Inactive (no confirm)
+    card.locator(".deactivate-btn").click()
+
+    # 2. Expand Inactive section
+    logged_in_page.locator("#sessions-inactive h2.inactive-toggle").click()
+    expect(logged_in_page.locator(
+        f"#sessions-inactive [data-id='{sid}']"
+    )).to_be_visible(timeout=5000)
+
+    # 3. Click the inactive card's ✕ — soft delete
     logged_in_page.once("dialog", lambda d: d.accept())
-    card.locator(".del-btn").click()
+    logged_in_page.locator(
+        f"#sessions-inactive [data-id='{sid}'] .delete-btn"
+    ).click()
 
     expect(card).to_have_count(0, timeout=5000)
 

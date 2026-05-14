@@ -269,6 +269,15 @@ async def set_permission_mode(session_id: str, req: PermissionModeRequest) -> di
     return {"mode": req.mode, "auto_resolved": resolved}
 
 
+@router.post("/sessions/{session_id}/deactivate")
+async def deactivate_session(session_id: str) -> dict[str, Any]:
+    """Move session into the 'Inactive' bucket; no process change."""
+    ok = await manager.deactivate(session_id)
+    if not ok:
+        raise HTTPException(404, "session not found")
+    return {"ok": True}
+
+
 @router.post("/sessions/{session_id}/interrupt")
 async def interrupt_session(session_id: str) -> dict[str, Any]:
     """打断当前会话：杀掉子进程。下一次发消息或显式 resume 会自动重启。"""

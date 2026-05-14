@@ -62,6 +62,10 @@ class Session:
     seq: int = 0
     finished: bool = False
     hibernated: bool = False
+    # User-facing "inactive" flag. Set via deactivate(); cleared when user
+    # sends a fresh message. Cards in this state render in the Inactive
+    # section on home.
+    deactivated_at: float | None = None
     pending_permissions: int = 0          # 当前等待用户决定的权限请求数
     needs_action_detail: str | None = None  # post_turn_summary 报告的待办（None=无）
     # 一轮对话激活中：用户发出 → result 之间（含工具调用），用作"工作中"判定
@@ -108,6 +112,7 @@ class Session:
             "state": self.compute_state(),
             "pending_permissions": self.pending_permissions,
             "needs_action_detail": self.needs_action_detail,
+            "is_inactive": self.deactivated_at is not None,
         }
 
 
@@ -159,6 +164,7 @@ class SessionManager:
                 last_activity_at=r["last_activity_at"],
                 hibernated=True,
                 finished=r["finished_at"] is not None,
+                deactivated_at=r.get("deactivated_at"),
             )
             sess.seq = await db.max_seq(r["id"])
             async with self._lock:
@@ -249,6 +255,28 @@ class SessionManager:
             await sess.proc.terminate()
         except Exception:
             log.exception("terminate during interrupt failed for %s", sess_id)
+        return True
+
+    async def deactivate(self, sess_id: str) -> bool:
+        """Mark a session inactive. Frontend renders it under "Inactive"."""
+        async with self._lock:
+            sess = self.sessions.get(sess_id)
+        if not sess:
+            return False
+        sess.deactivated_at = time.time()
+        await db.mark_deactivated(sess_id)
+        self._broadcast_status(sess)
+        return True
+
+    async def activate(self, sess_id: str) -> bool:
+        """Clear the inactive flag (called when user sends a new message)."""
+        async with self._lock:
+            sess = self.sessions.get(sess_id)
+        if not sess or sess.deactivated_at is None:
+            return False
+        sess.deactivated_at = None
+        await db.mark_activated(sess_id)
+        self._broadcast_status(sess)
         return True
 
     async def delete(self, sess_id: str) -> bool:

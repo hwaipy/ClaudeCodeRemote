@@ -18,17 +18,15 @@ from tests.pages.home_page import HomePage
 
 # ===== Active / Inactive split (§2) =====
 
-@pytest.mark.spec_only
-@pytest.mark.xfail(reason="spec: Active/Inactive split not implemented")
 def test_active_and_inactive_sections_exist(logged_in_page):
     hp = HomePage(logged_in_page)
     hp.expect_visible()
     expect(logged_in_page.locator("#sessions-active")).to_be_visible()
-    expect(logged_in_page.locator("#sessions-inactive")).to_be_visible()
+    # Inactive section header is always visible; the list inside is collapsed.
+    expect(logged_in_page.locator("#sessions-inactive h2.inactive-toggle")
+           ).to_be_visible()
 
 
-@pytest.mark.spec_only
-@pytest.mark.xfail(reason="spec: Inactive section collapsed by default")
 def test_inactive_section_starts_collapsed(logged_in_page):
     hp = HomePage(logged_in_page)
     hp.expect_visible()
@@ -36,20 +34,16 @@ def test_inactive_section_starts_collapsed(logged_in_page):
     assert "expanded" not in (inactive.get_attribute("class") or "")
 
 
-@pytest.mark.spec_only
-@pytest.mark.xfail(reason="spec: clicking Inactive h2 toggles expanded")
 def test_clicking_inactive_header_toggles(logged_in_page):
     hp = HomePage(logged_in_page)
     hp.expect_visible()
-    header = logged_in_page.locator("#sessions-inactive > h2")
+    header = logged_in_page.locator("#sessions-inactive h2.inactive-toggle")
     header.click()
     expect(logged_in_page.locator("#sessions-inactive.expanded")).to_be_visible()
     header.click()
     expect(logged_in_page.locator("#sessions-inactive.expanded")).to_have_count(0)
 
 
-@pytest.mark.spec_only
-@pytest.mark.xfail(reason="spec: deactivate-btn on active cards (no confirm)")
 def test_active_card_x_moves_to_inactive(logged_in_page, spawned_session):
     sid = spawned_session(name="moves-to-inactive")
     hp = HomePage(logged_in_page)
@@ -61,6 +55,8 @@ def test_active_card_x_moves_to_inactive(logged_in_page, spawned_session):
     ).click()
     expect(logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
            ).to_have_count(0, timeout=5000)
+    # Inactive header always visible; expand to see the card
+    logged_in_page.locator("#sessions-inactive h2.inactive-toggle").click()
     expect(logged_in_page.locator(f"#sessions-inactive [data-id='{sid}']")
            ).to_have_count(1)
 

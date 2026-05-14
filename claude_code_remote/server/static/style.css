@@ -373,6 +373,18 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .err.show { display: block; }
 
 .home-top { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+#sessions-inactive { margin-top: 22px; }
+#sessions-inactive h2.inactive-toggle {
+  font-size: 18px; font-weight: 600;
+  display: flex; align-items: center; gap: 8px;
+  cursor: pointer; user-select: none;
+  margin: 0 0 4px 0;
+}
+#sessions-inactive .count { font-size: 13px; color: var(--text-dim); font-weight: 400; }
+#sessions-inactive .chevron { font-size: 12px; color: var(--text-dim); margin-left: auto; transition: transform .15s ease; }
+#sessions-inactive.expanded .chevron { transform: rotate(90deg); }
+#sessions-inactive #session-list-inactive { display: none; margin-top: 6px; }
+#sessions-inactive.expanded #session-list-inactive { display: flex; }
 .home-top .btn { padding: 8px 18px; font-size: 14px; }
 .modal-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
 .modal-body label { color: var(--text-dim); font-size: 12px; margin-top: 8px; }

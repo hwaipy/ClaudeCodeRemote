@@ -292,65 +292,103 @@ function setSortMode(mode) {
   }
 }
 function renderSessionList() {
-  const list = $("session-list");
+  const listActive   = $("session-list-active");
+  const listInactive = $("session-list-inactive");
+  const inactiveBox  = $("sessions-inactive");
   const mode = getSortMode();
-  const arr = Array.from(state.sessionsById.values()).sort((a, b) => {
+  const all = Array.from(state.sessionsById.values()).sort((a, b) => {
     const ka = mode === "active" ? (a.last_activity_at || 0) : (a.created_at || 0);
     const kb = mode === "active" ? (b.last_activity_at || 0) : (b.created_at || 0);
     return kb - ka;
   });
-  if (!arr.length) {
-    list.innerHTML = `<div class="session-empty">No sessions</div>`;
-    return;
+  const active   = all.filter(s => !s.is_inactive);
+  const inactive = all.filter(s =>  s.is_inactive);
+
+  // Inactive section header always visible; count is empty when 0.
+  inactiveBox.querySelector(".count").textContent = inactive.length ? `(${inactive.length})` : "";
+
+  // Render active
+  if (!active.length) {
+    listActive.innerHTML = `<div class="session-empty">No sessions</div>`;
+  } else {
+    listActive.innerHTML = "";
+    for (const s of active) renderOneCard(s, listActive, /*inactive=*/false);
   }
-  list.innerHTML = "";
-  for (const s of arr) {
-    const badge = STATE_BADGES[s.state] || STATE_BADGES.idle;
-    const active = relTime(s.last_activity_at);
-    const pp = s.pending_permissions || 0;
-    const needs = s.needs_action_detail;
-    const isCurrent = state.sessionId === s.id;
-    const isBusy = s.state === "busy";
-    const el = document.createElement("div");
-    el.className = "session-card state-" + (badge.cls || "idle")
-                 + (isBusy ? " session-busy" : "")
-                 + (isCurrent ? " is-current" : "");
-    el.setAttribute("data-id", s.id);
-    // cwd → last 2 path segments; short id → "ccr-" + first 6 chars of suffix
-    const segs = (s.cwd || "").split("/").filter(Boolean);
-    const cwdShort = segs.slice(-2).join("/") || (s.cwd || "");
-    const idSuffix = (s.id || "").replace(/^ccr-/, "").slice(0, 6);
-    const shortId  = "ccr-" + idSuffix;
-    const badgeLabel = badge.label + (pp > 1 ? ` ×${pp}` : "");
-    el.innerHTML = `
-      <div class="session-row1">
-        <span class="state-dot" aria-hidden="true"></span>
-        <div class="name">${escHTML(s.name || "untitled")}</div>
-        <span class="badge ${badge.cls}">${escHTML(badgeLabel)}</span>
-        <button class="del-btn" title="Delete session">✕</button>
-      </div>
-      <div class="meta-line">
-        <span class="cwd-short" title="${escHTML(s.cwd || "")}">${escHTML(cwdShort)}</span>
-        <span class="meta-sep"> · </span>
-        <span class="short-id" title="${escHTML(s.id || "")}">${escHTML(shortId)}</span>
-      </div>
-      <div class="ts-line">active ${active} ago${needs ? " · " + escHTML(needs.slice(0, 40)) : ""}</div>`;
-    el.querySelector(".del-btn").addEventListener("click", async (e) => {
-      e.stopPropagation();
+  // Render inactive
+  listInactive.innerHTML = "";
+  for (const s of inactive) renderOneCard(s, listInactive, /*inactive=*/true);
+}
+
+function renderOneCard(s, container, isInactiveSection) {
+  const badge = STATE_BADGES[s.state] || STATE_BADGES.idle;
+  const active = relTime(s.last_activity_at);
+  const pp = s.pending_permissions || 0;
+  const needs = s.needs_action_detail;
+  const isCurrent = state.sessionId === s.id;
+  const isBusy = s.state === "busy";
+  const el = document.createElement("div");
+  el.className = "session-card state-" + (badge.cls || "idle")
+               + (isBusy ? " session-busy" : "")
+               + (isCurrent ? " is-current" : "");
+  el.setAttribute("data-id", s.id);
+  const segs = (s.cwd || "").split("/").filter(Boolean);
+  const cwdShort = segs.slice(-2).join("/") || (s.cwd || "");
+  const idSuffix = (s.id || "").replace(/^ccr-/, "").slice(0, 6);
+  const shortId  = "ccr-" + idSuffix;
+  const badgeLabel = badge.label + (pp > 1 ? ` ×${pp}` : "");
+  // Active cards get .deactivate-btn (no confirm, moves to inactive).
+  // Inactive cards get .delete-btn (confirm, soft-deletes via existing API).
+  const xClass = isInactiveSection ? "delete-btn" : "deactivate-btn";
+  const xTitle = isInactiveSection ? "Delete session" : "Move to Inactive";
+  el.innerHTML = `
+    <div class="session-row1">
+      <span class="state-dot" aria-hidden="true"></span>
+      <div class="name">${escHTML(s.name || "untitled")}</div>
+      <span class="badge ${badge.cls}">${escHTML(badgeLabel)}</span>
+      <button class="${xClass}" title="${xTitle}">✕</button>
+    </div>
+    <div class="meta-line">
+      <span class="cwd-short" title="${escHTML(s.cwd || "")}">${escHTML(cwdShort)}</span>
+      <span class="meta-sep"> · </span>
+      <span class="short-id" title="${escHTML(s.id || "")}">${escHTML(shortId)}</span>
+    </div>
+    <div class="ts-line">active ${active} ago${needs ? " · " + escHTML(needs.slice(0, 40)) : ""}</div>`;
+  const xBtn = el.querySelector("." + xClass);
+  xBtn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    if (isInactiveSection) {
       if (!confirm(`Delete session "${s.name}"? This cannot be undone.`)) return;
       try {
         await api(`/api/sessions/${encodeURIComponent(s.id)}`, { method: "DELETE" });
       } catch (err) {
         alert("Delete failed: " + err.message);
       }
-    });
-    el.addEventListener("click", () => {
-      if (state.sessionId === s.id) return;   // 已经在打开这个 session，避免重新加载
-      enterChat(s.id, s.name, s.cwd, s.state);
-    });
-    list.appendChild(el);
-  }
+    } else {
+      try {
+        await api(`/api/sessions/${encodeURIComponent(s.id)}/deactivate`,
+                   { method: "POST", body: JSON.stringify({}) });
+      } catch (err) {
+        alert("Deactivate failed: " + err.message);
+      }
+    }
+  });
+  el.addEventListener("click", () => {
+    if (state.sessionId === s.id) return;
+    enterChat(s.id, s.name, s.cwd, s.state);
+  });
+  container.appendChild(el);
 }
+
+// ---------- Inactive section collapse toggle ----------
+(function setupInactiveToggle() {
+  const box = $("sessions-inactive");
+  if (!box) return;
+  const header = box.querySelector("h2.inactive-toggle");
+  if (!header) return;
+  header.addEventListener("click", () => {
+    box.classList.toggle("expanded");
+  });
+})();
 
 // in-app toast：会话状态变到 waiting_permission / needs_input 且不在该会话的 chat 视图时提醒
 const _lastNotifiedState = new Map();
@@ -534,7 +572,7 @@ $("spawn-go").addEventListener("click", async () => {
 
   function applyFilter() {
     const q = (input.value || "").trim().toLowerCase();
-    document.querySelectorAll("#session-list .session-card").forEach(card => {
+    document.querySelectorAll(".session-card").forEach(card => {
       const name = (card.querySelector(".name")?.textContent || "").toLowerCase();
       const match = !q || name.includes(q);
       card.hidden = !match;

@@ -34,18 +34,18 @@ def test_home_renders_session_cards(logged_in_page, live_db):
         "SELECT COUNT(*) FROM sessions WHERE deleted_at IS NULL"
     ).fetchone()[0]
 
-    cards = logged_in_page.locator("#session-list .session-card")
+    cards = logged_in_page.locator(".session-card")
     expect(cards).to_have_count(db_count, timeout=5000)
 
 
 def test_card_names_match_db(logged_in_page, live_db):
     """Every session name in the DB appears as a card name in the UI."""
     expect(logged_in_page.locator("#view-home")).to_be_visible()
-    expect(logged_in_page.locator("#session-list .session-card").first
+    expect(logged_in_page.locator(".session-card").first
            ).to_be_visible(timeout=5000)
 
     rendered_names = logged_in_page.locator(
-        "#session-list .session-card .name"
+        ".session-card .name"
     ).all_inner_texts()
     db_names = [
         (row[0] or "untitled") for row in live_db.execute(
@@ -63,9 +63,9 @@ def test_page_has_all_six_states_represented_somewhere(logged_in_page, live_db):
     on server boot, sessions show as 'hibernated' or 'finished'. So we just
     check there's variety, not specific states.
     """
-    expect(logged_in_page.locator("#session-list .session-card").first
+    expect(logged_in_page.locator(".session-card").first
            ).to_be_visible(timeout=5000)
 
     # Each card has a state-* class somewhere on it
-    card_count = logged_in_page.locator("#session-list .session-card").count()
+    card_count = logged_in_page.locator(".session-card").count()
     assert card_count > 0

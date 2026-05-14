@@ -8,8 +8,10 @@ class HomePage:
     def __init__(self, page: Page) -> None:
         self.page = page
         self.view: Locator = page.locator("#view-home")
-        self.list: Locator = page.locator("#session-list")
-        self.cards: Locator = page.locator("#session-list .session-card")
+        # "list" refers to the Active list — used for the "Loading…" check.
+        self.list: Locator = page.locator("#session-list-active")
+        # cards: both Active + Inactive (search filter, count-zero checks).
+        self.cards: Locator = page.locator(".session-card")
         self.spawn_name: Locator = page.locator("#spawn-name")
         self.spawn_cwd: Locator = page.locator("#spawn-cwd")
         self.spawn_go: Locator = page.locator("#spawn-go")
@@ -30,11 +32,11 @@ class HomePage:
         return self
 
     def card_by_id(self, session_id: str) -> Locator:
-        return self.page.locator(f"#session-list .session-card[data-id='{session_id}']")
+        return self.page.locator(f".session-card[data-id='{session_id}']")
 
     def card_by_name(self, name: str) -> Locator:
         return self.page.locator(
-            f"#session-list .session-card:has(.name:text-is('{name}'))"
+            f".session-card:has(.name:text-is('{name}'))"
         )
 
     def fill_spawn_form(self, cwd: str, name: str = "") -> "HomePage":

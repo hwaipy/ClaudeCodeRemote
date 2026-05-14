@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     last_activity_at    REAL NOT NULL,
     hibernated_at       REAL,
     finished_at         REAL,
-    deleted_at          REAL
+    deleted_at          REAL,
+    deactivated_at      REAL
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -60,6 +61,10 @@ def _open() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH), isolation_level=None, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(_SCHEMA)
+    # Lightweight migrations for older DBs
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+    if "deactivated_at" not in cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN deactivated_at REAL")
     return conn
 
 
@@ -142,8 +147,23 @@ async def mark_deleted(sess_id: str) -> None:
     await _run(_w)
 
 
+async def mark_deactivated(sess_id: str) -> None:
+    def _w() -> None:
+        _conn.execute("UPDATE sessions SET deactivated_at=? WHERE id=?",
+                       (time.time(), sess_id))
+    await _run(_w)
+
+
+async def mark_activated(sess_id: str) -> None:
+    def _w() -> None:
+        _conn.execute("UPDATE sessions SET deactivated_at=NULL WHERE id=?",
+                       (sess_id,))
+    await _run(_w)
+
+
 _SESS_COLS = ("id", "claude_session_id", "name", "cwd", "created_at",
-              "last_activity_at", "hibernated_at", "finished_at", "deleted_at")
+              "last_activity_at", "hibernated_at", "finished_at", "deleted_at",
+              "deactivated_at")
 
 
 async def get_session(sess_id: str) -> dict[str, Any] | None:
