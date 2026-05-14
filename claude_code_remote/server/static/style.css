@@ -325,11 +325,24 @@ input:focus, textarea:focus { border-color: var(--accent); }
 }
 .modal-foot {
   flex: 0 0 auto;
-  display: flex; gap: 10px;
+  display: flex; gap: 10px; align-items: center;
   padding: 12px 14px;
   border-top: 1px solid var(--border-soft);
 }
 .modal-foot .btn { flex: 1; padding: 10px; font-size: 14px; }
+.modal-iconbtn {
+  flex: 0 0 auto;
+  width: 38px; height: 38px;
+  padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.modal-iconbtn:hover { background: var(--bg-hover); color: var(--accent); border-color: var(--accent); }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .chip {
@@ -363,12 +376,23 @@ input:focus, textarea:focus { border-color: var(--accent); }
   transition: background 0.15s ease;
 }
 .session-card:hover { background: var(--bg-hover); border-color: var(--border); }
-/* 工作中 session：荧光绿边框 + 微光晕（参考 baseline app.py） */
+/* 工作中 session：荧光绿边框 + 加深的光晕 + 缓动呼吸 */
 .session-card.session-busy {
   border-color: #2ea043;
-  box-shadow: 0 0 10px rgba(46, 160, 67, 0.35);
+  border-width: 2px;
+  /* 边框加粗后内容会被往里压；用 negative margin 维持外尺寸 */
+  margin: -1px;
+  box-shadow: 0 0 14px rgba(46, 160, 67, 0.55), inset 0 0 0 1px rgba(46, 160, 67, 0.15);
+  animation: ccr-pulse-busy 2.4s ease-in-out infinite;
 }
-.session-card.session-busy:hover { border-color: #2ea043; }
+.session-card.session-busy:hover {
+  border-color: #2ea043;
+  box-shadow: 0 0 18px rgba(46, 160, 67, 0.7), inset 0 0 0 1px rgba(46, 160, 67, 0.2);
+}
+@keyframes ccr-pulse-busy {
+  0%, 100% { box-shadow: 0 0 12px rgba(46, 160, 67, 0.45), inset 0 0 0 1px rgba(46, 160, 67, 0.15); }
+  50%      { box-shadow: 0 0 18px rgba(46, 160, 67, 0.75), inset 0 0 0 1px rgba(46, 160, 67, 0.25); }
+}
 .session-card .session-row1 {
   display: flex; align-items: center; gap: 8px;
 }
@@ -384,8 +408,10 @@ input:focus, textarea:focus { border-color: var(--accent); }
   font-size: 11px; padding: 2px 8px; border-radius: 999px;
   border: 1px solid var(--border); background: var(--bg-hover); color: var(--text-muted);
 }
-.state-badge.running     { background: var(--ok-bg);     color: var(--ok-fg);     border-color: var(--ok-border); }
-.state-badge.busy        { background: var(--ok-bg);     color: var(--ok-fg);     border-color: var(--ok-border); }
+.state-badge.running     { background: rgba(46, 160, 67, 0.18); color: #1e7a31; border-color: rgba(46, 160, 67, 0.6); }
+.state-badge.busy        { background: rgba(46, 160, 67, 0.18); color: #1e7a31; border-color: rgba(46, 160, 67, 0.6); font-weight: 600; }
+body.theme-dark .state-badge.running { background: rgba(46, 160, 67, 0.22); color: #6dd388; border-color: rgba(46, 160, 67, 0.7); }
+body.theme-dark .state-badge.busy    { background: rgba(46, 160, 67, 0.22); color: #6dd388; border-color: rgba(46, 160, 67, 0.7); }
 .state-badge.waiting     { background: var(--warn-bg);   color: var(--warn-fg);   border-color: var(--warn-border); }
 .state-badge.needs-input { background: var(--accent-bg); color: var(--accent-fg); border-color: var(--accent); }
 .state-badge.idle        { background: var(--accent-bg); color: var(--accent-fg); border-color: var(--accent-border); }
@@ -401,7 +427,7 @@ input:focus, textarea:focus { border-color: var(--accent); }
   border-color: var(--accent);
   box-shadow: 0 0 12px var(--accent-hover);
 }
-.session-card.state-busy { border-color: var(--ok-border); }
+.session-card.state-busy { border-color: #2ea043; }
 /* 当前正在打开的 session：左侧加蓝色色条，整体加微高亮，提示用户"这就是当前会话" */
 /* 当前打开的 session 高亮：只在宽屏双栏（session list 常驻可见）才需要 */
 @media (min-width: 900px) {
@@ -1063,7 +1089,7 @@ body.theme-dark .conv-status .cs-spark { color: #e8a690; }
   opacity: 1;
   transition: opacity 200ms ease;
 }
-.chat-loading.fade-out { opacity: 0; }   /* JS 加这个 class 触发淡出，结束后再设 hidden */
+.chat-loading.fade-out { opacity: 0; pointer-events: none; }   /* 淡出阶段立刻让点击穿透，防止盖住下面的卡片 */
 .chat-loading[hidden] { display: none; }
 .chat-loading-spinner {
   width: 32px; height: 32px;
@@ -1087,6 +1113,82 @@ body.theme-dark .conv-status .cs-spark { color: #e8a690; }
 }
 .tool-lazy-hint { color: var(--text-dim); font-style: italic; font-size: 11.5px; }
 @keyframes tool-spin { to { transform: rotate(360deg); } }
+
+/* AskUserQuestion 交互卡：跟工具卡风格一致但带选项按钮 */
+.askuser-card {
+  align-self: flex-start;
+  width: min(720px, 100%);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 13px;
+}
+.askuser-card.submitted { border-color: var(--border-soft); }
+.askuser-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border-soft);
+}
+.askuser-icon { font-size: 14px; color: var(--accent); }
+.askuser-title { flex: 0 0 auto; font-weight: 600; color: var(--text); }
+.askuser-status {
+  flex: 1 1 auto; text-align: right;
+  font-size: 11.5px; color: var(--text-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.askuser-status.pending::before {
+  content: "✦ ";
+  color: var(--accent);
+}
+.askuser-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 14px; }
+.askuser-question { display: flex; flex-direction: column; gap: 6px; }
+.askuser-q { font-weight: 600; color: var(--text); line-height: 1.4; }
+.askuser-sub { font-size: 11.5px; color: var(--text-dim); }
+.askuser-options { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+.askuser-option {
+  display: flex; flex-direction: column; gap: 2px;
+  text-align: left;
+  padding: 10px 14px;
+  background: var(--bg-elev);
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  touch-action: manipulation;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-tap-highlight-color: rgba(0, 122, 255, 0.15);
+  transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
+}
+.askuser-option:hover:not(.disabled) { background: var(--bg-hover); border-color: var(--accent); }
+.askuser-option:active:not(.disabled) { transform: scale(0.985); background: var(--bg-hover); }
+.askuser-option.selected {
+  background: var(--accent-soft, rgba(0, 122, 255, .12));
+  border-color: var(--accent);
+  border-width: 2px;
+  padding: 9.5px 13.5px;
+  color: var(--accent);
+}
+.askuser-option.disabled { cursor: default; opacity: .55; pointer-events: none; }
+.askuser-option > * { pointer-events: none; }
+.askuser-option-label { font-size: 13px; font-weight: 600; }
+.askuser-option-desc { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+.askuser-option.selected .askuser-option-desc { color: var(--accent); opacity: .8; }
+.askuser-foot {
+  display: flex; justify-content: flex-end;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-soft);
+}
+.askuser-foot[hidden] { display: none; }
+.askuser-submit {
+  padding: 8px 18px; font-size: 13px;
+  touch-action: manipulation;
+  pointer-events: auto;
+}
+.askuser-submit:disabled { opacity: .5; cursor: not-allowed; }
 
 /* Edit 工具的 unified diff 视图 */
 .diff-header {

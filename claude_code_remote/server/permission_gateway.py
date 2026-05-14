@@ -44,12 +44,26 @@ class PermissionRequest:
     future: asyncio.Future = field(default_factory=lambda: asyncio.get_event_loop().create_future())
 
 
+@dataclass
+class AskUserRequest:
+    """AskUserQuestion 工具的挂起请求：hook 进来后我们把整条 hook 调用挂着，
+    等用户在前端回答完再 resolve（future 拿到答案 list），然后给 stdin 灌 tool_result
+    并返回 hook allow。这样 CLI 不会触发 "Answer questions?" auto-fail。"""
+    req_id: str
+    ccr_session_id: str
+    tool_use_id: str
+    tool_input: dict[str, Any]
+    created_at: float = field(default_factory=time.time)
+    future: asyncio.Future = field(default_factory=lambda: asyncio.get_event_loop().create_future())
+
+
 VALID_MODES = ("manual", "allow_all")
 
 
 class PermissionGateway:
     def __init__(self) -> None:
         self._pending: dict[str, PermissionRequest] = {}
+        self._askuser_pending: dict[str, AskUserRequest] = {}  # req_id -> AskUserRequest
         # ccr_session_id -> {"tools": set[str], "commands": set[str (fingerprint)]}
         self._allow: dict[str, dict[str, set[str]]] = {}
         # ccr_session_id -> "manual" | "allow_all"  (per-session permission mode)
@@ -78,6 +92,9 @@ class PermissionGateway:
         return [r for r in self._pending.values() if r.ccr_session_id == sid]
 
     def is_preapproved(self, sid: str, tool_name: str, tool_input: dict[str, Any]) -> bool:
+        # AskUserQuestion 不走 preapproved—它由独立的 askuser 挂起流程处理（见 open_askuser）
+        if tool_name == "AskUserQuestion":
+            return False
         if self._modes.get(sid) == "allow_all":
             return True
         st = self._allow.get(sid)
@@ -88,6 +105,37 @@ class PermissionGateway:
         if cmd_fingerprint(tool_name, tool_input) in st["commands"]:
             return True
         return False
+
+    # ---------- AskUserQuestion 挂起 ----------
+    async def open_askuser(self, sess_id: str, tool_use_id: str,
+                           tool_input: dict[str, Any]) -> AskUserRequest:
+        req = AskUserRequest(
+            req_id="aq-" + uuid.uuid4().hex[:10],
+            ccr_session_id=sess_id,
+            tool_use_id=tool_use_id,
+            tool_input=tool_input,
+        )
+        async with self._lock:
+            self._askuser_pending[req.req_id] = req
+        return req
+
+    async def resolve_askuser_by_tool_id(self, tool_use_id: str, answer: Any) -> bool:
+        """前端 askuser_answer 收到 → 按 tool_use_id 找挂起请求并把答案塞给 future。"""
+        async with self._lock:
+            target_rid = None
+            for rid, req in self._askuser_pending.items():
+                if req.tool_use_id == tool_use_id:
+                    target_rid = rid
+                    break
+            if target_rid is None:
+                return False
+            req = self._askuser_pending.pop(target_rid)
+        if not req.future.done():
+            req.future.set_result(answer)
+        return True
+
+    def get_pending_askuser(self, sid: str) -> list[AskUserRequest]:
+        return [r for r in self._askuser_pending.values() if r.ccr_session_id == sid]
 
     async def open_request(self, *, ccr_session_id: str, claude_payload: dict[str, Any]) -> PermissionRequest:
         tool_name = claude_payload.get("tool_name", "")
@@ -164,6 +212,11 @@ class PermissionGateway:
                 req = self._pending.pop(rid)
                 if not req.future.done():
                     req.future.set_result({"behavior": "deny", "message": "session ended"})
+            aq_drop = [rid for rid, r in self._askuser_pending.items() if r.ccr_session_id == sid]
+            for rid in aq_drop:
+                aq = self._askuser_pending.pop(rid)
+                if not aq.future.done():
+                    aq.future.set_result(None)   # None = 取消（session 结束）
 
 
 gateway = PermissionGateway()

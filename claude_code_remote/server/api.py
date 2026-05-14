@@ -26,6 +26,18 @@ class SpawnRequest(BaseModel):
     name: str = ""
 
 
+class DbgLogRequest(BaseModel):
+    tag: str
+    data: Any = None
+
+
+@router.post("/dbg/log")
+async def dbg_log(req: DbgLogRequest) -> dict[str, Any]:
+    """前端调试钩子：把任意标签+数据打到服务端 INFO 日志，远端可在 journalctl 里查。"""
+    log.info("DBG %s %s", req.tag, req.data)
+    return {"ok": True}
+
+
 @router.post("/spawn")
 async def spawn(req: SpawnRequest) -> dict[str, Any]:
     cwd = os.path.expanduser(req.cwd)
@@ -74,6 +86,34 @@ async def ls(path: str = "") -> LsResponse:
         raise HTTPException(403, f"无权限读取：{p}")
     parent = None if p == p.parent else str(p.parent)
     return LsResponse(path=str(p), parent=parent, dirs=dirs)
+
+
+class MkdirRequest(BaseModel):
+    parent: str
+    name: str = Field(..., min_length=1)
+
+
+@router.post("/mkdir")
+async def mkdir(req: MkdirRequest) -> dict[str, Any]:
+    """在指定父目录下创建子目录（目录浏览器"新建文件夹"用）。"""
+    parent_raw = (req.parent or "").strip()
+    parent = Path(os.path.expanduser(parent_raw)).resolve()
+    if not parent.is_dir():
+        raise HTTPException(400, f"parent is not a directory: {parent}")
+    # 文件夹名安全：禁 / \ 以及前后空白；只在目标父目录下创建一级
+    name = req.name.strip()
+    if not name or "/" in name or "\\" in name or name in (".", ".."):
+        raise HTTPException(400, "invalid folder name")
+    target = parent / name
+    try:
+        target.mkdir(parents=False, exist_ok=False)
+    except FileExistsError:
+        raise HTTPException(409, f"already exists: {target}")
+    except PermissionError:
+        raise HTTPException(403, f"permission denied: {parent}")
+    except OSError as e:
+        raise HTTPException(400, f"mkdir failed: {e}")
+    return {"path": str(target)}
 
 
 @router.get("/sessions/{session_id}/stderr")
@@ -297,6 +337,75 @@ class PermissionWaitRequest(BaseModel):
 PERMISSION_WAIT_TIMEOUT_S = 580.0  # 略短于桥接器 600s
 
 
+async def _handle_askuser_hook(sess: Any, tool_use_id: str,
+                                tool_input: dict[str, Any]) -> dict[str, Any]:
+    """AskUserQuestion 的 PreToolUse hook：把整条 hook 调用挂着等用户在前端答完，
+    然后 **在 return allow 之前** 把 tool_result 写到 claude stdin（管道缓冲里）。
+
+    ⚠️ 当前只是半成品。已验证：前端能渲卡片、用户能交互、答案能写回 DB。
+       但 claude CLI 在 `--print` 模式下 emit tool_use 之后会**自己内部**合成一条
+       `is_error=true content="Answer questions?"` 的 tool_result 加到它发往
+       Anthropic API 的消息流里——我们 stdin 注入的真答案在它消息流里是第二条，
+       Anthropic 端通常会用第一条，agent 最终回的还是 "Answer questions?"。
+       这是 CLI 设计层的限制，靠 hook 无法绕过。
+       真正可用要走 MCP 自定义工具或代理 Anthropic API（见项目 follow-up）。"""
+    import json
+    aq = await gateway.open_askuser(sess.id, tool_use_id, tool_input)
+    log.info("askuser hook opened: req=%s sess=%s tool_use_id=%s",
+             aq.req_id, sess.id, tool_use_id)
+    await manager.inject_event(sess, {
+        "type": "_ccr",
+        "subtype": "askuser_request",
+        "req_id": aq.req_id,
+        "tool_use_id": tool_use_id,
+        "tool_input": tool_input,
+    })
+    try:
+        answer = await asyncio.wait_for(aq.future,
+                                         timeout=PERMISSION_WAIT_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        log.warning("askuser timeout: req=%s", aq.req_id)
+        await gateway.resolve_askuser_by_tool_id(tool_use_id, None)
+        await manager.inject_event(sess, {
+            "type": "_ccr",
+            "subtype": "askuser_resolved",
+            "req_id": aq.req_id,
+            "tool_use_id": tool_use_id,
+            "cancelled": True,
+        })
+        return {"behavior": "deny", "message": "askuser timeout"}
+    if answer is None:
+        # session 取消或没答案
+        await manager.inject_event(sess, {
+            "type": "_ccr",
+            "subtype": "askuser_resolved",
+            "req_id": aq.req_id,
+            "tool_use_id": tool_use_id,
+            "cancelled": True,
+        })
+        return {"behavior": "deny", "message": "askuser cancelled"}
+    # 用户答完：先给 claude 持久化一条 user/tool_result（供前端 backlog 回放看到答案），
+    # 再 stdin 灬一条 tool_result 给 CLI 读，最后才 return allow。
+    content_text = json.dumps(answer, ensure_ascii=False)
+    blocks = [{
+        "type": "tool_result",
+        "tool_use_id": tool_use_id,
+        "content": content_text,
+    }]
+    await manager.inject_event(sess, {
+        "type": "user",
+        "message": {"role": "user", "content": blocks},
+    })
+    try:
+        await sess.proc.send_user_message(blocks)
+    except Exception:
+        log.exception("askuser stdin write failed sess=%s", sess.id)
+        return {"behavior": "deny", "message": "stdin write failed"}
+    log.info("askuser hook resolving allow: req=%s sess=%s", aq.req_id, sess.id)
+    return {"behavior": "allow", "updatedInput": tool_input,
+            "message": "askuser answered"}
+
+
 @router.post("/permission/wait")
 async def permission_wait(req: PermissionWaitRequest) -> dict[str, Any]:
     """PreToolUse hook 桥接器 POST 进来。命中白名单直接 allow，否则推 WS 等用户决定。"""
@@ -308,6 +417,11 @@ async def permission_wait(req: PermissionWaitRequest) -> dict[str, Any]:
     tool_name = payload.get("tool_name", "")
     tool_input = payload.get("tool_input") or {}
     tool_use_id = payload.get("tool_use_id", "")
+
+    # AskUserQuestion 走独立的 hook-hold 流程：用户没回答前我们就把整条 hook 调用挂着；
+    # 等用户回答后再给 stdin 灬 tool_result，并 return allow。这样 CLI 不会触发 auto-fail。
+    if tool_name == "AskUserQuestion":
+        return await _handle_askuser_hook(sess, tool_use_id, tool_input)
 
     if gateway.is_preapproved(sid, tool_name, tool_input):
         log.info("permission preapproved: sess=%s tool=%s", sid, tool_name)

@@ -56,9 +56,14 @@ def _result_size(content: Any) -> int:
     return 0
 
 
+def _is_askuser_tool(name: str) -> bool:
+    """AskUserQuestion 工具不剥：前端要完整问题+选项才能渲染交互卡。"""
+    return name == "AskUserQuestion"
+
+
 def strip_payload_for_backlog(payload: dict[str, Any]) -> dict[str, Any]:
     """浅拷贝并改写：tool_use.input / tool_result.content → 懒占位。
-    其它字段不动；原 payload 不被改写。"""
+    其它字段不动；原 payload 不被改写。AskUserQuestion 工具完整保留。"""
     t = payload.get("type")
     if t == "assistant":
         msg = payload.get("message") or {}
@@ -70,6 +75,9 @@ def strip_payload_for_backlog(payload: dict[str, Any]) -> dict[str, Any]:
         for b in blocks:
             if isinstance(b, dict) and b.get("type") == "tool_use":
                 name = b.get("name", "")
+                if _is_askuser_tool(name):
+                    new_blocks.append(b)
+                    continue
                 summary = _summarize_tool_input(name, b.get("input"))
                 nb = {**b, "input": {CCR_LAZY: True, CCR_SUMMARY: summary}}
                 new_blocks.append(nb)
@@ -183,9 +191,10 @@ def update_live_tools(sess: Any, evt: dict[str, Any]) -> None:
                 cur["completed"] = True
 
 
-def strip_live_event(payload: dict[str, Any]) -> dict[str, Any] | None:
+def strip_live_event(payload: dict[str, Any], sess: Any = None) -> dict[str, Any] | None:
     """实时 WS 广播路径上的瘦身。返回 None = 此事件不下发；否则返回（可能瘦身的）新 payload。
-    DB 不走这条路径，原始 payload 仍然全量入库，按需走 /tool/{id} 拉回。"""
+    DB 不走这条路径，原始 payload 仍然全量入库，按需走 /tool/{id} 拉回。
+    AskUserQuestion 类工具豁免：前端要完整 input 渲染交互卡。"""
     t = payload.get("type")
     if t == "assistant" or t == "user":
         return strip_payload_for_backlog(payload)
@@ -195,13 +204,21 @@ def strip_live_event(payload: dict[str, Any]) -> dict[str, Any] | None:
         if et == "content_block_start":
             cb = ev.get("content_block") or {}
             if cb.get("type") == "tool_use":
-                # 把 input 替换为占位；保留 id/name/type 让前端能起卡片
+                if _is_askuser_tool(cb.get("name", "")):
+                    return payload   # 完整下发：交互卡需要 questions/options
                 new_cb = {**cb, "input": {CCR_LAZY: True, CCR_SUMMARY: ""}}
                 return {**payload, "event": {**ev, "content_block": new_cb}}
         elif et == "content_block_delta":
             d = ev.get("delta") or {}
-            # 工具参数的分块 stream 全部不下发；最终 assistant 事件里给 summary 就够了
             if d.get("type") == "input_json_delta":
+                # 默认丢；如果对应 block 是 AskUserQuestion，保留让前端能边收边显示问题
+                if sess is not None:
+                    idx = ev.get("index")
+                    tid = sess.block_to_tool.get(idx) if hasattr(sess, "block_to_tool") else None
+                    if tid:
+                        tname = (sess.live_tools.get(tid) or {}).get("name", "")
+                        if _is_askuser_tool(tname):
+                            return payload
                 return None
     return payload
 

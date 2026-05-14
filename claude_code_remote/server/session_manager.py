@@ -41,6 +41,10 @@ def _classify(evt: dict[str, Any]) -> str | None:
             return "perm_req"
         if sub == "permission_resolved":
             return "perm_resolved"
+        if sub == "askuser_request":
+            return "askuser_req"
+        if sub == "askuser_resolved":
+            return "askuser_resolved"
     return None
 
 
@@ -298,6 +302,33 @@ class SessionManager:
                 except asyncio.QueueFull:
                     pass
 
+    def _is_askuser_autofail(self, sess: Session, evt: dict[str, Any]) -> bool:
+        """匹配 claude --print 模式下 AskUserQuestion 的 CLI 兜底 fail 输出。
+        条件：user.tool_result，tool_use_id 是已知的 AskUserQuestion，is_error=true，
+              content == "Answer questions?"（CLI 硬编码字串）。"""
+        if evt.get("type") != "user":
+            return False
+        msg = evt.get("message") or {}
+        blocks = msg.get("content") or []
+        if not isinstance(blocks, list) or not blocks:
+            return False
+        # 这种自动 fail 通常单独一条 block；保险起见只要其中一条命中就吞整条
+        for b in blocks:
+            if not isinstance(b, dict) or b.get("type") != "tool_result":
+                continue
+            if not b.get("is_error"):
+                continue
+            content = b.get("content")
+            if not isinstance(content, str) or content != "Answer questions?":
+                continue
+            tid = b.get("tool_use_id")
+            if not tid:
+                continue
+            tool = sess.live_tools.get(tid) if hasattr(sess, "live_tools") else None
+            if tool and tool.get("name") == "AskUserQuestion":
+                return True
+        return False
+
     async def _deliver(self, sess: Session, evt: dict[str, Any]) -> None:
         from .tool_lazy import strip_live_event, update_live_tools
         # 先把 raw 事件灌进 live_tools，给 /tool/{id} 查最新累积状态用
@@ -305,6 +336,14 @@ class SessionManager:
             update_live_tools(sess, evt)
         except Exception:
             log.exception("update_live_tools failed for %s", sess.id)
+        # 拦截 AskUserQuestion 的"自动 fail"伪 tool_result：claude --print 模式下任意
+        # AskUserQuestion 调用结束后 CLI 会立刻 emit 一条 is_error=true content="Answer questions?"
+        # 我们的真答案要等用户点击才走 stdin 灌进去；如果不拦住这条伪结果，前端会先看到它
+        # 然后把卡片打成"已回答"。CLI 自己看到我们后续注入的真 tool_result 会用最后那个
+        # 继续推进，所以前端这边吞掉伪 fail 不会影响 claude 的对话流。
+        if self._is_askuser_autofail(sess, evt):
+            log.debug("dropped AskUserQuestion autofail tool_result for sess=%s", sess.id)
+            return
         env = sess.envelope(evt)
         kind = _classify(evt)
         if kind is not None:
@@ -329,7 +368,7 @@ class SessionManager:
         elif _t == "result":
             self._broadcast_turn_state(sess, include_tokens=True)
         # 广播前瘦身：工具调用的 input / result 用占位代替，input_json_delta 整段丢
-        stripped = strip_live_event(evt)
+        stripped = strip_live_event(evt, sess)
         if stripped is not None:
             broadcast_env = env if stripped is evt else {**env, "event": stripped}
             for q in list(sess.subscribers):
@@ -513,6 +552,18 @@ class SessionManager:
                         "tool_name": req.tool_name,
                         "tool_input": req.tool_input,
                         "tool_use_id": req.tool_use_id,
+                        "replay": True,
+                    },
+                }
+            # AskUserQuestion 的挂起请求也重发，让前端在重连时能继续看到交互卡
+            for aq in gateway.get_pending_askuser(sess.id):
+                yield {
+                    "seq": -1, "ts": time.time(),
+                    "event": {
+                        "type": "_ccr", "subtype": "askuser_request",
+                        "req_id": aq.req_id,
+                        "tool_use_id": aq.tool_use_id,
+                        "tool_input": aq.tool_input,
                         "replay": True,
                     },
                 }

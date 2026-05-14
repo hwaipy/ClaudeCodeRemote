@@ -21,6 +21,21 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+async def _handle_askuser_answer(sess, msg: dict) -> None:
+    """前端把 AskUserQuestion 的回答收集完 → resolve gateway 里挂起的 hook 调用。
+    真正给 claude stdin 灬 tool_result 的逻辑在 api._handle_askuser_hook 里完成
+    （它在 return allow 之前先写 stdin，避免 CLI 的 auto-fail）。"""
+    tool_use_id = (msg.get("tool_use_id") or "").strip()
+    answers = msg.get("answers")
+    if not tool_use_id or not isinstance(answers, list):
+        log.warning("bad askuser_answer payload: %r", msg)
+        return
+    ok = await gateway.resolve_askuser_by_tool_id(tool_use_id, answers)
+    if not ok:
+        log.warning("askuser_answer: no pending hook req for tool_use_id=%s (stale?)",
+                    tool_use_id)
+
+
 async def _handle_permission_decision(sess_id: str, msg: dict) -> None:
     req_id = msg.get("req_id")
     decision = (msg.get("decision") or "").strip()
@@ -139,6 +154,8 @@ async def ws_session(ws: WebSocket, session_id: str) -> None:
                                           sess.id)
                 elif kind == "permission_decision":
                     await _handle_permission_decision(sess.id, msg)
+                elif kind == "askuser_answer":
+                    await _handle_askuser_answer(sess, msg)
                 elif kind == "ping":
                     await ws.send_json({"type": "pong", "ts": msg.get("ts")})
                 else:

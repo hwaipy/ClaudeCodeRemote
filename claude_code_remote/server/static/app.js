@@ -11,6 +11,7 @@ const state = {
   // 流式状态：
   msgById: new Map(),         // msg_id -> {bubble, text}
   toolById: new Map(),         // tool_use_id -> {card, partialInput, finalInput, resultEl}
+  askuserById: new Map(),      // tool_use_id -> {card, questions, answers, submitted}
   activeMsgId: null,           // 当前打开的 stream message id
   blocksByIdx: new Map(),      // stream message index -> {type, msgId|toolUseId}
   // 每个 session 的 DOM + 流式状态快照：切走时缓存，切回来直接复用，免 spinner 免重渲
@@ -220,6 +221,22 @@ $("modal-confirm").addEventListener("click", () => {
 });
 $("modal-browse").addEventListener("click", (e) => {
   if (e.target.id === "modal-browse") closeBrowse();
+});
+$("modal-newdir").addEventListener("click", async () => {
+  const parent = _browse.curPath;
+  if (!parent) return;
+  const name = (prompt(`Create new folder in:\n${parent}\n\nName:`) || "").trim();
+  if (!name) return;
+  try {
+    const r = await api("api/mkdir", {
+      method: "POST",
+      body: JSON.stringify({ parent, name }),
+    });
+    // 刷新当前目录，新文件夹会自动出现在列表里；同时把 curPath 跳进去更方便用户继续
+    await browseLoad(r.path);
+  } catch (e) {
+    alert("New folder failed: " + (e.message || e));
+  }
 });
 
 const STATE_BADGES = {
@@ -432,6 +449,7 @@ function saveCurrentSessionCache() {
     dom: frag,
     msgById:          state.msgById,
     toolById:         state.toolById,
+    askuserById:      state.askuserById,
     blocksByIdx:      state.blocksByIdx,
     firstSeq:         state.firstSeq,
     hasMoreHistory:   state.hasMoreHistory,
@@ -460,6 +478,7 @@ function restoreSessionCache(cached) {
   log.appendChild(cached.dom);   // fragment 内子节点转移回 chat-log，fragment 自身清空（下次保存再装）
   state.msgById         = cached.msgById;
   state.toolById        = cached.toolById;
+  state.askuserById     = cached.askuserById || new Map();
   state.blocksByIdx     = cached.blocksByIdx;
   state.activeMsgId     = null;    // 离开时若有未完成 message，msgId 失效；下条 message_start 会重置
   state.firstSeq        = cached.firstSeq;
@@ -541,6 +560,7 @@ async function enterChat(id, name, cwd, sessionState) {
   state.cacheHit = false;
   state.msgById.clear();
   state.toolById.clear();
+  state.askuserById.clear();
   state.activeMsgId = null;
   state.blocksByIdx.clear();
   state.firstSeq = null;
@@ -1681,6 +1701,182 @@ function attachToolResult(toolUseId, content, isError) {
   showThinkingPlaceholder(state.currentMsgModel);
 }
 
+// 调试小钩子：调试模式下把任意 tag/data 打到服务端日志，方便手机端不能看 console 时排查
+function dbgLog(tag, data) {
+  try { console.log("[" + tag + "]", data); } catch (_) {}
+  if (!state.token) return;
+  fetch(apiPath("/api/dbg/log"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + state.token },
+    body: JSON.stringify({ tag, data }),
+  }).catch(() => {});
+}
+
+// ---------- AskUserQuestion 交互卡 ----------
+// 后端 PreToolUse hook 命中 AskUserQuestion 时挂起整条 hook 调用，把 `_ccr askuser_request`
+// 推给前端。这里据此渲染交互卡。用户提交答案 → WS `askuser_answer` → 后端 resolve hook，
+// 先给 claude stdin 写 tool_result 再 return allow。
+// 局限（!）：claude CLI 在 `--print` 模式下会在 emit tool_use 之后**自己内部**合成一条
+// is_error=true content="Answer questions?" 的 tool_result 写进它发往 Anthropic API 的
+// 消息流。我们注入的真答案在它消息流里是第二条，模型大概率用第一条，结果就是 agent 看到
+// "Answer questions?"。CCR 后端层面已经能拿到真答案（DB 里有），但 agent 用不上。
+// 要真可用还需要 MCP 自定义工具或代理 Anthropic API（见 todo）。
+function ensureAskUserCard(toolUseId) {
+  let entry = state.askuserById.get(toolUseId);
+  if (entry) return entry;
+  const root = chatRoot();
+  state.currentToolGroup = null;   // 跟普通工具卡一样：打断 group 序列
+  const card = document.createElement("div");
+  card.className = "askuser-card pending";
+  card.dataset.toolUseId = toolUseId;
+  card.innerHTML = `
+    <div class="askuser-head">
+      <span class="askuser-icon">❔</span>
+      <span class="askuser-title">Question</span>
+      <span class="askuser-status pending">Waiting for input…</span>
+    </div>
+    <div class="askuser-body"></div>
+    <div class="askuser-foot" hidden>
+      <button class="askuser-submit btn btn-primary" type="button">Submit</button>
+    </div>`;
+  root.appendChild(card);
+  chatScrollBottom();
+  entry = {
+    toolUseId,
+    card,
+    bodyEl: card.querySelector(".askuser-body"),
+    footEl: card.querySelector(".askuser-foot"),
+    submitBtn: card.querySelector(".askuser-submit"),
+    statusEl: card.querySelector(".askuser-status"),
+    questions: null,      // 完整 input 到了再填
+    answers: null,        // 每题一个：单选 string | 多选 string[]
+    submitted: false,
+  };
+  state.askuserById.set(toolUseId, entry);
+  entry.submitBtn.addEventListener("click", () => submitAskUser(toolUseId));
+  return entry;
+}
+
+function populateAskUserCard(entry, input) {
+  if (!entry || !input || !Array.isArray(input.questions)) return;
+  if (entry.questions) return;   // 已渲染过，不重复
+  entry.questions = input.questions;
+  entry.answers = entry.questions.map(q => q.multiSelect ? [] : null);
+  entry.statusEl.textContent = "";
+  entry.statusEl.classList.remove("pending");
+  entry.bodyEl.innerHTML = "";
+  entry.questions.forEach((q, qi) => {
+    const block = document.createElement("div");
+    block.className = "askuser-question";
+    const qText = document.createElement("div");
+    qText.className = "askuser-q";
+    qText.textContent = q.question || q.header || `Question ${qi + 1}`;
+    block.appendChild(qText);
+    if (q.header && q.header !== qText.textContent) {
+      const sub = document.createElement("div");
+      sub.className = "askuser-sub";
+      sub.textContent = q.header;
+      block.appendChild(sub);
+    }
+    const opts = document.createElement("div");
+    opts.className = "askuser-options";
+    (q.options || []).forEach(o => {
+      // 用 div + role="button"：避开 iOS Safari 下 <button> + display:flex 的渲染/点击异常
+      const btn = document.createElement("div");
+      btn.className = "askuser-option";
+      btn.setAttribute("role", "button");
+      btn.setAttribute("tabindex", "0");
+      btn.dataset.label = o.label;
+      btn.dataset.qi = String(qi);
+      btn.innerHTML = `
+        <span class="askuser-option-label">${escHTML(o.label || "")}</span>
+        ${o.description ? `<span class="askuser-option-desc">${escHTML(o.description)}</span>` : ""}`;
+      const trigger = (e) => {
+        e.preventDefault();
+        toggleAskUserOption(entry, qi, o.label, btn);
+      };
+      btn.addEventListener("click", trigger);
+      btn.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") trigger(e);
+      });
+      opts.appendChild(btn);
+    });
+    block.appendChild(opts);
+    entry.bodyEl.appendChild(block);
+  });
+  entry.footEl.hidden = false;
+  refreshAskUserSubmit(entry);
+  chatScrollBottom();
+}
+
+function toggleAskUserOption(entry, qi, label, btn) {
+  if (entry.submitted) return;
+  const q = entry.questions[qi];
+  if (q.multiSelect) {
+    const arr = entry.answers[qi];
+    const i = arr.indexOf(label);
+    if (i >= 0) { arr.splice(i, 1); btn.classList.remove("selected"); }
+    else        { arr.push(label);  btn.classList.add("selected"); }
+  } else {
+    entry.answers[qi] = label;
+    // 同一问的其它选项取消高亮
+    entry.bodyEl.querySelectorAll(`.askuser-option[data-qi="${qi}"]`).forEach(b => {
+      b.classList.toggle("selected", b === btn);
+    });
+  }
+  refreshAskUserSubmit(entry);
+}
+
+function refreshAskUserSubmit(entry) {
+  // 必填校验：每题至少要选一个；多选可空 → 也允许（按 Claude Code 行为，空数组也算合法）
+  const allAnswered = entry.questions.every((q, i) => {
+    const a = entry.answers[i];
+    if (q.multiSelect) return true;          // 多选允许 0 项
+    return a !== null && a !== undefined;
+  });
+  entry.submitBtn.disabled = !allAnswered;
+}
+
+function submitAskUser(toolUseId) {
+  const entry = state.askuserById.get(toolUseId);
+  if (!entry || entry.submitted) return;
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+  // 跟 Claude Code CLI 一致的 tool_result 形态：每题一项 {"option": "<label>"}（多选时 option 是数组）
+  const answers = entry.questions.map((q, i) => ({
+    option: entry.answers[i],
+  }));
+  state.ws.send(JSON.stringify({
+    type: "askuser_answer",
+    tool_use_id: toolUseId,
+    answers,
+  }));
+  entry.submitted = true;
+  entry.submitBtn.disabled = true;
+  entry.submitBtn.textContent = "Submitted";
+  entry.card.classList.add("submitted");
+  entry.card.classList.remove("pending");
+  entry.statusEl.textContent = "Answered";
+  // 选中的按钮锁住、其它的灰
+  entry.bodyEl.querySelectorAll(".askuser-option").forEach(b => b.classList.add("disabled"));
+}
+
+function markAskUserAnswered(toolUseId) {
+  // backlog/reload 路径：发现 tool_result 已有，把卡片标"已回答"
+  const entry = state.askuserById.get(toolUseId);
+  if (!entry || entry.submitted) return;
+  entry.submitted = true;
+  if (entry.submitBtn) {
+    entry.submitBtn.disabled = true;
+    entry.submitBtn.textContent = "Answered";
+  }
+  if (entry.bodyEl) {
+    entry.bodyEl.querySelectorAll(".askuser-option").forEach(b => b.classList.add("disabled"));
+  }
+  entry.card.classList.add("submitted");
+  entry.card.classList.remove("pending");
+  if (entry.statusEl) entry.statusEl.textContent = "Answered";
+}
+
 // ---------- 权限请求卡片 ----------
 function showPermissionRequest(evt) {
   const root = chatRoot();
@@ -1841,6 +2037,18 @@ function handleEvent(evt, ts) {
     if (evt.subtype === "permission_resolved") return markPermissionResolved(evt);
     if (evt.subtype === "permission_mode") return applyPermissionMode(evt.mode);
     if (evt.subtype === "turn_state") return applyTurnState(evt);
+    if (evt.subtype === "askuser_request") {
+      // hook-hold 流程：服务端在 PreToolUse hook 阶段就把这个事件推过来；
+      // 它带完整 input（questions/options），我们立刻渲染卡片，等用户提交
+      const ent = ensureAskUserCard(evt.tool_use_id);
+      populateAskUserCard(ent, evt.tool_input || {});
+      return;
+    }
+    if (evt.subtype === "askuser_resolved") {
+      // 超时/取消：服务端标记此 askuser 不再可答
+      if (evt.tool_use_id && evt.cancelled) markAskUserAnswered(evt.tool_use_id);
+      return;
+    }
     return;
   }
   if (t === "_internal") {
@@ -1924,6 +2132,13 @@ function handleStreamEvent(ev) {
       state.msgById.set(state.activeMsgId, { bubble, text: "" });
       state.blocksByIdx.set(idx, { type: "text", msgId: state.activeMsgId });
     } else if (cb.type === "tool_use") {
+      if (cb.name === "AskUserQuestion") {
+        // 交互卡：起骨架，input 完整后由 assistant 事件填问题/选项
+        ensureAskUserCard(cb.id);
+        state.blocksByIdx.set(idx, { type: "askuser", toolUseId: cb.id });
+        hideThinkingPlaceholder();
+        return;
+      }
       const entry = ensureToolCard(cb.id, cb.name);
       const inp = cb.input || {};
       if (inp.__ccr_lazy === true) {
@@ -1998,6 +2213,12 @@ function handleAssistantMessage(msg) {
         if (id) state.msgById.set(id, { bubble, text: b.text });
       }
     } else if (b.type === "tool_use") {
+      if (b.name === "AskUserQuestion") {
+        // 最终 input 到位，渲染问题/选项；live 路径上 ensureAskUserCard 已经在 content_block_start 时建好
+        const ent = ensureAskUserCard(b.id);
+        populateAskUserCard(ent, b.input || {});
+        continue;
+      }
       const entry = ensureToolCard(b.id, b.name);
       const inp = b.input || {};
       if (inp.__ccr_lazy === true) {
@@ -2017,6 +2238,11 @@ function handleUserMessage(msg) {
   const cs = msg.content || [];
   for (const c of cs) {
     if (c.type === "tool_result" && c.tool_use_id) {
+      // AskUserQuestion 的回答（包括本会话之前的 backlog 里的）→ 把交互卡标已回答
+      if (state.askuserById.has(c.tool_use_id)) {
+        markAskUserAnswered(c.tool_use_id);
+        continue;
+      }
       attachToolResult(c.tool_use_id, c.content, c.is_error);
     }
   }
