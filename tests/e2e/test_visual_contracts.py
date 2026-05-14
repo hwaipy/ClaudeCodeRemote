@@ -148,6 +148,21 @@ def test_search_bar_is_a_single_pill(logged_in_page):
     )
 
 
+def test_search_bar_animates_open(logged_in_page):
+    """Spec §2.1: search expansion is animated, not a snap."""
+    bar = logged_in_page.locator("#search-bar")
+    transition = computed(logged_in_page, bar, "transition")
+    # Has some animated property (width / opacity / transform / padding)
+    assert any(p in transition for p in ("width", "transform", "opacity", "padding")), (
+        f"#search-bar should declare a transition: {transition!r}"
+    )
+    # Non-zero duration somewhere in the declaration
+    m = re.search(r"([0-9.]+)\s*(ms|s)\b", transition)
+    assert m, f"no animation duration in {transition!r}"
+    secs = float(m.group(1)) / (1000.0 if m.group(2) == "ms" else 1.0)
+    assert 0.1 <= secs <= 1.0, f"animation duration {secs}s out of expected range"
+
+
 def test_search_bar_has_no_internal_gaps_breaking_pill(logged_in_page):
     """Children sit inside the pill, not floating with margins that would
     visually separate them."""

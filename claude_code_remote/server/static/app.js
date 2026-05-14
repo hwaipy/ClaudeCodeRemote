@@ -567,11 +567,10 @@ $("spawn-go").addEventListener("click", async () => {
 
 // ---------- Session list search ----------
 (function setupSearch() {
-  const btn      = $("search-btn");
-  const bar      = $("search-bar");
-  const input    = $("search-input");
-  const clear    = $("search-clear");
-  const homeTop  = document.querySelector(".home-top");
+  const btn   = $("search-btn");
+  const input = $("search-input");
+  const clear = $("search-clear");
+  const wrap  = document.querySelector(".home-top-wrap");
 
   function applyFilter() {
     const q = (input.value || "").trim().toLowerCase();
@@ -582,15 +581,14 @@ $("spawn-go").addEventListener("click", async () => {
     });
   }
   function open() {
-    if (homeTop) homeTop.setAttribute("hidden", "");
-    bar.removeAttribute("hidden");
-    input.focus();
-    input.select();
+    if (!wrap) return;
+    wrap.classList.add("search-open");
+    // Focus after the bar finishes expanding — otherwise iOS jumps the layout
+    setTimeout(() => { input.focus(); input.select(); }, 250);
   }
   function close() {
     input.value = "";
-    bar.setAttribute("hidden", "");
-    if (homeTop) homeTop.removeAttribute("hidden");
+    if (wrap) wrap.classList.remove("search-open");
     applyFilter();
   }
 

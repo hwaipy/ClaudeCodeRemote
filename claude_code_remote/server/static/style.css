@@ -372,11 +372,15 @@ input:focus, textarea:focus { border-color: var(--accent); }
 }
 .err.show { display: block; }
 
+/* home-top wrap layers .home-top + .search-bar so the search bar can
+   slide out from the right with a transition. */
+.home-top-wrap { position: relative; height: 36px; margin-bottom: 12px; }
 .home-top {
-  display: flex; justify-content: space-between; align-items: center;
-  gap: 8px; margin-bottom: 12px;
+  position: absolute; inset: 0;
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  transition: opacity .15s ease;
 }
-.home-top[hidden] { display: none; }
+.home-top-wrap.search-open .home-top { opacity: 0; pointer-events: none; }
 .home-top .btn { padding: 8px 18px; font-size: 14px; }
 
 /* Section labels for "Active" / "Inactive" — small, dim, uppercase */
@@ -425,18 +429,34 @@ input:focus, textarea:focus { border-color: var(--accent); }
   display: inline-flex; align-items: center; justify-content: center;
 }
 .search-btn:hover { background: var(--bg-elev); color: var(--text); }
-/* Search bar: single rounded pill that visually replaces home-top.
-   The bar IS the container — icon, input and close button live inside
-   borderless. Matches the height of #new-btn so the swap is seamless. */
+/* Search bar: single rounded pill that grows from the right edge of the
+   home-top row with a transition. Collapsed = width 0 / no border /
+   children invisible. Expanded (via .home-top-wrap.search-open) = full
+   width pill. The bar IS the container — children are borderless. */
 .search-bar {
+  position: absolute; top: 0; right: 0; height: 36px;
+  width: 0;
   display: flex; align-items: center; gap: 6px;
-  margin-bottom: 12px;
-  height: 36px; padding: 0 6px 0 12px;
-  border: 1px solid var(--border-soft); border-radius: 999px;
+  padding: 0;
+  border: 0 solid var(--border-soft); border-radius: 999px;
+  background: transparent;
+  overflow: hidden;
+  transition: width .25s cubic-bezier(.4,0,.2,1),
+              padding .25s ease,
+              border-width .15s ease,
+              background-color .15s ease;
+}
+.home-top-wrap.search-open .search-bar {
+  width: 100%;
+  padding: 0 6px 0 12px;
+  border-width: 1px;
   background: var(--bg-input);
 }
-.search-bar[hidden] { display: none; }
 .search-bar:focus-within { border-color: var(--accent); }
+/* Children stay invisible during the collapse-to-pill animation so they
+   don't squeeze; revealed once the bar has room. */
+.search-bar > * { opacity: 0; transition: opacity .15s ease; }
+.home-top-wrap.search-open .search-bar > * { opacity: 1; transition-delay: .12s; }
 .search-bar-icon { color: var(--text-dim); display: inline-flex; }
 .search-bar input {
   flex: 1; min-width: 0;

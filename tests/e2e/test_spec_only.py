@@ -290,26 +290,35 @@ def test_home_top_layout_new_left_search_right(logged_in_page):
 
 
 def test_search_open_hides_home_top_covering_new_btn(logged_in_page):
-    """Clicking search → .home-top hidden, #search-bar visible covering it."""
+    """Clicking search → .home-top fades (opacity 0) under the expanded bar;
+    #search-bar shows + .home-top-wrap gains .search-open."""
     hp = HomePage(logged_in_page)
     hp.expect_visible()
     home_top = logged_in_page.locator(".home-top")
     expect(home_top).to_be_visible()
     logged_in_page.locator("#search-btn").click()
-    expect(logged_in_page.locator("#search-bar")).to_be_visible()
-    expect(home_top).to_be_hidden()
-    expect(logged_in_page.locator("#new-btn")).to_be_hidden()
+
+    expect(logged_in_page.locator(".home-top-wrap")).to_have_class(
+        __import__("re").compile(r"\bsearch-open\b"), timeout=2000
+    )
+    expect(logged_in_page.locator("#search-input")).to_be_visible()
+    # .home-top is faded (opacity 0), pointer-events: none — visually covered
+    expect(home_top).to_have_css("opacity", "0")
+    expect(home_top).to_have_css("pointer-events", "none")
 
 
 def test_search_close_restores_home_top(logged_in_page):
     hp = HomePage(logged_in_page)
     hp.expect_visible()
     logged_in_page.locator("#search-btn").click()
-    expect(logged_in_page.locator("#search-bar")).to_be_visible()
+    expect(logged_in_page.locator(".home-top-wrap")).to_have_class(
+        __import__("re").compile(r"\bsearch-open\b"), timeout=2000
+    )
     logged_in_page.locator("#search-clear").click()
-    expect(logged_in_page.locator(".home-top")).to_be_visible()
-    expect(logged_in_page.locator("#new-btn")).to_be_visible()
-    expect(logged_in_page.locator("#search-bar")).to_be_hidden()
+    expect(logged_in_page.locator(".home-top-wrap")).not_to_have_class(
+        __import__("re").compile(r"\bsearch-open\b"), timeout=2000
+    )
+    expect(logged_in_page.locator(".home-top")).to_have_css("opacity", "1")
 
 
 def test_inactive_chevron_is_left_of_label(logged_in_page):
