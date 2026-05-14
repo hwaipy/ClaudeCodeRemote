@@ -418,11 +418,11 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .sort-btn[data-mode="created"] .sort-icon-created { display: block; }
 .sort-btn[data-mode="active"]  .sort-icon-active  { display: block; }
 .search-btn {
-  background: transparent; border: 0; cursor: pointer;
+  background: transparent; border: 1px solid var(--border-soft); cursor: pointer;
   color: var(--text-dim);
-  padding: 6px; border-radius: 8px;
+  width: 34px; height: 34px; padding: 0;
+  border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
-  margin-bottom: 4px;   /* line up visually with h1 baseline */
 }
 .search-btn:hover { background: var(--bg-elev); color: var(--text); }
 /* Search bar: single rounded pill that visually replaces home-top.
