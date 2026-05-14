@@ -243,7 +243,7 @@ async def set_permission_mode(session_id: str, req: PermissionModeRequest) -> di
     except ValueError as e:
         raise HTTPException(400, str(e))
     log.info("permission mode set: sess=%s mode=%s", session_id, req.mode)
-    # 切到 allow_all → 把已经在等待的请求一律放行
+    # 切到 allow_all / accept_edits / plan → 把已经在等待的请求按新规则处理
     resolved = 0
     if req.mode == "allow_all":
         for preq in gateway.pending_for_session(session_id):
@@ -259,6 +259,38 @@ async def set_permission_mode(session_id: str, req: PermissionModeRequest) -> di
                     "req_id": preq.req_id,
                     "decision": "allow",
                     "message": "allow_all mode",
+                })
+    elif req.mode == "accept_edits":
+        from .permission_gateway import _EDIT_TOOLS
+        for preq in gateway.pending_for_session(session_id):
+            if preq.tool_name not in _EDIT_TOOLS:
+                continue
+            ok = await gateway.resolve(preq.req_id,
+                                       {"behavior": "allow",
+                                        "updatedInput": preq.tool_input,
+                                        "message": "accept_edits mode"})
+            if ok:
+                resolved += 1
+                await manager.inject_event(sess, {
+                    "type": "_ccr",
+                    "subtype": "permission_resolved",
+                    "req_id": preq.req_id,
+                    "decision": "allow",
+                    "message": "accept_edits mode",
+                })
+    elif req.mode == "plan":
+        for preq in gateway.pending_for_session(session_id):
+            ok = await gateway.resolve(preq.req_id,
+                                       {"behavior": "deny",
+                                        "message": "plan mode"})
+            if ok:
+                resolved += 1
+                await manager.inject_event(sess, {
+                    "type": "_ccr",
+                    "subtype": "permission_resolved",
+                    "req_id": preq.req_id,
+                    "decision": "deny",
+                    "message": "plan mode",
                 })
     # 广播 mode 变更到 WS（其它窗口同步 UI）
     await manager.inject_event(sess, {
@@ -431,6 +463,10 @@ async def permission_wait(req: PermissionWaitRequest) -> dict[str, Any]:
     # 等用户回答后再给 stdin 灬 tool_result，并 return allow。这样 CLI 不会触发 auto-fail。
     if tool_name == "AskUserQuestion":
         return await _handle_askuser_hook(sess, tool_use_id, tool_input)
+
+    # plan mode: deny everything before it ever reaches the user
+    if gateway.is_plan_mode(sid):
+        return {"behavior": "deny", "message": "plan mode (no tool execution)"}
 
     if gateway.is_preapproved(sid, tool_name, tool_input):
         log.info("permission preapproved: sess=%s tool=%s", sid, tool_name)

@@ -96,15 +96,13 @@ def test_new_session_modal_form_values_persist(logged_in_page):
 
 # ===== Four permission modes (§12) =====
 
-@pytest.mark.spec_only
-@pytest.mark.xfail(reason="spec: 4 modes (manual/accept_edits/plan/allow_all)")
 def test_perm_menu_has_four_modes(logged_in_page, spawned_session):
     sid = spawned_session(name="perm-mode-test")
     hp = HomePage(logged_in_page)
     hp.expect_visible()
     hp.card_by_id(sid).click()
 
-    logged_in_page.locator("#chat-perm").click()
+    logged_in_page.locator("#chat-perm").dispatch_event("click")
     items = logged_in_page.locator("#perm-menu .perm-menu-item")
     expect(items).to_have_count(4)
     modes = items.evaluate_all("els => els.map(e => e.dataset.mode)")

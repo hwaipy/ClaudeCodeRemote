@@ -57,7 +57,8 @@ class AskUserRequest:
     future: asyncio.Future = field(default_factory=lambda: asyncio.get_event_loop().create_future())
 
 
-VALID_MODES = ("manual", "allow_all")
+VALID_MODES = ("manual", "accept_edits", "plan", "allow_all")
+_EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 
 
 class PermissionGateway:
@@ -95,8 +96,12 @@ class PermissionGateway:
         # AskUserQuestion 不走 preapproved—它由独立的 askuser 挂起流程处理（见 open_askuser）
         if tool_name == "AskUserQuestion":
             return False
-        if self._modes.get(sid) == "allow_all":
+        mode = self._modes.get(sid, "manual")
+        if mode == "allow_all":
             return True
+        if mode == "accept_edits" and tool_name in _EDIT_TOOLS:
+            return True
+        # plan mode never preapproves; handled in api.permission_wait (auto-deny)
         st = self._allow.get(sid)
         if not st:
             return False
@@ -105,6 +110,9 @@ class PermissionGateway:
         if cmd_fingerprint(tool_name, tool_input) in st["commands"]:
             return True
         return False
+
+    def is_plan_mode(self, sid: str) -> bool:
+        return self._modes.get(sid) == "plan"
 
     # ---------- AskUserQuestion 挂起 ----------
     async def open_askuser(self, sess_id: str, tool_use_id: str,
