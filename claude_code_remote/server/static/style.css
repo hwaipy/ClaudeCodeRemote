@@ -372,20 +372,32 @@ input:focus, textarea:focus { border-color: var(--accent); }
 }
 .err.show { display: block; }
 
-.home-top { display: flex; justify-content: flex-end; margin-bottom: 8px; }
-#sessions-inactive { margin-top: 22px; }
-#sessions-inactive h2.inactive-toggle {
-  font-size: 18px; font-weight: 600;
-  display: flex; align-items: center; gap: 8px;
-  cursor: pointer; user-select: none;
-  margin: 0 0 4px 0;
+.home-top {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 8px; margin-bottom: 12px;
 }
-#sessions-inactive .count { font-size: 13px; color: var(--text-dim); font-weight: 400; }
-#sessions-inactive .chevron { font-size: 12px; color: var(--text-dim); margin-left: auto; transition: transform .15s ease; }
+.home-top[hidden] { display: none; }
+.home-top .btn { padding: 8px 18px; font-size: 14px; }
+
+/* Section labels for "Active" / "Inactive" — small, dim, uppercase */
+.section-label {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--text-dim);
+  margin: 8px 0 4px;
+  display: flex; align-items: center; gap: 6px;
+}
+.section-label .section-label-text { font-weight: 600; }
+.section-label .count { font-weight: 400; }
+
+#sessions-inactive { margin-top: 18px; }
+#sessions-inactive .inactive-toggle { cursor: pointer; user-select: none; }
+#sessions-inactive .chevron {
+  font-size: 9px; transition: transform .15s ease;
+  display: inline-block; line-height: 1;
+}
 #sessions-inactive.expanded .chevron { transform: rotate(90deg); }
 #sessions-inactive #session-list-inactive { display: none; margin-top: 6px; }
 #sessions-inactive.expanded #session-list-inactive { display: flex; }
-.home-top .btn { padding: 8px 18px; font-size: 14px; }
 .modal-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
 .modal-body label { color: var(--text-dim); font-size: 12px; margin-top: 8px; }
 .modal-foot {
@@ -393,16 +405,18 @@ input:focus, textarea:focus { border-color: var(--accent); }
   padding: 12px 16px; border-top: 1px solid var(--border-soft);
 }
 .modal-title { font-weight: 600; font-size: 16px; padding-left: 4px; }
-.sessions-header { display: flex; align-items: flex-end; gap: 8px; }
+.sessions-header { display: flex; align-items: center; gap: 8px; }
+.sessions-header .section-label { margin: 8px 0 4px; flex: 1; }
 .sort-btn {
-  background: transparent; border: 1px solid var(--border-soft); border-radius: 12px;
+  background: transparent; border: 1px solid var(--border-soft); border-radius: 999px;
+  width: 28px; height: 28px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
   color: var(--text-dim); cursor: pointer;
-  font-size: 11px; padding: 3px 8px;
-  display: inline-flex; align-items: center; gap: 4px;
-  margin-bottom: 6px;
 }
 .sort-btn:hover { color: var(--text); border-color: var(--border); }
-.sort-btn .sort-caret { font-size: 10px; opacity: .7; }
+.sort-btn svg { display: none; }
+.sort-btn[data-mode="created"] .sort-icon-created { display: block; }
+.sort-btn[data-mode="active"]  .sort-icon-active  { display: block; }
 .search-btn {
   background: transparent; border: 0; cursor: pointer;
   color: var(--text-dim);
@@ -411,8 +425,11 @@ input:focus, textarea:focus { border-color: var(--accent); }
   margin-bottom: 4px;   /* line up visually with h1 baseline */
 }
 .search-btn:hover { background: var(--bg-elev); color: var(--text); }
-.search-bar { display: flex; gap: 6px; margin-top: 10px; }
+/* Search bar: when expanded, takes the home-top slot so it visually covers
+   the New session button. */
+.search-bar { display: flex; gap: 6px; align-items: center; margin-bottom: 12px; }
 .search-bar[hidden] { display: none; }
+.search-bar-icon { color: var(--text-dim); display: inline-flex; padding: 0 4px; }
 .search-bar input {
   flex: 1; padding: 8px 10px; border-radius: 8px;
   border: 1px solid var(--border-soft); background: var(--bg-input);

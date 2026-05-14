@@ -287,8 +287,10 @@ function setSortMode(mode) {
   const btn = $("sessions-sort");
   if (btn) {
     btn.dataset.mode = mode;
-    const label = btn.querySelector(".sort-label");
-    if (label) label.textContent = "sort: " + mode;
+    // Tooltip explains current mode + what next click does
+    btn.title = mode === "created"
+      ? "Sorted by creation date — click for last-active"
+      : "Sorted by last-active — click for creation date";
   }
 }
 function renderSessionList() {
@@ -383,7 +385,7 @@ function renderOneCard(s, container, isInactiveSection) {
 (function setupInactiveToggle() {
   const box = $("sessions-inactive");
   if (!box) return;
-  const header = box.querySelector("h2.inactive-toggle");
+  const header = box.querySelector(".inactive-toggle");
   if (!header) return;
   header.addEventListener("click", () => {
     box.classList.toggle("expanded");
@@ -565,10 +567,11 @@ $("spawn-go").addEventListener("click", async () => {
 
 // ---------- Session list search ----------
 (function setupSearch() {
-  const btn   = $("search-btn");
-  const bar   = $("search-bar");
-  const input = $("search-input");
-  const clear = $("search-clear");
+  const btn      = $("search-btn");
+  const bar      = $("search-bar");
+  const input    = $("search-input");
+  const clear    = $("search-clear");
+  const homeTop  = document.querySelector(".home-top");
 
   function applyFilter() {
     const q = (input.value || "").trim().toLowerCase();
@@ -579,6 +582,7 @@ $("spawn-go").addEventListener("click", async () => {
     });
   }
   function open() {
+    if (homeTop) homeTop.setAttribute("hidden", "");
     bar.removeAttribute("hidden");
     input.focus();
     input.select();
@@ -586,6 +590,7 @@ $("spawn-go").addEventListener("click", async () => {
   function close() {
     input.value = "";
     bar.setAttribute("hidden", "");
+    if (homeTop) homeTop.removeAttribute("hidden");
     applyFilter();
   }
 

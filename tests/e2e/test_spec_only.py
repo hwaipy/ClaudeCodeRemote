@@ -248,6 +248,94 @@ def test_sort_toggle_cycles_created_active(logged_in_page):
     expect(btn).to_have_attribute("data-mode", "created")
 
 
+def test_sort_button_is_icon_only_no_text(logged_in_page):
+    """Sort button contains SVG icons, no visible text label."""
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    btn = logged_in_page.locator("#sessions-sort")
+    expect(btn).to_be_visible()
+    # Has at least one SVG inside
+    expect(btn.locator("svg")).to_have_count(2)   # created + active, one shown
+    # No "sort:" text content
+    label = btn.inner_text().strip()
+    assert "sort" not in label.lower(), f"sort button should be icon-only, got {label!r}"
+
+
+def test_sort_icon_switches_with_mode(logged_in_page):
+    """Calendar (created) ↔ clock (active) — the right SVG is visible per mode."""
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    btn = logged_in_page.locator("#sessions-sort")
+    expect(btn.locator(".sort-icon-created")).to_be_visible()
+    expect(btn.locator(".sort-icon-active")).to_be_hidden()
+    btn.click()
+    expect(btn.locator(".sort-icon-active")).to_be_visible()
+    expect(btn.locator(".sort-icon-created")).to_be_hidden()
+
+
+def test_home_top_layout_new_left_search_right(logged_in_page):
+    """home-top: new-btn on left, search-btn on right, similar y."""
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    new_box = logged_in_page.locator("#new-btn").bounding_box()
+    search_box = logged_in_page.locator("#search-btn").bounding_box()
+    assert new_box and search_box
+    assert new_box["x"] < search_box["x"], "new-btn should be left of search-btn"
+    # Same row (centers within 10px vertically)
+    new_cy = new_box["y"] + new_box["height"] / 2
+    search_cy = search_box["y"] + search_box["height"] / 2
+    assert abs(new_cy - search_cy) <= 10, (
+        f"new-btn and search-btn should be at same height: {new_cy} vs {search_cy}"
+    )
+
+
+def test_search_open_hides_home_top_covering_new_btn(logged_in_page):
+    """Clicking search → .home-top hidden, #search-bar visible covering it."""
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    home_top = logged_in_page.locator(".home-top")
+    expect(home_top).to_be_visible()
+    logged_in_page.locator("#search-btn").click()
+    expect(logged_in_page.locator("#search-bar")).to_be_visible()
+    expect(home_top).to_be_hidden()
+    expect(logged_in_page.locator("#new-btn")).to_be_hidden()
+
+
+def test_search_close_restores_home_top(logged_in_page):
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    logged_in_page.locator("#search-btn").click()
+    expect(logged_in_page.locator("#search-bar")).to_be_visible()
+    logged_in_page.locator("#search-clear").click()
+    expect(logged_in_page.locator(".home-top")).to_be_visible()
+    expect(logged_in_page.locator("#new-btn")).to_be_visible()
+    expect(logged_in_page.locator("#search-bar")).to_be_hidden()
+
+
+def test_inactive_chevron_is_left_of_label(logged_in_page):
+    """Chevron ▶ sits at the start of the Inactive section header."""
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    chev = logged_in_page.locator("#sessions-inactive .chevron")
+    label = logged_in_page.locator("#sessions-inactive .section-label-text")
+    chev_box = chev.bounding_box()
+    label_box = label.bounding_box()
+    assert chev_box and label_box
+    assert chev_box["x"] < label_box["x"], "chevron should be left of label"
+
+
+def test_section_labels_are_small_and_dim(logged_in_page):
+    """Active / Inactive labels are small (≤14px) and dim (not body text color)."""
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    for sel in ("#sessions-active .section-label-text",
+                "#sessions-inactive .section-label-text"):
+        size = logged_in_page.locator(sel).evaluate(
+            "el => parseFloat(getComputedStyle(el).fontSize)"
+        )
+        assert size <= 14, f"{sel} font-size {size} > 14"
+
+
 # ===== Ctx 不警示 (§11) =====
 
 @pytest.mark.spec_only
