@@ -2548,7 +2548,7 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("online", kickReconnect);
 window.addEventListener("pageshow", () => kickReconnect());   // 从 bfcache 唤回也算
 // 主题切换按钮
-document.querySelectorAll("#theme-toggle, #theme-toggle-login").forEach(b => {
+document.querySelectorAll("#theme-toggle").forEach(b => {
   b.addEventListener("click", toggleTheme);
 });
 // PWA service worker（只在 secure context 下有效；http 公网会静默失败，不影响功能）

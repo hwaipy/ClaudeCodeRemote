@@ -218,7 +218,6 @@ def test_ctx_status_never_red():
 
 # ===== Theme toggle moved out of login (§14) =====
 
-@pytest.mark.xfail(reason="spec: #theme-toggle-login removed from login view")
 def test_login_view_has_no_theme_toggle(fresh_page):
     expect(fresh_page.locator("#view-login")).to_be_visible()
     expect(fresh_page.locator("#theme-toggle-login")).to_have_count(0)
