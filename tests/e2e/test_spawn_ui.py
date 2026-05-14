@@ -30,16 +30,17 @@ def cleanup_test_sessions(server_env):
 
 
 def test_empty_cwd_shows_error(logged_in_page):
-    """cwd input defaults to '~/codes' on first paint, so the test has to
-    explicitly clear it before triggering submit."""
     hp = HomePage(logged_in_page)
     hp.expect_visible()
+    hp.open_new_modal()
     hp.spawn_cwd.fill("")
     hp.spawn_name.fill("would-fail")
     hp.submit_spawn()
     expect(hp.spawn_err).to_be_visible()
     expect(hp.spawn_err).to_contain_text("Working directory required")
+    # still on home, modal still open
     expect(logged_in_page.locator("#view-home")).to_have_class(ACTIVE_CLASS)
+    expect(logged_in_page.locator("#modal-new-session")).to_be_visible()
 
 
 def _seed_recents(page, paths):
@@ -53,6 +54,7 @@ def test_chip_click_fills_cwd(logged_in_page):
     _seed_recents(logged_in_page, ["~/codes-recent", "~/other-recent"])
     hp = HomePage(logged_in_page)
     hp.expect_visible()
+    hp.open_new_modal()
     chip = logged_in_page.locator(
         "#cwd-presets .chip[data-path='~/codes-recent']"
     )
@@ -65,6 +67,7 @@ def test_chip_marked_active_when_cwd_matches(logged_in_page):
     _seed_recents(logged_in_page, ["~/match-me"])
     hp = HomePage(logged_in_page)
     hp.expect_visible()
+    hp.open_new_modal()
     hp.spawn_cwd.fill("~/match-me")
     expect(logged_in_page.locator(
         "#cwd-presets .chip.active[data-path='~/match-me']"

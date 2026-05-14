@@ -17,6 +17,7 @@ def seeded_dir(tmp_path):
 
 
 def _open_modal_at(page, hp, path: str) -> DirectoryModal:
+    hp.open_new_modal()
     hp.spawn_cwd.fill(path)
     hp.browse_btn.click()
     dm = DirectoryModal(page)

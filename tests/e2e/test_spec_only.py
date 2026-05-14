@@ -1,11 +1,12 @@
-"""Spec-only tests — encode behaviors that are in SPEC.html but not yet in code.
+"""Spec tests — assertions for behaviors described in SPEC.html.
 
-Every test here is xfail. As the implementation catches up, remove the xfail
-mark and the test starts gating the feature.
+Tests still marked @pytest.mark.spec_only + @pytest.mark.xfail correspond
+to spec items not yet implemented. As code catches up, drop both marks.
 
-Run only spec backlog:    pytest -m spec_only
-Run everything else:      pytest -m 'not spec_only'
-Default run:              pytest    (these show as xfail/xpassed, suite stays green)
+Run only the unfinished backlog:  pytest -m spec_only --run-spec
+Skip xfail-only spec tests:       pytest -m 'not spec_only'
+Default `pytest`:                  runs all (xfail items still skipped via the
+                                   --run-spec hook in conftest).
 """
 from __future__ import annotations
 
@@ -14,11 +15,10 @@ from playwright.sync_api import expect
 
 from tests.pages.home_page import HomePage
 
-pytestmark = [pytest.mark.spec_only]
-
 
 # ===== Active / Inactive split (§2) =====
 
+@pytest.mark.spec_only
 @pytest.mark.xfail(reason="spec: Active/Inactive split not implemented")
 def test_active_and_inactive_sections_exist(logged_in_page):
     hp = HomePage(logged_in_page)
@@ -27,6 +27,7 @@ def test_active_and_inactive_sections_exist(logged_in_page):
     expect(logged_in_page.locator("#sessions-inactive")).to_be_visible()
 
 
+@pytest.mark.spec_only
 @pytest.mark.xfail(reason="spec: Inactive section collapsed by default")
 def test_inactive_section_starts_collapsed(logged_in_page):
     hp = HomePage(logged_in_page)
@@ -35,6 +36,7 @@ def test_inactive_section_starts_collapsed(logged_in_page):
     assert "expanded" not in (inactive.get_attribute("class") or "")
 
 
+@pytest.mark.spec_only
 @pytest.mark.xfail(reason="spec: clicking Inactive h2 toggles expanded")
 def test_clicking_inactive_header_toggles(logged_in_page):
     hp = HomePage(logged_in_page)
@@ -46,6 +48,7 @@ def test_clicking_inactive_header_toggles(logged_in_page):
     expect(logged_in_page.locator("#sessions-inactive.expanded")).to_have_count(0)
 
 
+@pytest.mark.spec_only
 @pytest.mark.xfail(reason="spec: deactivate-btn on active cards (no confirm)")
 def test_active_card_x_moves_to_inactive(logged_in_page, spawned_session):
     sid = spawned_session(name="moves-to-inactive")
@@ -64,7 +67,6 @@ def test_active_card_x_moves_to_inactive(logged_in_page, spawned_session):
 
 # ===== New session modal (§2.2) =====
 
-@pytest.mark.xfail(reason="spec: New session inline form moved to modal")
 def test_new_button_opens_modal(logged_in_page):
     hp = HomePage(logged_in_page)
     hp.expect_visible()
@@ -72,7 +74,6 @@ def test_new_button_opens_modal(logged_in_page):
     expect(logged_in_page.locator("#modal-new-session")).to_be_visible()
 
 
-@pytest.mark.xfail(reason="spec: modal closes via × / cancel / esc")
 def test_new_session_modal_closes_on_esc(logged_in_page):
     logged_in_page.locator("#new-btn").click()
     expect(logged_in_page.locator("#modal-new-session")).to_be_visible()
@@ -80,8 +81,26 @@ def test_new_session_modal_closes_on_esc(logged_in_page):
     expect(logged_in_page.locator("#modal-new-session")).to_be_hidden()
 
 
+def test_new_session_modal_closes_on_cancel(logged_in_page):
+    logged_in_page.locator("#new-btn").click()
+    expect(logged_in_page.locator("#modal-new-session")).to_be_visible()
+    logged_in_page.locator("#new-modal-cancel").click()
+    expect(logged_in_page.locator("#modal-new-session")).to_be_hidden()
+
+
+def test_new_session_modal_form_values_persist(logged_in_page):
+    """Closing the modal keeps the form fields so re-opening shows the
+    user's in-progress input (spec)."""
+    logged_in_page.locator("#new-btn").click()
+    logged_in_page.locator("#spawn-name").fill("draft-name")
+    logged_in_page.locator("#new-modal-close").click()
+    logged_in_page.locator("#new-btn").click()
+    expect(logged_in_page.locator("#spawn-name")).to_have_value("draft-name")
+
+
 # ===== Four permission modes (§12) =====
 
+@pytest.mark.spec_only
 @pytest.mark.xfail(reason="spec: 4 modes (manual/accept_edits/plan/allow_all)")
 def test_perm_menu_has_four_modes(logged_in_page, spawned_session):
     sid = spawned_session(name="perm-mode-test")
@@ -167,7 +186,8 @@ def test_spawn_via_ui_adds_to_recent_chips(logged_in_page, tmp_path,
     )
     assert str(tmp_path) in recents
     assert recents[0] == str(tmp_path), "newest should be leftmost"
-    # Chip with this path should be rendered
+    # Open the new-session modal to see chips
+    hp.open_new_modal()
     expect(logged_in_page.locator(
         f"#cwd-presets .chip[data-path='{tmp_path}']"
     )).to_be_visible()
@@ -236,6 +256,7 @@ def test_sort_toggle_cycles_created_active(logged_in_page):
 
 # ===== Ctx 不警示 (§11) =====
 
+@pytest.mark.spec_only
 @pytest.mark.xfail(reason="spec: high ctx usage shows no warning color")
 def test_ctx_status_never_red():
     """Placeholder — needs a live session with high ctx to fully verify.

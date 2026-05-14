@@ -470,6 +470,7 @@ $("spawn-go").addEventListener("click", async () => {
     localStorage.setItem("ccr.cwd", cwd);
     pushRecentCwd(cwd);
     $("spawn-name").value = "";
+    if (window.__closeNewModal) window.__closeNewModal();
     enterChat(r.id, r.name, r.cwd);
   } catch (e) {
     $("spawn-err").textContent = "Start failed: " + (e.message || e);
@@ -479,6 +480,38 @@ $("spawn-go").addEventListener("click", async () => {
     $("spawn-go").textContent = "Start";
   }
 });
+
+// ---------- New session modal ----------
+(function setupNewModal() {
+  const btn       = $("new-btn");
+  const modal     = $("modal-new-session");
+  const closeX    = $("new-modal-close");
+  const cancelBtn = $("new-modal-cancel");
+
+  function open() {
+    modal.removeAttribute("hidden");
+    if (!$("spawn-cwd").value) $("spawn-cwd").value = state.cwd || "";
+    syncPresetChips();
+    setTimeout(() => $("spawn-name").focus(), 0);
+  }
+  function close() {
+    modal.setAttribute("hidden", "");
+    $("spawn-err").classList.remove("show");
+  }
+  // Make it reachable from spawn-go success path so we can hide the modal
+  // once we're on our way to chat view.
+  window.__closeNewModal = close;
+
+  btn.addEventListener("click", open);
+  closeX.addEventListener("click", close);
+  cancelBtn.addEventListener("click", close);
+  modal.addEventListener("click", (e) => {
+    if (e.target.id === "modal-new-session") close();   // backdrop only
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !modal.hasAttribute("hidden")) close();
+  });
+})();
 
 // ---------- Session list sort toggle ----------
 (function setupSortToggle() {

@@ -23,6 +23,12 @@ class HomePage:
         # wait until WS-driven snapshot replaced the "Loading…" placeholder
         expect(self.list).not_to_contain_text("Loading…", timeout=5000)
 
+    def open_new_modal(self) -> "HomePage":
+        """Click ＋ New session to reveal the form (it's hidden by default)."""
+        self.page.locator("#new-btn").click()
+        self.page.locator("#modal-new-session").wait_for(state="visible")
+        return self
+
     def card_by_id(self, session_id: str) -> Locator:
         return self.page.locator(f"#session-list .session-card[data-id='{session_id}']")
 
@@ -32,6 +38,9 @@ class HomePage:
         )
 
     def fill_spawn_form(self, cwd: str, name: str = "") -> "HomePage":
+        """Opens the new-session modal (if not open) and fills the form."""
+        if not self.page.locator("#modal-new-session:not([hidden])").count():
+            self.open_new_modal()
         if name:
             self.spawn_name.fill(name)
         self.spawn_cwd.fill(cwd)

@@ -37,20 +37,12 @@
 <div class="view" id="view-home">
   <div class="center-wrap">
     <div class="card">
-      <h1>New session</h1>
-      <label for="spawn-name">Name (optional)</label>
-      <input id="spawn-name" type="text" placeholder="e.g. debug logs">
-      <label for="spawn-cwd">Working directory</label>
-      <div class="path-row">
-        <input id="spawn-cwd" type="text" placeholder="/abs/path">
-        <button type="button" class="btn btn-secondary path-browse" id="browse-btn">Browse…</button>
+      <div class="home-top">
+        <button class="btn btn-primary" id="new-btn" type="button">＋ New session</button>
       </div>
-      <div class="chips" id="cwd-presets"></div>
-      <button class="btn btn-primary btn-block" id="spawn-go">Start</button>
-      <div class="err" id="spawn-err"></div>
 
       <div class="sessions-header">
-        <h1 style="margin-top: 28px; flex: 1;">Existing sessions</h1>
+        <h1 style="margin-top: 4px; flex: 1;">Existing sessions</h1>
         <button id="sessions-sort" type="button" class="sort-btn" data-mode="created" title="Sort">
           <span class="sort-label">sort: created</span>
           <span class="sort-caret">▾</span>
@@ -154,6 +146,31 @@
           <line x1="5" y1="12" x2="19" y2="12"></line>
         </svg>
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- New session modal -->
+<div class="modal-bg" id="modal-new-session" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title">New session</div>
+      <button class="modal-x" id="new-modal-close" type="button">×</button>
+    </div>
+    <div class="modal-body">
+      <label for="spawn-name">Name (optional)</label>
+      <input id="spawn-name" type="text" placeholder="e.g. debug logs">
+      <label for="spawn-cwd">Working directory</label>
+      <div class="path-row">
+        <input id="spawn-cwd" type="text" placeholder="/abs/path">
+        <button type="button" class="btn btn-secondary path-browse" id="browse-btn">Browse…</button>
+      </div>
+      <div class="chips" id="cwd-presets"></div>
+      <div class="err" id="spawn-err"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-secondary" id="new-modal-cancel" type="button">Cancel</button>
+      <button class="btn btn-primary" id="spawn-go" type="button">Start</button>
     </div>
   </div>
 </div>

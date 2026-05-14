@@ -53,6 +53,8 @@ def test_spawn_with_invalid_cwd_shows_error(logged_in_page):
     hp.fill_spawn_form(cwd="/nonexistent/path/" + "x" * 30, name="bad-cwd")
     hp.submit_spawn()
     expect(hp.spawn_err).to_be_visible(timeout=3000)
+    # modal stays open on error
+    expect(logged_in_page.locator("#modal-new-session")).to_be_visible()
     expect(hp.cards).to_have_count(0)
 
 
