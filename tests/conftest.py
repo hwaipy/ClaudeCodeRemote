@@ -262,3 +262,29 @@ def logged_in_page(page, base_url, test_token):
     )
     page.goto(base_url)
     return page
+
+
+def _viewport_page(browser, base_url, test_token, width, height):
+    ctx = browser.new_context(viewport={"width": width, "height": height})
+    ctx.add_init_script(
+        "try { localStorage.setItem('ccr.token', " + repr(test_token) + "); } catch (e) {}"
+    )
+    page = ctx.new_page()
+    page.goto(base_url)
+    try:
+        yield page
+    finally:
+        ctx.close()
+
+
+@pytest.fixture
+def mobile_page(browser, base_url, test_token):
+    """390×844 (iPhone 14) — pre-authenticated."""
+    yield from _viewport_page(browser, base_url, test_token, 390, 844)
+
+
+@pytest.fixture
+def wide_page(browser, base_url, test_token):
+    """1280×720 (desktop) — pre-authenticated. body.stage-app two-column
+    grid kicks in via @media (min-width: 900px)."""
+    yield from _viewport_page(browser, base_url, test_token, 1280, 720)
