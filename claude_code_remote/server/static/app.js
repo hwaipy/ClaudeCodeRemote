@@ -437,6 +437,40 @@ $("spawn-go").addEventListener("click", async () => {
   }
 });
 
+// ---------- Session list search ----------
+(function setupSearch() {
+  const btn   = $("search-btn");
+  const bar   = $("search-bar");
+  const input = $("search-input");
+  const clear = $("search-clear");
+
+  function applyFilter() {
+    const q = (input.value || "").trim().toLowerCase();
+    document.querySelectorAll("#session-list .session-card").forEach(card => {
+      const name = (card.querySelector(".name")?.textContent || "").toLowerCase();
+      const match = !q || name.includes(q);
+      card.hidden = !match;
+    });
+  }
+  function open() {
+    bar.removeAttribute("hidden");
+    input.focus();
+    input.select();
+  }
+  function close() {
+    input.value = "";
+    bar.setAttribute("hidden", "");
+    applyFilter();
+  }
+
+  btn.addEventListener("click", open);
+  clear.addEventListener("click", close);
+  input.addEventListener("input", applyFilter);
+  input.addEventListener("keydown", e => {
+    if (e.key === "Escape") close();
+  });
+})();
+
 // ---------- Chat ----------
 function saveCurrentSessionCache() {
   if (!state.sessionId) return;

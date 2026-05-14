@@ -365,6 +365,29 @@ input:focus, textarea:focus { border-color: var(--accent); }
 }
 .err.show { display: block; }
 
+.sessions-header { display: flex; align-items: flex-end; gap: 8px; }
+.search-btn {
+  background: transparent; border: 0; cursor: pointer;
+  color: var(--text-dim);
+  padding: 6px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-bottom: 4px;   /* line up visually with h1 baseline */
+}
+.search-btn:hover { background: var(--bg-elev); color: var(--text); }
+.search-bar { display: flex; gap: 6px; margin-top: 10px; }
+.search-bar[hidden] { display: none; }
+.search-bar input {
+  flex: 1; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--border-soft); background: var(--bg-input);
+  color: var(--text); font: inherit;
+}
+.search-bar input:focus { outline: 1px solid var(--accent); }
+.search-clear {
+  background: transparent; border: 1px solid var(--border-soft); border-radius: 8px;
+  color: var(--text-dim); padding: 0 10px; cursor: pointer;
+}
+.search-clear:hover { color: var(--text); }
+
 .session-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
 .session-card {
   background: var(--bg-card);
@@ -375,6 +398,7 @@ input:focus, textarea:focus { border-color: var(--accent); }
   display: flex; flex-direction: column; gap: 4px;
   transition: background 0.15s ease;
 }
+.session-card[hidden] { display: none; }   /* search filter relies on this */
 .session-card:hover { background: var(--bg-hover); border-color: var(--border); }
 /* 工作中 session：荧光绿边框 + 加深的光晕 + 缓动呼吸 */
 .session-card.session-busy {

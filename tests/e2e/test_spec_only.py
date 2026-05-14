@@ -170,7 +170,6 @@ def test_spawn_adds_to_recent_chips(logged_in_page, spawned_session, tmp_path):
 
 # ===== Search button (§2.3) =====
 
-@pytest.mark.xfail(reason="spec: 🔭 search button + #search-bar")
 def test_search_button_opens_bar(logged_in_page):
     hp = HomePage(logged_in_page)
     hp.expect_visible()
@@ -181,7 +180,6 @@ def test_search_button_opens_bar(logged_in_page):
     expect(logged_in_page.locator("#search-input")).to_be_focused()
 
 
-@pytest.mark.xfail(reason="spec: typing filters Active + Inactive by name substring")
 def test_search_filters_cards(logged_in_page, spawned_session):
     a = spawned_session(name="apple-tree")
     b = spawned_session(name="banana-bread")
