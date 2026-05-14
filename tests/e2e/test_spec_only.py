@@ -98,7 +98,6 @@ def test_perm_menu_has_four_modes(logged_in_page, spawned_session):
 
 # ===== Session card redesign (§2 cards) =====
 
-@pytest.mark.xfail(reason="spec: card has .state-dot leading indicator")
 def test_card_has_state_dot(logged_in_page, spawned_session):
     sid = spawned_session(name="state-dot-test")
     hp = HomePage(logged_in_page)
@@ -108,39 +107,35 @@ def test_card_has_state_dot(logged_in_page, spawned_session):
     expect(card.locator(".state-dot")).to_have_count(1)
 
 
-@pytest.mark.xfail(reason="spec: badge always shows, not just waiting/needs_input")
 def test_card_badge_always_visible(logged_in_page, spawned_session):
     sid = spawned_session(name="badge-test")
     hp = HomePage(logged_in_page)
     hp.expect_visible()
-    expect(hp.card_by_id(sid).locator(".badge, .state-badge")
+    expect(hp.card_by_id(sid).locator(".badge")
            ).to_be_visible(timeout=5000)
 
 
-@pytest.mark.xfail(reason="spec: short id (ccr-XXXXXX) replaces full id")
 def test_card_uses_short_id(logged_in_page, spawned_session):
     sid = spawned_session(name="short-id-test")
     hp = HomePage(logged_in_page)
     hp.expect_visible()
     card = hp.card_by_id(sid)
     expect(card).to_be_visible(timeout=5000)
-    # short-id text length is 'ccr-' + 6 chars = 10 chars
     short = card.locator(".short-id")
     expect(short).to_have_count(1)
+    # short-id is "ccr-" + 6 chars = 10 chars
     assert len(short.inner_text().strip()) == 10
 
 
-@pytest.mark.xfail(reason="spec: cwd shortened to last 2 segments")
 def test_card_uses_cwd_short(logged_in_page, spawned_session, tmp_path):
-    # tmp_path = /tmp/pytest-of-USER/pytest-N/test_X — last 2 segments = "pytest-N/test_X"
     sid = spawned_session(name="cwd-short-test", cwd=str(tmp_path))
     hp = HomePage(logged_in_page)
     hp.expect_visible()
     card = hp.card_by_id(sid)
     expect(card).to_be_visible(timeout=5000)
-    short = card.locator(".cwd-short").inner_text()
-    # Should be just the last two path components, not the full path
-    assert "/" not in short.lstrip("/").split("/", 2)[2:] if "/" in short else True
+    short = card.locator(".cwd-short").inner_text().strip()
+    # tmp_path is /tmp/pytest-of-USER/pytest-N/test_X — last 2 segs only
+    assert short.count("/") == 1, f"expected exactly one separator: {short!r}"
     assert len(short) < len(str(tmp_path))
 
 

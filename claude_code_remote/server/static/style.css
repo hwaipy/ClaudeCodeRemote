@@ -433,6 +433,41 @@ input:focus, textarea:focus { border-color: var(--accent); }
   0%, 100% { box-shadow: 0 0 12px rgba(46, 160, 67, 0.45), inset 0 0 0 1px rgba(46, 160, 67, 0.15); }
   50%      { box-shadow: 0 0 18px rgba(46, 160, 67, 0.75), inset 0 0 0 1px rgba(46, 160, 67, 0.25); }
 }
+.session-card .state-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+.session-card.state-busy .state-dot,
+.session-card.state-needs-input .state-dot,
+.session-card.state-waiting .state-dot { background: var(--accent, #3fb950); }
+.session-card.state-waiting .state-dot,
+.session-card.state-needs-input .state-dot { background: #d29922; }
+.session-card.state-busy .state-dot { background: #3fb950; }
+.session-card.state-idle .state-dot,
+.session-card.state-hibernated .state-dot {
+  background: transparent; border: 1.5px solid var(--text-dim, #8b949e);
+  width: 6px; height: 6px;
+}
+.session-card.state-finished .state-dot {
+  background: var(--text-dim, #8b949e);
+}
+.session-card .badge {
+  font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.session-card.state-busy .badge { color: #3fb950; border-color: #1f5333; background: rgba(63,185,80,.08); }
+.session-card.state-waiting .badge,
+.session-card.state-needs-input .badge { color: #d29922; border-color: #5b4421; background: rgba(210,153,34,.08); }
+.session-card .meta-line {
+  font-size: 12px; color: var(--text-dim); font-family: ui-monospace, "SF Mono", Consolas, monospace;
+}
+.session-card .ts-line {
+  font-size: 11px; color: var(--text-dim);
+}
+
 .session-card .session-row1 {
   display: flex; align-items: center; gap: 8px;
 }

@@ -310,22 +310,31 @@ function renderSessionList() {
     const pp = s.pending_permissions || 0;
     const needs = s.needs_action_detail;
     const isCurrent = state.sessionId === s.id;
-    // 工作中：边框荧光绿；等批准/等输入仍显示徽章；idle / hibernated / finished 不显示文字
     const isBusy = s.state === "busy";
-    const showBadge = s.state === "waiting_permission" || s.state === "needs_input";
     const el = document.createElement("div");
     el.className = "session-card state-" + (badge.cls || "idle")
                  + (isBusy ? " session-busy" : "")
                  + (isCurrent ? " is-current" : "");
     el.setAttribute("data-id", s.id);
+    // cwd → last 2 path segments; short id → "ccr-" + first 6 chars of suffix
+    const segs = (s.cwd || "").split("/").filter(Boolean);
+    const cwdShort = segs.slice(-2).join("/") || (s.cwd || "");
+    const idSuffix = (s.id || "").replace(/^ccr-/, "").slice(0, 6);
+    const shortId  = "ccr-" + idSuffix;
+    const badgeLabel = badge.label + (pp > 1 ? ` ×${pp}` : "");
     el.innerHTML = `
       <div class="session-row1">
+        <span class="state-dot" aria-hidden="true"></span>
         <div class="name">${escHTML(s.name || "untitled")}</div>
-        ${showBadge ? `<span class="state-badge ${badge.cls}">${badge.label}${pp > 1 ? ` ×${pp}` : ""}</span>` : ""}
-        <button class="del-btn" title="Delete session">🗑</button>
+        <span class="badge ${badge.cls}">${escHTML(badgeLabel)}</span>
+        <button class="del-btn" title="Delete session">✕</button>
       </div>
-      <div class="meta">${escHTML(s.cwd)}</div>
-      <div class="tiny">${escHTML(s.id)} · active ${active} ago${needs ? " · " + escHTML(needs.slice(0, 40)) : ""}</div>`;
+      <div class="meta-line">
+        <span class="cwd-short" title="${escHTML(s.cwd || "")}">${escHTML(cwdShort)}</span>
+        <span class="meta-sep"> · </span>
+        <span class="short-id" title="${escHTML(s.id || "")}">${escHTML(shortId)}</span>
+      </div>
+      <div class="ts-line">active ${active} ago${needs ? " · " + escHTML(needs.slice(0, 40)) : ""}</div>`;
     el.querySelector(".del-btn").addEventListener("click", async (e) => {
       e.stopPropagation();
       if (!confirm(`Delete session "${s.name}"? This cannot be undone.`)) return;
