@@ -27,6 +27,22 @@ FAKE_CLAUDE = PROJECT_ROOT / "tests" / "fakes" / "fake_claude.py"
 LIVE_FIXTURE_DIR = PROJECT_ROOT / "tests" / "fixtures" / "live"
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--run-spec", action="store_true", default=False,
+        help="Also run @pytest.mark.spec_only tests (slow, mostly xfail)",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--run-spec"):
+        return
+    skip = pytest.mark.skip(reason="spec_only — pass --run-spec to enable")
+    for item in items:
+        if "spec_only" in item.keywords:
+            item.add_marker(skip)
+
+
 def _free_port() -> int:
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
