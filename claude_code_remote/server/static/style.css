@@ -425,22 +425,34 @@ input:focus, textarea:focus { border-color: var(--accent); }
   margin-bottom: 4px;   /* line up visually with h1 baseline */
 }
 .search-btn:hover { background: var(--bg-elev); color: var(--text); }
-/* Search bar: when expanded, takes the home-top slot so it visually covers
-   the New session button. */
-.search-bar { display: flex; gap: 6px; align-items: center; margin-bottom: 12px; }
+/* Search bar: single rounded pill that visually replaces home-top.
+   The bar IS the container — icon, input and close button live inside
+   borderless. Matches the height of #new-btn so the swap is seamless. */
+.search-bar {
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 12px;
+  height: 36px; padding: 0 6px 0 12px;
+  border: 1px solid var(--border-soft); border-radius: 999px;
+  background: var(--bg-input);
+}
 .search-bar[hidden] { display: none; }
-.search-bar-icon { color: var(--text-dim); display: inline-flex; padding: 0 4px; }
+.search-bar:focus-within { border-color: var(--accent); }
+.search-bar-icon { color: var(--text-dim); display: inline-flex; }
 .search-bar input {
-  flex: 1; padding: 8px 10px; border-radius: 8px;
-  border: 1px solid var(--border-soft); background: var(--bg-input);
+  flex: 1; min-width: 0;
+  padding: 0; margin: 0;
+  border: 0; background: transparent;
   color: var(--text); font: inherit;
+  outline: none;
 }
-.search-bar input:focus { outline: 1px solid var(--accent); }
 .search-clear {
-  background: transparent; border: 1px solid var(--border-soft); border-radius: 8px;
-  color: var(--text-dim); padding: 0 10px; cursor: pointer;
+  background: transparent; border: 0; border-radius: 50%;
+  width: 24px; height: 24px; padding: 0;
+  color: var(--text-dim); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 14px;
 }
-.search-clear:hover { color: var(--text); }
+.search-clear:hover { color: var(--text); background: var(--bg-hover); }
 
 .session-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
 .session-card {
