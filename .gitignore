@@ -11,3 +11,7 @@ venv/
 .idea/
 .vscode/
 *.log
+
+# Test fixtures snapshot from local prod data — never commit
+tests/fixtures/
+.pytest_cache/

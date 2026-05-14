@@ -284,6 +284,7 @@ function renderSessionList() {
     el.className = "session-card state-" + (badge.cls || "idle")
                  + (isBusy ? " session-busy" : "")
                  + (isCurrent ? " is-current" : "");
+    el.setAttribute("data-id", s.id);
     el.innerHTML = `
       <div class="session-row1">
         <div class="name">${escHTML(s.name || "untitled")}</div>
