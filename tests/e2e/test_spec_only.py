@@ -197,11 +197,21 @@ def test_search_filters_cards(logged_in_page, spawned_session):
 
 # ===== Sort toggle (§2 active section) =====
 
-@pytest.mark.xfail(reason="spec: sort toggle between created / active")
 def test_sort_toggle_exists(logged_in_page):
     hp = HomePage(logged_in_page)
     hp.expect_visible()
     expect(logged_in_page.locator("#sessions-sort")).to_be_visible()
+
+
+def test_sort_toggle_cycles_created_active(logged_in_page):
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    btn = logged_in_page.locator("#sessions-sort")
+    assert btn.get_attribute("data-mode") == "created"
+    btn.click()
+    expect(btn).to_have_attribute("data-mode", "active")
+    btn.click()
+    expect(btn).to_have_attribute("data-mode", "created")
 
 
 # ===== Ctx 不警示 (§11) =====

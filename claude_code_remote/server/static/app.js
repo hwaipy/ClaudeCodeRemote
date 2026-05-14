@@ -262,10 +262,26 @@ function relTime(ts) {
   return Math.floor(d/86400) + "d";
 }
 
+function getSortMode() {
+  return localStorage.getItem("ccr.sortMode") || "created";
+}
+function setSortMode(mode) {
+  try { localStorage.setItem("ccr.sortMode", mode); } catch (e) {}
+  const btn = $("sessions-sort");
+  if (btn) {
+    btn.dataset.mode = mode;
+    const label = btn.querySelector(".sort-label");
+    if (label) label.textContent = "sort: " + mode;
+  }
+}
 function renderSessionList() {
   const list = $("session-list");
-  const arr = Array.from(state.sessionsById.values())
-    .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+  const mode = getSortMode();
+  const arr = Array.from(state.sessionsById.values()).sort((a, b) => {
+    const ka = mode === "active" ? (a.last_activity_at || 0) : (a.created_at || 0);
+    const kb = mode === "active" ? (b.last_activity_at || 0) : (b.created_at || 0);
+    return kb - ka;
+  });
   if (!arr.length) {
     list.innerHTML = `<div class="session-empty">No sessions</div>`;
     return;
@@ -436,6 +452,18 @@ $("spawn-go").addEventListener("click", async () => {
     $("spawn-go").textContent = "Start";
   }
 });
+
+// ---------- Session list sort toggle ----------
+(function setupSortToggle() {
+  const btn = $("sessions-sort");
+  if (!btn) return;
+  setSortMode(getSortMode());   // sync UI to stored mode
+  btn.addEventListener("click", () => {
+    const next = getSortMode() === "created" ? "active" : "created";
+    setSortMode(next);
+    renderSessionList();
+  });
+})();
 
 // ---------- Session list search ----------
 (function setupSearch() {

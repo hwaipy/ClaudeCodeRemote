@@ -366,6 +366,15 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .err.show { display: block; }
 
 .sessions-header { display: flex; align-items: flex-end; gap: 8px; }
+.sort-btn {
+  background: transparent; border: 1px solid var(--border-soft); border-radius: 12px;
+  color: var(--text-dim); cursor: pointer;
+  font-size: 11px; padding: 3px 8px;
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-bottom: 6px;
+}
+.sort-btn:hover { color: var(--text); border-color: var(--border); }
+.sort-btn .sort-caret { font-size: 10px; opacity: .7; }
 .search-btn {
   background: transparent; border: 0; cursor: pointer;
   color: var(--text-dim);
