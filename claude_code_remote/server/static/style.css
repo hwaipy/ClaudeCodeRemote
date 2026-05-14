@@ -344,7 +344,14 @@ input:focus, textarea:focus { border-color: var(--accent); }
 }
 .modal-iconbtn:hover { background: var(--bg-hover); color: var(--accent); border-color: var(--accent); }
 
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+/* Recent cwds: horizontal strip, scroll without visible scrollbar */
+.chips {
+  display: flex; flex-wrap: nowrap; gap: 6px; margin-top: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: 0 0 auto; }
 .chip {
   font-size: 13px;
   padding: 4px 11px;

@@ -20,11 +20,26 @@ const state = {
 };
 const SESSION_CACHE_MAX = 10;
 
-const presets = [
-  ["~", "~"],
-  ["codes", "~/codes"],
-  ["Synology/Claude", "~/SynologyDrive/Claude"],
-];
+// Most-recent-used cwds for the chip strip. Stored as a JSON array in
+// localStorage.ccr.recentCwds, left = newest, max 10 entries. Updated on
+// every successful spawn (see spawn handler).
+const RECENT_CWDS_KEY = "ccr.recentCwds";
+const RECENT_CWDS_MAX = 10;
+function loadRecentCwds() {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT_CWDS_KEY) || "[]");
+    return Array.isArray(v) ? v.filter(x => typeof x === "string" && x) : [];
+  } catch (e) { return []; }
+}
+function pushRecentCwd(path) {
+  const p = (path || "").trim();
+  if (!p) return;
+  const list = loadRecentCwds().filter(x => x !== p);
+  list.unshift(p);
+  list.length = Math.min(list.length, RECENT_CWDS_MAX);
+  try { localStorage.setItem(RECENT_CWDS_KEY, JSON.stringify(list)); } catch (e) {}
+  renderPresets();
+}
 
 // ---------- 主题 ----------
 function applyTheme(t) {
@@ -151,11 +166,13 @@ if (_hardReloadEl) _hardReloadEl.addEventListener("click", async (e) => {
 function renderPresets() {
   const box = $("cwd-presets");
   box.innerHTML = "";
-  for (const [label, path] of presets) {
+  for (const path of loadRecentCwds()) {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "chip";
-    b.textContent = label;
+    b.dataset.path = path;
+    b.textContent = path;
+    b.title = path;
     b.addEventListener("click", () => {
       $("spawn-cwd").value = path;
       syncPresetChips();
@@ -167,7 +184,7 @@ function renderPresets() {
 function syncPresetChips() {
   const v = $("spawn-cwd").value.trim();
   document.querySelectorAll("#cwd-presets .chip").forEach(c => {
-    c.classList.toggle("active", c.textContent && presets.find(p => p[0] === c.textContent && p[1] === v));
+    c.classList.toggle("active", c.dataset.path === v && v !== "");
   });
 }
 $("spawn-cwd").addEventListener("input", syncPresetChips);
@@ -362,7 +379,7 @@ function showToast(text, sessId) {
 
 function enterHome() {
   showView("home");
-  if (!$("spawn-cwd").value) $("spawn-cwd").value = state.cwd || presets[1][1];
+  if (!$("spawn-cwd").value) $("spawn-cwd").value = state.cwd || "";
   syncPresetChips();
   connectGlobalWS();
 }
@@ -442,6 +459,7 @@ $("spawn-go").addEventListener("click", async () => {
     const r = await api("/api/spawn", { method: "POST", body: JSON.stringify({ cwd, name }) });
     state.cwd = cwd;
     localStorage.setItem("ccr.cwd", cwd);
+    pushRecentCwd(cwd);
     $("spawn-name").value = "";
     enterChat(r.id, r.name, r.cwd);
   } catch (e) {

@@ -146,26 +146,51 @@ def test_card_uses_cwd_short(logged_in_page, spawned_session, tmp_path):
 
 # ===== Recent cwds chips (§2 chip behavior) =====
 
-@pytest.mark.xfail(reason="spec: chips are recent (LRU), not hardcoded presets")
-def test_first_visit_no_chips(fresh_page, test_token, base_url):
-    fresh_page.evaluate(f'() => localStorage.setItem("ccr.token", {test_token!r})')
-    fresh_page.goto(base_url)
-    expect(fresh_page.locator("#view-home")).to_be_visible()
-    # No history → no chips
-    expect(fresh_page.locator("#cwd-presets .chip")).to_have_count(0)
-
-
-@pytest.mark.xfail(reason="spec: spawn appends to recent list (max 10, left=newest)")
-def test_spawn_adds_to_recent_chips(logged_in_page, spawned_session, tmp_path):
-    sid = spawned_session(name="adds-chip", cwd=str(tmp_path))
+def test_first_visit_no_chips(logged_in_page):
+    """logged_in_page sets only ccr.token; recentCwds key is absent → no chips."""
     hp = HomePage(logged_in_page)
     hp.expect_visible()
-    # After spawn, that cwd should be in the recent list
+    expect(logged_in_page.locator("#cwd-presets .chip")).to_have_count(0)
+
+
+def test_spawn_via_ui_adds_to_recent_chips(logged_in_page, tmp_path,
+                                            cleanup_test_sessions_for_recent_chips):
+    """Spawn through the form so the recent-list code path runs."""
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    hp.fill_spawn_form(cwd=str(tmp_path), name="test-recent-chip")
+    hp.submit_spawn()
+    expect(logged_in_page.locator("body")).to_have_class(
+        __import__("re").compile(r"\bhas-session\b"), timeout=10000
+    )
+    # Back to home so chips re-render
+    logged_in_page.locator("#chat-back").dispatch_event("click")
+    expect(hp.cards.first).to_be_visible(timeout=5000)
+
     recents = logged_in_page.evaluate(
         '() => JSON.parse(localStorage.getItem("ccr.recentCwds") || "[]")'
     )
     assert str(tmp_path) in recents
     assert recents[0] == str(tmp_path), "newest should be leftmost"
+    # Chip with this path should be rendered
+    expect(logged_in_page.locator(
+        f"#cwd-presets .chip[data-path='{tmp_path}']"
+    )).to_be_visible()
+
+
+@pytest.fixture
+def cleanup_test_sessions_for_recent_chips(server_env):
+    from tests.helpers import api_list_sessions, api_delete_session
+    yield
+    try:
+        for s in api_list_sessions(server_env["base_url"], server_env["token"]):
+            if (s.get("name") or "").startswith("test-"):
+                try:
+                    api_delete_session(server_env["base_url"], server_env["token"], s["id"])
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 
 # ===== Search button (§2.3) =====

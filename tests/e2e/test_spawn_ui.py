@@ -42,26 +42,33 @@ def test_empty_cwd_shows_error(logged_in_page):
     expect(logged_in_page.locator("#view-home")).to_have_class(ACTIVE_CLASS)
 
 
+def _seed_recents(page, paths):
+    page.evaluate(
+        '(p) => localStorage.setItem("ccr.recentCwds", JSON.stringify(p))', paths
+    )
+    page.reload()
+
+
 def test_chip_click_fills_cwd(logged_in_page):
+    _seed_recents(logged_in_page, ["~/codes-recent", "~/other-recent"])
     hp = HomePage(logged_in_page)
     hp.expect_visible()
-    chips = logged_in_page.locator("#cwd-presets .chip")
-    expect(chips.first).to_be_visible()
-
-    # Click the "codes" chip — fills cwd with ~/codes
-    codes_chip = logged_in_page.locator("#cwd-presets .chip", has_text="codes").first
-    codes_chip.click()
-    expect(hp.spawn_cwd).to_have_value("~/codes")
+    chip = logged_in_page.locator(
+        "#cwd-presets .chip[data-path='~/codes-recent']"
+    )
+    expect(chip).to_be_visible()
+    chip.click()
+    expect(hp.spawn_cwd).to_have_value("~/codes-recent")
 
 
 def test_chip_marked_active_when_cwd_matches(logged_in_page):
+    _seed_recents(logged_in_page, ["~/match-me"])
     hp = HomePage(logged_in_page)
     hp.expect_visible()
-    # Type a path that matches a preset → that chip gains .active
-    hp.spawn_cwd.fill("~/codes")
-    expect(
-        logged_in_page.locator("#cwd-presets .chip.active", has_text="codes")
-    ).to_be_visible()
+    hp.spawn_cwd.fill("~/match-me")
+    expect(logged_in_page.locator(
+        "#cwd-presets .chip.active[data-path='~/match-me']"
+    )).to_be_visible()
 
 
 def test_spawn_ui_flow_enters_chat(logged_in_page, tmp_path, cleanup_test_sessions):
