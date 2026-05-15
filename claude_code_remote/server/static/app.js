@@ -1012,26 +1012,28 @@ async function enterChat(id, name, cwd, sessionState) {
   const _ld = $("chat-loading");
   _ld.classList.remove("fade-out");
   _ld.hidden = false;
+
+  // §15 enter-latency: reveal chat view IMMEDIATELY — the spinner
+  // (#chat-loading) sits in the chat-log so the user sees the transition
+  // animation right after click. History and /resume run in the
+  // background; backlog_done eventually fades the spinner.
+  showView("chat");
+  if (window.innerWidth >= 900) $("chat-input").focus();
+  state.revealChat = () => {};   // already revealed; first_paint / backlog_done don't need to do it
+
+  // /resume is fire-and-forget — its only side effect (spawning the
+  // CLI) is needed for sending messages, not for showing history.
+  // WS connect also auto-resumes on first user message anyway.
   if (sessionState && sessionState !== "running") {
-    try {
-      await api(`/api/sessions/${encodeURIComponent(id)}/resume`, { method: "POST" });
-    } catch (e) {
-      appendBubble("system", `Resume failed: ${e.message}`);
-    }
+    const ownId = id;
+    api(`/api/sessions/${encodeURIComponent(id)}/resume`, { method: "POST" })
+      .catch(e => {
+        if (state.sessionId === ownId) {
+          appendBubble("system", `Resume failed: ${e.message}`);
+        }
+      });
   }
-  let revealed = false;
-  const ownId = id;
-  const reveal = () => {
-    if (revealed) return;
-    revealed = true;
-    if (state.sessionId !== ownId) return;
-    const log = $("chat-log");
-    setScrollTopInstant(log, log.scrollHeight);
-    showView("chat");
-    if (window.innerWidth >= 900) $("chat-input").focus();
-  };
-  state.revealChat = reveal;
-  setTimeout(reveal, 800);
+
   connectWS();
 }
 
