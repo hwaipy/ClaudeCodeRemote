@@ -357,11 +357,11 @@ def test_rename_doesnt_shift_card_layout(logged_in_page, spawned_session):
 
 
 def test_current_card_merges_into_chat_on_wide(wide_page, base_url, test_token):
-    """Wide layout: selected card visually merges into the chat panel.
-    - Its left/top/bottom keep the subtle gray border
-    - Right border + right radius dissolve
-    - Right edge reaches the sidebar's right edge (covers the divider
-      pseudo at this card's height, so the divider has a notch here)
+    """Wide layout: selected card sits flush against the chat panel.
+    - All four borders are gray (the right border is the middle segment of
+      the continuous outline that joins the two concave bulges above/below)
+    - Right radius is squared so the gray border meets the arcs cleanly
+    - Right edge reaches the sidebar's right edge
     - Internal kebab position is unchanged by the extension"""
     from tests.helpers import api_spawn, api_delete_session
     import re as _re
@@ -376,10 +376,11 @@ def test_current_card_merges_into_chat_on_wide(wide_page, base_url, test_token):
         card.click()
         expect(card).to_have_class(_re.compile(r"\bis-current\b"), timeout=5000)
 
-        # Right edge stuff
+        # Right border is now gray (part of the continuous outline)
         border_color = computed(wide_page, card, "border-right-color").replace(" ", "")
-        assert border_color in ("rgba(0,0,0,0)", "transparent"), (
-            f"is-current right border-color: {border_color}"
+        assert border_color not in ("rgba(0,0,0,0)", "transparent"), (
+            f"is-current right border-color must be visible (gray segment "
+            f"between the two bulges), got {border_color}"
         )
         radius = computed_px(wide_page, card, "border-top-right-radius")
         assert radius <= 1, f"top-right radius should be 0: {radius}"
@@ -406,13 +407,16 @@ def test_current_card_merges_into_chat_on_wide(wide_page, base_url, test_token):
 
 
 def test_current_card_has_inverse_rounded_right_corners(wide_page, base_url, test_token):
-    """Spec §15 (wide): selected card has concave 'reverse rounded' corners
-    at its top-right and bottom-right, giving a visual 'opened' feel where
-    the chat panel appears to wrap around the card.
+    """Spec §15 (wide): selected card's white (bg-page) region extends
+    OUTWARD past the card top/bottom along the sidebar's right edge, with
+    concave arcs scooping the boundary inward — giving an 'opened' feel
+    where the chat panel appears to wrap around the card.
 
-    Implementation: two pseudo-elements (::before / ::after) of bg-elev color
-    sit at the card's top-right / bottom-right corners, with an inner
-    border-radius so the bg-elev quarter-pie indents into the card body."""
+    Implementation: two pseudo-elements (::before above, ::after below)
+    sit OUTSIDE the card (top/bottom: -10px) at the card's right edge,
+    painted with a radial-gradient that paints bg-elev inside a 10px-radius
+    circle anchored at the "outer" corner of each pseudo and bg-page
+    outside. The boundary curve is the concave arc."""
     from tests.helpers import api_spawn, api_delete_session
     import re as _re
     sid = api_spawn(base_url, test_token, "/tmp", "inverse-corner-test")
@@ -437,11 +441,7 @@ def test_current_card_has_inverse_rounded_right_corners(wide_page, base_url, tes
                     height: before.height,
                     top: before.top,
                     right: before.right,
-                    bg: before.backgroundColor,
-                    radiusTL: before.borderTopLeftRadius,
-                    radiusTR: before.borderTopRightRadius,
-                    radiusBL: before.borderBottomLeftRadius,
-                    radiusBR: before.borderBottomRightRadius,
+                    bgImage: before.backgroundImage,
                   }},
                   after: {{
                     content: after.content,
@@ -449,11 +449,7 @@ def test_current_card_has_inverse_rounded_right_corners(wide_page, base_url, tes
                     height: after.height,
                     bottom: after.bottom,
                     right: after.right,
-                    bg: after.backgroundColor,
-                    radiusTL: after.borderTopLeftRadius,
-                    radiusTR: after.borderTopRightRadius,
-                    radiusBL: after.borderBottomLeftRadius,
-                    radiusBR: after.borderBottomRightRadius,
+                    bgImage: after.backgroundImage,
                   }},
                 }};
             }}"""
@@ -466,48 +462,54 @@ def test_current_card_has_inverse_rounded_right_corners(wide_page, base_url, tes
                 return 0.0
 
         # Both pseudos must be rendered (content not 'none')
-        assert info["before"]["content"] not in ("none", "normal"), (
-            f"::before content was {info['before']['content']!r}; pseudo must render"
-        )
-        assert info["after"]["content"] not in ("none", "normal"), (
-            f"::after content was {info['after']['content']!r}; pseudo must render"
-        )
+        for tag in ("before", "after"):
+            assert info[tag]["content"] not in ("none", "normal"), (
+                f"::{tag} content was {info[tag]['content']!r}; pseudo must render"
+            )
 
-        # Each pseudo is at least 6×6 (visible curve) and at most ~16
+        # Each pseudo: 10×11 (10 wide × 11 tall — 1px overlap into card)
         for tag in ("before", "after"):
             w = _px(info[tag]["width"])
             h = _px(info[tag]["height"])
-            assert 6 <= w <= 20, f"::{tag} width {w} out of range"
-            assert 6 <= h <= 20, f"::{tag} height {h} out of range"
+            assert 8 <= w <= 14, f"::{tag} width {w} out of range (~10)"
+            assert 9 <= h <= 16, f"::{tag} height {h} out of range (~11)"
 
-        # The concave curve on ::before is at its bottom-left
-        # (apex at top-right of card → curve sweeps into card body).
-        before_bl = _px(info["before"]["radiusBL"])
-        assert before_bl >= 6, (
-            f"::before bottom-left radius should be ≥6 (the concave curve), "
-            f"got {info['before']['radiusBL']!r}"
+        # The bulge sits OUTSIDE the card: ::before's top is negative
+        # (pseudo extends above card), ::after's bottom is negative.
+        before_top = _px(info["before"]["top"])
+        after_bottom = _px(info["after"]["bottom"])
+        assert before_top <= -8, (
+            f"::before top should be ≤ -8px (pseudo extends above card), "
+            f"got {info['before']['top']!r}"
         )
-        # The concave curve on ::after is at its top-left
-        # (apex at bottom-right of card → curve sweeps into card body).
-        after_tl = _px(info["after"]["radiusTL"])
-        assert after_tl >= 6, (
-            f"::after top-left radius should be ≥6 (the concave curve), "
-            f"got {info['after']['radiusTL']!r}"
+        assert after_bottom <= -8, (
+            f"::after bottom should be ≤ -8px (pseudo extends below card), "
+            f"got {info['after']['bottom']!r}"
         )
 
-        # The pseudo must use the sidebar (--bg-elev) color, NOT the card
-        # body color — otherwise no visible indent.
-        sidebar_bg = computed(wide_page, wide_page.locator("#view-home"),
-                              "background-color")
-        card_bg = computed(wide_page, card, "background-color")
-        # Pseudo bg should match sidebar bg, not card bg.
-        assert info["before"]["bg"].replace(" ", "") == sidebar_bg.replace(" ", ""), (
-            f"::before bg {info['before']['bg']} should equal sidebar bg {sidebar_bg}"
-        )
-        assert info["before"]["bg"] != card_bg, (
-            f"::before bg ({info['before']['bg']}) must differ from card bg "
-            f"({card_bg}) so the indent is visible"
-        )
+        # The boundary curve is rendered via a radial-gradient on the
+        # pseudo (NOT a solid color, NOT a border-radius).
+        for tag in ("before", "after"):
+            bg_image = info[tag]["bgImage"]
+            assert "radial-gradient" in bg_image, (
+                f"::{tag} background-image should be a radial-gradient, "
+                f"got {bg_image!r}"
+            )
+            # Must include both colors so the boundary is visible
+            sidebar_bg = computed(wide_page, wide_page.locator("#view-home"),
+                                  "background-color").replace(" ", "")
+            card_bg = computed(wide_page, card, "background-color").replace(" ", "")
+            # The CSS uses var(--bg-elev) and var(--bg-page); resolved as
+            # rgb() in computed bg-image. Strip whitespace for comparison.
+            bg_norm = bg_image.replace(" ", "")
+            assert sidebar_bg in bg_norm, (
+                f"::{tag} gradient should include sidebar color {sidebar_bg}, "
+                f"got {bg_image!r}"
+            )
+            assert card_bg in bg_norm, (
+                f"::{tag} gradient should include card color {card_bg}, "
+                f"got {bg_image!r}"
+            )
     finally:
         api_delete_session(base_url, test_token, sid)
 

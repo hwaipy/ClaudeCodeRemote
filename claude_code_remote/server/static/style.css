@@ -773,8 +773,10 @@ body.theme-dark .state-badge.busy    { background: rgba(46, 160, 67, 0.22); colo
 @media (min-width: 900px) {
   .session-card.is-current {
     background: var(--bg-page);
-    /* Keep the subtle gray border on top/left/bottom; right edge dissolves. */
-    border-right-color: transparent;
+    /* Keep the gray border on ALL four sides — the right border at x=320
+       is the middle segment of the continuous outline that connects the
+       two concave bulges (see ::before / ::after below). Square the right
+       corners so the border meets the arcs cleanly. */
     border-top-right-radius: 0;
     border-bottom-right-radius: 0;
     /* Bleed past center-wrap's 16px right padding so the card meets the
@@ -794,30 +796,47 @@ body.theme-dark .state-badge.busy    { background: rgba(46, 160, 67, 0.22); colo
   .session-card.is-current .card-menu { right: 20px; }
   .session-card.is-current:hover { background: var(--bg-page); }
 
-  /* "Opened" feel at the card↔chat junction: two bg-elev (sidebar color)
-     quarter-pies sit at the card's top-right and bottom-right corners.
-     With a 10×10 box and a 10px radius on the INNER corner (bottom-left
-     for ::before, top-left for ::after), each pseudo becomes a quarter-pie
-     whose apex points OUT to the card corner — visually carving a concave
-     "reverse rounded" indent into the merged card+chat bg-page area. */
+  /* "Opened" feel at the card↔chat junction: the white (bg-page) region
+     extends OUTWARD past the card top and bottom along the sidebar's
+     right edge, with a concave arc scooping the boundary inward. Each
+     pseudo is a 10-wide × 11-tall box (1px overlap into the card body
+     so the bulge merges through the card's top/bottom border) painted
+     with a radial-gradient: bg-elev (sidebar color) inside a 10px-radius
+     circle anchored at the corner away from the card, bg-page outside.
+     The boundary of that circle is the concave arc — same geometry as
+     the SVG mockup's <path A 10 10 0 0 0 …>. */
   .session-card.is-current::before,
   .session-card.is-current::after {
     content: "";
     position: absolute;
     right: 0;
     width: 10px;
-    height: 10px;
-    background: var(--bg-elev);
+    height: 11px;
     pointer-events: none;
-    z-index: 3;            /* above card content but below kebab menu (z-index varies) */
+    z-index: 3;
   }
   .session-card.is-current::before {
-    top: 0;
-    border-bottom-left-radius: 10px;
+    top: -10px;
+    /* 1) 1×10 vertical gray line at the bulge's right edge (continues the
+     *    divider above the bulge into the bulge area).
+     * 2) Radial gradient with a thin gray ring on the arc itself. */
+    background:
+      linear-gradient(var(--border), var(--border)) top right / 1px 10px no-repeat,
+      radial-gradient(circle at top left,
+        var(--bg-elev) 9.3px,
+        var(--border) 9.6px,
+        var(--border) 10.2px,
+        var(--bg-page) 10.5px);
   }
   .session-card.is-current::after {
-    bottom: 0;
-    border-top-left-radius: 10px;
+    bottom: -10px;
+    background:
+      linear-gradient(var(--border), var(--border)) bottom right / 1px 10px no-repeat,
+      radial-gradient(circle at bottom left,
+        var(--bg-elev) 9.3px,
+        var(--border) 9.6px,
+        var(--border) 10.2px,
+        var(--bg-page) 10.5px);
   }
 }
 @keyframes ccr-pulse-yellow {
