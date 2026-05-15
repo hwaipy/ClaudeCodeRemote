@@ -328,6 +328,11 @@ function renderOneCard(s, container, isInactiveSection) {
   const needs = s.needs_action_detail;
   const isCurrent = state.sessionId === s.id;
   const isBusy = s.state === "busy";
+  // Only render a text badge for actionable states. idle / hibernated /
+  // finished are conveyed by the state-dot alone (less chrome).
+  const showBadge = s.state === "busy"
+                 || s.state === "waiting_permission"
+                 || s.state === "needs_input";
   const el = document.createElement("div");
   el.className = "session-card state-" + (badge.cls || "idle")
                + (isBusy ? " session-busy" : "")
@@ -346,7 +351,7 @@ function renderOneCard(s, container, isInactiveSection) {
     <div class="session-row1">
       <span class="state-dot" aria-hidden="true"></span>
       <div class="name">${escHTML(s.name || "untitled")}</div>
-      <span class="badge ${badge.cls}">${escHTML(badgeLabel)}</span>
+      ${showBadge ? `<span class="badge ${badge.cls}">${escHTML(badgeLabel)}</span>` : ""}
       <button class="${xClass}" title="${xTitle}">✕</button>
     </div>
     <div class="meta-line">

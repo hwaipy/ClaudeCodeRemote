@@ -120,12 +120,22 @@ def test_card_has_state_dot(logged_in_page, spawned_session):
     expect(card.locator(".state-dot")).to_have_count(1)
 
 
-def test_card_badge_always_visible(logged_in_page, spawned_session):
-    sid = spawned_session(name="badge-test")
+def test_idle_card_has_no_badge(logged_in_page, spawned_session):
+    """Spec: idle / hibernated / finished sessions show only the state-dot —
+    NO 'Idle' text badge. A freshly spawned session with no activity is
+    idle (active_turn=false), so this catches the regression."""
+    sid = spawned_session(name="idle-no-badge")
     hp = HomePage(logged_in_page)
     hp.expect_visible()
-    expect(hp.card_by_id(sid).locator(".badge")
-           ).to_be_visible(timeout=5000)
+    card = hp.card_by_id(sid)
+    expect(card).to_be_visible(timeout=5000)
+    # Confirm the card is in an idle-class state
+    cls = card.get_attribute("class") or ""
+    assert "state-idle" in cls or "state-hibernated" in cls or "state-finished" in cls, (
+        f"freshly spawned session expected to be idle-class: {cls}"
+    )
+    # And no badge rendered
+    expect(card.locator(".badge")).to_have_count(0)
 
 
 def test_card_uses_short_id(logged_in_page, spawned_session):
