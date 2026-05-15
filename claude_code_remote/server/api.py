@@ -317,6 +317,19 @@ async def rename_session(session_id: str, req: RenameRequest) -> dict[str, Any]:
     return {"ok": True, "name": name}
 
 
+@router.post("/sessions/{session_id}/activate")
+async def activate_session(session_id: str) -> dict[str, Any]:
+    """Move a previously-deactivated session back into the Active bucket."""
+    ok = await manager.activate(session_id)
+    if not ok:
+        # Either session not found, or it wasn't deactivated. Idempotent OK.
+        from .session_manager import manager as _m
+        sess = await _m.get(session_id)
+        if not sess:
+            raise HTTPException(404, "session not found")
+    return {"ok": True}
+
+
 @router.post("/sessions/{session_id}/deactivate")
 async def deactivate_session(session_id: str) -> dict[str, Any]:
     """Move session into the 'Inactive' bucket; no process change."""

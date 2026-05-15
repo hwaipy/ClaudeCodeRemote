@@ -347,9 +347,10 @@ function renderOneCard(s, container, isInactiveSection) {
   const badgeLabel = badge.label + (pp > 1 ? ` ×${pp}` : "");
   // Top-right kebab menu. Items differ per section:
   //   Active   → Rename / Move to Inactive / Delete
-  //   Inactive → Delete only (rename can come later if needed)
+  //   Inactive → Move to Active / Delete
   const menuItemsHtml = isInactiveSection
-    ? `<button class="card-menu-item card-menu-item-danger" role="menuitem" data-action="delete">Delete</button>`
+    ? `<button class="card-menu-item" role="menuitem" data-action="activate">Move to Active</button>
+       <button class="card-menu-item card-menu-item-danger" role="menuitem" data-action="delete">Delete</button>`
     : `<button class="card-menu-item" role="menuitem" data-action="rename">Rename</button>
        <button class="card-menu-item" role="menuitem" data-action="deactivate">Move to Inactive</button>
        <button class="card-menu-item card-menu-item-danger" role="menuitem" data-action="delete">Delete</button>`;
@@ -472,6 +473,11 @@ function renderOneCard(s, container, isInactiveSection) {
           await api(`/api/sessions/${encodeURIComponent(s.id)}/deactivate`,
                      { method: "POST", body: JSON.stringify({}) });
         } catch (err) { alert("Deactivate failed: " + err.message); }
+      } else if (action === "activate") {
+        try {
+          await api(`/api/sessions/${encodeURIComponent(s.id)}/activate`,
+                     { method: "POST", body: JSON.stringify({}) });
+        } catch (err) { alert("Activate failed: " + err.message); }
       }
     });
   });

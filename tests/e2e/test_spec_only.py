@@ -44,6 +44,37 @@ def test_clicking_inactive_header_toggles(logged_in_page):
     expect(logged_in_page.locator("#sessions-inactive.expanded")).to_have_count(0)
 
 
+def test_inactive_card_menu_can_reactivate(logged_in_page, spawned_session):
+    """Inactive card menu has 'Move to Active'; click → card moves back
+    to the Active section."""
+    sid = spawned_session(name="reactivate-me")
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+
+    # Move to Inactive first
+    card = logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
+    expect(card).to_be_visible(timeout=5000)
+    card.locator(".card-menu-btn").click()
+    card.locator('.card-menu-item[data-action="deactivate"]').click()
+    expect(card).to_have_count(0, timeout=5000)
+
+    # Expand Inactive, find the card, use the menu's Move to Active
+    logged_in_page.locator("#sessions-inactive h2.inactive-toggle").click()
+    inactive = logged_in_page.locator(f"#sessions-inactive [data-id='{sid}']")
+    expect(inactive).to_be_visible(timeout=5000)
+    items = inactive.locator(".card-menu-item")
+    inactive.locator(".card-menu-btn").click()
+    expect(items).to_have_count(2)
+    actions = items.evaluate_all("els => els.map(e => e.dataset.action)")
+    assert actions == ["activate", "delete"]
+    inactive.locator('.card-menu-item[data-action="activate"]').click()
+
+    # Card is back in Active section, removed from Inactive
+    expect(inactive).to_have_count(0, timeout=5000)
+    expect(logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
+           ).to_have_count(1, timeout=5000)
+
+
 def test_active_card_menu_has_three_items(logged_in_page, spawned_session):
     """Spec: active card menu = Rename / Move to Inactive / Delete."""
     sid = spawned_session(name="three-item-menu")
