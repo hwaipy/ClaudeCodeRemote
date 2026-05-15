@@ -125,10 +125,13 @@ async def mark_hibernated(sess_id: str) -> None:
 
 
 async def mark_resumed(sess_id: str) -> None:
+    """Clear hibernated_at. NOTE: does NOT touch last_activity_at — that
+    timestamp tracks real user activity (messages), not the server-side
+    resume-from-hibernation bookkeeping moment."""
     def _w() -> None:
         _conn.execute(
-            "UPDATE sessions SET hibernated_at=NULL, last_activity_at=? WHERE id=?",
-            (time.time(), sess_id),
+            "UPDATE sessions SET hibernated_at=NULL WHERE id=?",
+            (sess_id,),
         )
     await _run(_w)
 

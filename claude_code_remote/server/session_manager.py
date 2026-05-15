@@ -234,7 +234,9 @@ class SessionManager:
         sess.proc = proc
         sess.hibernated = False
         sess.finished = False
-        sess.last_activity_at = time.time()
+        # NOTE: do NOT touch last_activity_at on resume — "active N ago" should
+        # reflect the last MESSAGE event, not the waking-up moment. Resume from
+        # hibernation is a server-side bookkeeping op, not user activity.
         # 旧 proc 被 interrupt / 崩溃时 message_start..message_stop 可能未配对，
         # busy / needs_action 残留旧值；新 proc 干净起步，重置一下
         sess.busy = False
