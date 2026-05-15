@@ -218,9 +218,10 @@ a:hover { text-decoration: underline; }
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
-  /* !important needed to beat the wide-screen rule
-     `body.stage-app #view-home .center-wrap { padding: 16px }`. */
-  padding-bottom: max(4px, env(safe-area-inset-bottom)) !important;
+  /* !important to beat the wide-screen rule and the iOS PWA's
+     env(safe-area-inset-bottom) (~34px). The footer's own tiny padding
+     keeps text just clear of the home indicator anyway. */
+  padding-bottom: 0 !important;
 }
 #view-home .card {
   background: transparent;

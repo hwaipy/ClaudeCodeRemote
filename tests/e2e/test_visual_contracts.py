@@ -75,7 +75,7 @@ def test_home_footer_sticks_to_bottom_when_content_short(logged_in_page):
     assert fb and wb
     # Footer's bottom should be tight against .center-wrap's bottom
     distance = (wb["y"] + wb["height"]) - (fb["y"] + fb["height"])
-    assert 0 <= distance <= 12, (
+    assert 0 <= distance <= 8, (
         f"footer should sit at .center-wrap bottom: footer_bottom={fb['y']+fb['height']}, "
         f"wrap_bottom={wb['y']+wb['height']}, gap={distance}"
     )
