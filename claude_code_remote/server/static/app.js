@@ -328,10 +328,10 @@ function renderOneCard(s, container, isInactiveSection) {
   const needs = s.needs_action_detail;
   const isCurrent = state.sessionId === s.id;
   const isBusy = s.state === "busy";
-  // Only render a text badge for actionable states. idle / hibernated /
-  // finished are conveyed by the state-dot alone (less chrome).
-  const showBadge = s.state === "busy"
-                 || s.state === "waiting_permission"
+  // Only render a text badge when the user is expected to act. Busy /
+  // idle / hibernated / finished get only the state-dot + (for busy)
+  // the green-glow card border — no text label.
+  const showBadge = s.state === "waiting_permission"
                  || s.state === "needs_input";
   const el = document.createElement("div");
   el.className = "session-card state-" + (badge.cls || "idle")
