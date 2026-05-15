@@ -212,11 +212,15 @@ a:hover { text-decoration: underline; }
 }
 /* Home view: no outer frame — content lives directly on the page bg.
    The .center-wrap becomes a flex column for home so the footer can
-   margin-top:auto its way to the bottom of the scroll area. */
-#view-home .center-wrap {
+   margin-top:auto its way to the bottom of the scroll area. Tighter
+   bottom padding pushes the footer almost to the viewport edge. */
+#view-home > .center-wrap {
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
+  /* !important needed to beat the wide-screen rule
+     `body.stage-app #view-home .center-wrap { padding: 16px }`. */
+  padding-bottom: max(4px, env(safe-area-inset-bottom)) !important;
 }
 #view-home .card {
   background: transparent;
@@ -225,18 +229,18 @@ a:hover { text-decoration: underline; }
   padding: 0;
   max-width: none;
 }
-/* Sticky home footer: deliberately dim + tiny.
+/* Sticky home footer: tiny, very dim — should not draw the eye.
    - Short page: margin-top: auto pushes it to the bottom of .center-wrap,
-     so it appears at the bottom of the viewport without being position:fixed.
-   - Long page: margin-top: auto collapses (no extra space), footer trails
-     immediately after the last session card and scrolls with the content. */
+     appearing near the viewport edge.
+   - Long page: margin-top: auto collapses, footer trails after the last
+     session card and scrolls with the content. */
 #view-home .home-footer {
   margin-top: auto;
   text-align: center;
-  font-size: 11px;
-  padding: 18px 12px max(12px, env(safe-area-inset-bottom));
+  font-size: 10px;
+  padding: 6px 12px 4px;
   color: var(--text-dim);
-  opacity: 0.55;
+  opacity: 0.4;
   flex-shrink: 0;
 }
 .home-footer a {
