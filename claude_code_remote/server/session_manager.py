@@ -247,6 +247,13 @@ class SessionManager:
         # NOTE: do NOT touch last_activity_at on resume — "active N ago" should
         # reflect the last MESSAGE event, not the waking-up moment. Resume from
         # hibernation is a server-side bookkeeping op, not user activity.
+        # ALSO suppress LA bumps from any envelopes claude --resume emits up
+        # front (init/status/replay of previous assistant+result). The CLI
+        # replays the old turn on every resume; without this flag, every
+        # click on an old card would slowly bump LA forward through those
+        # replayed envelopes. The flag clears the moment a real user_input
+        # envelope arrives (i.e. user actually typed).
+        sess._replay_pending = True
         # 旧 proc 被 interrupt / 崩溃时 message_start..message_stop 可能未配对，
         # busy / needs_action 残留旧值；新 proc 干净起步，重置一下
         sess.busy = False
@@ -397,17 +404,27 @@ class SessionManager:
             return
         env = sess.envelope(evt)
         kind = _classify(evt)
+        # Decide whether THIS event should bump last_activity_at. Two gates:
+        #   1. kind must be in _LA_BUMP_KINDS (CLI-internal events filtered)
+        #   2. session must not be in "post-resume replay" state — UNLESS the
+        #      event is a user_input (= user actually typed, which both clears
+        #      the flag and counts as real activity).
+        bump_la = False
+        if kind == "user_input":
+            sess._replay_pending = False
+            bump_la = True
+        elif kind in _LA_BUMP_KINDS and not getattr(sess, "_replay_pending", False):
+            bump_la = True
+
         if kind is not None:
             try:
                 # DB 始终入全量原文；前端按需走 /tool/{id} 拉回
                 await db.append_message(sess.id, env["seq"], env["ts"], kind, evt)
-                if kind in _LA_BUMP_KINDS:
+                if bump_la:
                     await db.update_activity(sess.id, env["ts"])
             except Exception:
                 log.exception("persist message failed for %s", sess.id)
-        # Only bump last_activity_at for real user/assistant activity —
-        # see _LA_BUMP_KINDS comment.
-        if kind in _LA_BUMP_KINDS:
+        if bump_la:
             sess.last_activity_at = env["ts"]
         # 状态变化检测（必须在 envelope/落库之后；并在 fan-out 之前确定，
         # 以便 broadcast_status 时拿到最新值）

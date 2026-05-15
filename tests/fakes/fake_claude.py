@@ -62,10 +62,20 @@ def stock_response(session_id: str) -> None:
 
 def main() -> int:
     session_id = "fake-" + uuid.uuid4().hex[:12]
+    is_resume = "--resume" in sys.argv
     # Emit init event so CCR captures claude_session_id
     emit({"type": "system", "subtype": "init",
           "session_id": session_id, "model": "fake-claude-1",
           "cwd": os.getcwd(), "tools": []})
+
+    # Real claude --resume replays the last turn(s) up front. Simulate that
+    # when FAKE_CLAUDE_REPLAY_ON_RESUME is set and --resume was passed.
+    replay_path = os.environ.get("FAKE_CLAUDE_REPLAY_ON_RESUME")
+    if is_resume and replay_path and os.path.exists(replay_path):
+        with open(replay_path, encoding="utf-8") as f:
+            for raw in f:
+                if raw.strip():
+                    emit(json.loads(raw))
 
     script_path = os.environ.get("FAKE_CLAUDE_SCRIPT")
     scripted = []

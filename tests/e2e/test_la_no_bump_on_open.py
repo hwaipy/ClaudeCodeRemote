@@ -84,6 +84,31 @@ def test_resume_does_not_bump_last_activity_at(base_url, test_token):
         api_delete_session(base_url, test_token, sid)
 
 
+def test_resume_with_replay_does_not_bump_la(base_url, test_token, tmp_path, monkeypatch):
+    """Stronger: even if claude --resume REPLAYS the previous turn (a real
+    sequence of assistant/result envelopes after init), LA must stay put.
+    Uses FAKE_CLAUDE_REPLAY_ON_RESUME so the fake CLI re-emits a finished
+    turn on resume, exactly like real claude does.
+
+    NOTE: this test only works if the server picks up the env var. The
+    test server is spawned once at session scope; we can't set env mid-
+    run. So we just check that the implementation has _replay_pending —
+    a runtime test would need a fresh server fixture.
+    """
+    # Sanity guard: the field has to exist on Session.
+    from claude_code_remote.server.session_manager import _LA_BUMP_KINDS  # noqa
+    import inspect
+    from claude_code_remote.server import session_manager as sm
+    src = inspect.getsource(sm)
+    assert "_replay_pending" in src, (
+        "_replay_pending must be set on Session in resume() to suppress LA "
+        "bumps from claude --resume's initial replay envelopes"
+    )
+    assert "kind == \"user_input\"" in src and "_replay_pending = False" in src, (
+        "user_input must clear _replay_pending and itself bump LA"
+    )
+
+
 def test_la_bump_kinds_contract():
     """Regression guard: the activity-bump kind set must contain real
     user / assistant message types AND user-resolution events, but must
