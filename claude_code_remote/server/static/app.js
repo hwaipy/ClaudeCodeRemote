@@ -343,16 +343,17 @@ function renderOneCard(s, container, isInactiveSection) {
   const idSuffix = (s.id || "").replace(/^ccr-/, "").slice(0, 6);
   const shortId  = "ccr-" + idSuffix;
   const badgeLabel = badge.label + (pp > 1 ? ` ×${pp}` : "");
-  // Top-right kebab menu, always visible. Menu items differ per section:
-  //   Active card  → "Move to Inactive" (no confirm)
-  //   Inactive card → "Delete"           (with confirm)
-  const menuAction = isInactiveSection ? "delete" : "deactivate";
-  const menuLabel  = isInactiveSection ? "Delete" : "Move to Inactive";
+  // Top-right kebab menu. Items differ per section:
+  //   Active   → Rename / Move to Inactive / Delete
+  //   Inactive → Delete only (rename can come later if needed)
+  const menuItemsHtml = isInactiveSection
+    ? `<button class="card-menu-item card-menu-item-danger" role="menuitem" data-action="delete">Delete</button>`
+    : `<button class="card-menu-item" role="menuitem" data-action="rename">Rename</button>
+       <button class="card-menu-item" role="menuitem" data-action="deactivate">Move to Inactive</button>
+       <button class="card-menu-item card-menu-item-danger" role="menuitem" data-action="delete">Delete</button>`;
   el.innerHTML = `
     <button class="card-menu-btn" aria-label="More" title="More">⋯</button>
-    <div class="card-menu" hidden role="menu">
-      <button class="card-menu-item" role="menuitem" data-action="${menuAction}">${menuLabel}</button>
-    </div>
+    <div class="card-menu" hidden role="menu">${menuItemsHtml}</div>
     <div class="session-row1">
       <span class="state-dot" aria-hidden="true"></span>
       <div class="name">${escHTML(s.name || "untitled")}</div>
@@ -365,12 +366,11 @@ function renderOneCard(s, container, isInactiveSection) {
     </div>
     <div class="ts-line">active ${active} ago${needs ? " · " + escHTML(needs.slice(0, 40)) : ""}</div>`;
 
-  const menuBtn = el.querySelector(".card-menu-btn");
-  const menu    = el.querySelector(".card-menu");
-  const menuItem = el.querySelector(".card-menu-item");
+  const menuBtn  = el.querySelector(".card-menu-btn");
+  const menu     = el.querySelector(".card-menu");
+  const nameEl   = el.querySelector(".name");
 
   function openMenu() {
-    // Close any other open card-menus first
     document.querySelectorAll(".card-menu:not([hidden])").forEach(m => {
       if (m !== menu) m.setAttribute("hidden", "");
     });
@@ -378,24 +378,74 @@ function renderOneCard(s, container, isInactiveSection) {
   }
   function closeMenu() { menu.setAttribute("hidden", ""); }
 
+  function startRename() {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "name-edit";
+    input.value = s.name || "";
+    input.maxLength = 80;
+    nameEl.replaceWith(input);
+    input.focus();
+    input.select();
+    let committed = false;
+    async function commit() {
+      if (committed) return;
+      committed = true;
+      const newName = input.value.trim();
+      // Restore name span first (so WS-pushed re-render doesn't fight us)
+      const span = document.createElement("div");
+      span.className = "name";
+      span.textContent = newName || s.name || "untitled";
+      input.replaceWith(span);
+      if (!newName || newName === s.name) return;
+      try {
+        await api(`/api/sessions/${encodeURIComponent(s.id)}/rename`,
+                   { method: "PUT", body: JSON.stringify({ name: newName }) });
+        s.name = newName;
+      } catch (err) {
+        alert("Rename failed: " + err.message);
+        span.textContent = s.name || "untitled";
+      }
+    }
+    function cancel() {
+      if (committed) return;
+      committed = true;
+      const span = document.createElement("div");
+      span.className = "name";
+      span.textContent = s.name || "untitled";
+      input.replaceWith(span);
+    }
+    input.addEventListener("keydown", e => {
+      if (e.key === "Enter") { e.preventDefault(); commit(); }
+      else if (e.key === "Escape") { e.preventDefault(); cancel(); }
+    });
+    input.addEventListener("blur", commit);
+    input.addEventListener("click", e => e.stopPropagation());
+  }
+
   menuBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     if (menu.hasAttribute("hidden")) openMenu(); else closeMenu();
   });
-  menuItem.addEventListener("click", async (e) => {
-    e.stopPropagation();
-    closeMenu();
-    if (menuAction === "delete") {
-      if (!confirm(`Delete session "${s.name}"? This cannot be undone.`)) return;
-      try {
-        await api(`/api/sessions/${encodeURIComponent(s.id)}`, { method: "DELETE" });
-      } catch (err) { alert("Delete failed: " + err.message); }
-    } else {
-      try {
-        await api(`/api/sessions/${encodeURIComponent(s.id)}/deactivate`,
-                   { method: "POST", body: JSON.stringify({}) });
-      } catch (err) { alert("Deactivate failed: " + err.message); }
-    }
+  menu.querySelectorAll(".card-menu-item").forEach(item => {
+    item.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      closeMenu();
+      const action = item.dataset.action;
+      if (action === "rename") {
+        startRename();
+      } else if (action === "delete") {
+        if (!confirm(`Delete session "${s.name}"? This cannot be undone.`)) return;
+        try {
+          await api(`/api/sessions/${encodeURIComponent(s.id)}`, { method: "DELETE" });
+        } catch (err) { alert("Delete failed: " + err.message); }
+      } else if (action === "deactivate") {
+        try {
+          await api(`/api/sessions/${encodeURIComponent(s.id)}/deactivate`,
+                     { method: "POST", body: JSON.stringify({}) });
+        } catch (err) { alert("Deactivate failed: " + err.message); }
+      }
+    });
   });
 
   el.addEventListener("click", () => {

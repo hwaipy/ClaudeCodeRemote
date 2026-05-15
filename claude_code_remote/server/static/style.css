@@ -635,7 +635,17 @@ input:focus, textarea:focus { border-color: var(--accent); }
   border-radius: 6px;
 }
 .session-card .card-menu-item:hover { background: var(--bg-hover); }
-.session-card .card-menu-item[data-action="delete"] { color: #cf222e; }
+.session-card .card-menu-item-danger { color: #cf222e; }
+
+.session-card .name-edit {
+  flex: 1; min-width: 0;
+  padding: 2px 6px;
+  font: inherit; font-weight: 600;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg-input); color: var(--text);
+  outline: none;
+}
 .session-card:hover { background: var(--bg-hover); border-color: var(--border); }
 /* 工作中 session：荧光绿边框 + 加深的光晕 + 缓动呼吸 */
 .session-card.session-busy {

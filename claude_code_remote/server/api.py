@@ -301,6 +301,22 @@ async def set_permission_mode(session_id: str, req: PermissionModeRequest) -> di
     return {"mode": req.mode, "auto_resolved": resolved}
 
 
+class RenameRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+
+
+@router.put("/sessions/{session_id}/rename")
+async def rename_session(session_id: str, req: RenameRequest) -> dict[str, Any]:
+    """Rename a session (user-facing name)."""
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    ok = await manager.rename(session_id, name)
+    if not ok:
+        raise HTTPException(404, "session not found")
+    return {"ok": True, "name": name}
+
+
 @router.post("/sessions/{session_id}/deactivate")
 async def deactivate_session(session_id: str) -> dict[str, Any]:
     """Move session into the 'Inactive' bucket; no process change."""

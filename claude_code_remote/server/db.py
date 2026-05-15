@@ -147,6 +147,12 @@ async def mark_deleted(sess_id: str) -> None:
     await _run(_w)
 
 
+async def update_name(sess_id: str, name: str) -> None:
+    def _w() -> None:
+        _conn.execute("UPDATE sessions SET name=? WHERE id=?", (name, sess_id))
+    await _run(_w)
+
+
 async def mark_deactivated(sess_id: str) -> None:
     def _w() -> None:
         _conn.execute("UPDATE sessions SET deactivated_at=? WHERE id=?",

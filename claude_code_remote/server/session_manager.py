@@ -257,6 +257,17 @@ class SessionManager:
             log.exception("terminate during interrupt failed for %s", sess_id)
         return True
 
+    async def rename(self, sess_id: str, name: str) -> bool:
+        """Update the user-facing name of a session."""
+        async with self._lock:
+            sess = self.sessions.get(sess_id)
+        if not sess:
+            return False
+        sess.name = name
+        await db.update_name(sess_id, name)
+        self._broadcast_status(sess)
+        return True
+
     async def deactivate(self, sess_id: str) -> bool:
         """Mark a session inactive. Frontend renders it under "Inactive"."""
         async with self._lock:

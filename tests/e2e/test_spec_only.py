@@ -44,6 +44,20 @@ def test_clicking_inactive_header_toggles(logged_in_page):
     expect(logged_in_page.locator("#sessions-inactive.expanded")).to_have_count(0)
 
 
+def test_active_card_menu_has_three_items(logged_in_page, spawned_session):
+    """Spec: active card menu = Rename / Move to Inactive / Delete."""
+    sid = spawned_session(name="three-item-menu")
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
+    expect(card).to_be_visible(timeout=5000)
+    card.locator(".card-menu-btn").click()
+    items = card.locator(".card-menu-item")
+    expect(items).to_have_count(3)
+    actions = items.evaluate_all("els => els.map(e => e.dataset.action)")
+    assert actions == ["rename", "deactivate", "delete"]
+
+
 def test_active_card_menu_moves_to_inactive(logged_in_page, spawned_session):
     """Active card kebab menu → 'Move to Inactive'."""
     sid = spawned_session(name="moves-to-inactive")
@@ -51,13 +65,64 @@ def test_active_card_menu_moves_to_inactive(logged_in_page, spawned_session):
     hp.expect_visible()
     card = logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
     expect(card).to_be_visible(timeout=5000)
-    # Open kebab menu and pick the action
     card.locator(".card-menu-btn").click()
     card.locator('.card-menu-item[data-action="deactivate"]').click()
     expect(card).to_have_count(0, timeout=5000)
     logged_in_page.locator("#sessions-inactive h2.inactive-toggle").click()
     expect(logged_in_page.locator(f"#sessions-inactive [data-id='{sid}']")
            ).to_have_count(1)
+
+
+def test_active_card_menu_delete_with_confirm(logged_in_page, spawned_session):
+    """Active card → Delete → confirm → soft-delete, card gone."""
+    sid = spawned_session(name="active-delete")
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
+    expect(card).to_be_visible(timeout=5000)
+    logged_in_page.once("dialog", lambda d: d.accept())
+    card.locator(".card-menu-btn").click()
+    card.locator('.card-menu-item[data-action="delete"]').click()
+    expect(card).to_have_count(0, timeout=5000)
+
+
+def test_rename_inline_edit_persists(logged_in_page, spawned_session):
+    """Rename menu item swaps .name for an editable input. Enter commits
+    via PUT /api/sessions/<id>/rename and updates the card on screen."""
+    sid = spawned_session(name="orig-name")
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
+    expect(card.locator(".name")).to_have_text("orig-name")
+
+    card.locator(".card-menu-btn").click()
+    card.locator('.card-menu-item[data-action="rename"]').click()
+
+    edit = card.locator(".name-edit")
+    expect(edit).to_be_visible()
+    expect(edit).to_be_focused()
+    edit.fill("renamed-session")
+    edit.press("Enter")
+
+    expect(card.locator(".name")).to_have_text("renamed-session", timeout=3000)
+    # Refresh and verify backend stored it
+    logged_in_page.reload()
+    expect(
+        logged_in_page.locator(f"#sessions-active [data-id='{sid}'] .name")
+    ).to_have_text("renamed-session", timeout=5000)
+
+
+def test_rename_escape_cancels(logged_in_page, spawned_session):
+    sid = spawned_session(name="keep-this")
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
+    card.locator(".card-menu-btn").click()
+    card.locator('.card-menu-item[data-action="rename"]').click()
+    edit = card.locator(".name-edit")
+    edit.fill("typed-but-cancelled")
+    edit.press("Escape")
+    expect(card.locator(".name")).to_have_text("keep-this")
 
 
 # ===== New session modal (§2.2) =====
