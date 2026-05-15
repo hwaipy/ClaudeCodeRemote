@@ -191,25 +191,70 @@ def test_search_bar_animates_open(logged_in_page):
     assert 0.1 <= secs <= 1.0, f"animation duration {secs}s out of expected range"
 
 
-def test_search_close_is_staged(logged_in_page):
-    """Close direction is the mirror of open:
-      1. Children fade out first
-      2. Bar visibly shrinks rightward (with its own delay so it doesn't
-         race with the fade)
-      3. Home-top fades back in only after the bar is fully collapsed
-    Encoded via transition-delay on .search-bar (close-direction width
-    delay) and on .home-top (close-direction fade-in delay)."""
-    bar = logged_in_page.locator("#search-bar")
-    home_top = logged_in_page.locator(".home-top")
+def test_search_close_actually_animates_visibly(logged_in_page):
+    """Playback test, not just CSS declaration: sample bar width at
+    multiple times during close and assert it smoothly decreases.
 
-    def first_delay(loc):
-        raw = computed(logged_in_page, loc, "transition-delay")
+    Catches the case where transition-delay is declared but the browser
+    snaps to final state (any browser quirk, e.g. iOS PWA behaviour) —
+    pure CSS contract tests miss this."""
+    logged_in_page.locator("#search-btn").click()
+    bar = logged_in_page.locator("#search-bar")
+    # Wait for open animation to settle
+    logged_in_page.wait_for_timeout(400)
+    w_open = bar.bounding_box()["width"]
+    assert w_open >= 200, f"bar should be wide when open: {w_open}"
+
+    # Trigger close
+    logged_in_page.locator("#search-clear").click()
+    # Sample partway through the 350ms close.
+    logged_in_page.wait_for_timeout(180)
+    w_mid = bar.bounding_box()["width"]
+
+    # Definitive: width must be strictly between 0 and the open width.
+    # If it's already 0 → snap. If it's still ~open width → not started.
+    assert 5 < w_mid < w_open - 20, (
+        f"bar should be visibly mid-collapse 220ms after close: "
+        f"open={w_open}, mid={w_mid} (full collapse or snap?)"
+    )
+
+    # Eventually settles to 0
+    logged_in_page.wait_for_timeout(600)
+    w_end = bar.bounding_box()["width"]
+    assert w_end <= 5, f"bar should be fully collapsed: {w_end}"
+
+
+def test_search_close_is_staged(logged_in_page):
+    """Close visual sequence: children fade fast → bar visibly shrinks
+    rightward → home-top fades back only after the bar is collapsed.
+
+    Implemented with a SINGLE transition spec across both states (iOS
+    Safari is unreliable about picking up a different transition declared
+    only in the target state), so staging comes from:
+      - children's short fade duration (~100ms)
+      - bar's longer shrink duration (~350ms)
+      - home-top's transition-delay (~350ms) so it waits for the bar."""
+    home_top = logged_in_page.locator(".home-top")
+    bar = logged_in_page.locator("#search-bar")
+    children = logged_in_page.locator("#search-bar > *").first
+
+    def first_duration(loc, prop):
+        raw = computed(logged_in_page, loc, prop)
         m = re.search(r"(-?[0-9.]+)\s*(ms|s)", raw)
-        assert m, f"no delay declared: {raw!r}"
+        assert m, f"no value declared for {prop}: {raw!r}"
         return float(m.group(1)) / (1000.0 if m.group(2) == "ms" else 1.0)
 
-    assert first_delay(bar) >= 0.05, "bar shrink delay too short for staged close"
-    assert first_delay(home_top) >= 0.25, "home-top fade-in delay too short"
+    # Home-top waits for the bar to collapse before fading back in
+    assert first_duration(home_top, "transition-delay") >= 0.25, (
+        "home-top fade-in delay too short to wait for bar collapse"
+    )
+    # Bar shrink takes longer than child fade so the empty pill is visible
+    bar_dur = first_duration(bar, "transition-duration")
+    child_dur = first_duration(children, "transition-duration")
+    assert bar_dur > child_dur + 0.1, (
+        f"bar shrink ({bar_dur}s) must outlast child fade ({child_dur}s) "
+        "so the empty collapse is visible"
+    )
 
 
 def test_search_bar_has_no_internal_gaps_breaking_pill(logged_in_page):
