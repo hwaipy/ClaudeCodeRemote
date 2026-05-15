@@ -64,6 +64,17 @@ def has_border(page: Page, loc: Locator) -> bool:
 
 # ---------- §1 login ----------
 
+def test_home_has_no_outer_frame(logged_in_page):
+    """Spec §2: home content sits directly on the page bg, no card frame."""
+    card = logged_in_page.locator("#view-home .card")
+    expect(card).to_be_visible()
+    assert not has_border(logged_in_page, card), "home .card must have no border"
+    bg = computed(logged_in_page, card, "background-color")
+    assert bg in ("rgba(0, 0, 0, 0)", "transparent"), (
+        f"home .card background must be transparent, got {bg!r}"
+    )
+
+
 def test_login_card_is_centered_and_compact(fresh_page):
     """Spec §1: login card is centered, not full-page-wide."""
     card = fresh_page.locator("#view-login .card")
