@@ -64,6 +64,23 @@ def has_border(page: Page, loc: Locator) -> bool:
 
 # ---------- §1 login ----------
 
+def test_home_footer_is_at_bottom_dim_and_small(logged_in_page):
+    """Spec §2: Sign out / Hard reload pinned to view-home bottom, dim+tiny."""
+    footer = logged_in_page.locator(".home-footer")
+    expect(footer).to_be_visible()
+    # Small font
+    size = computed_px(logged_in_page, footer, "font-size")
+    assert size <= 13, f"home-footer font-size {size} too big"
+    # Dim (opacity < 1 or very muted color — opacity is the spec)
+    op = float(computed(logged_in_page, footer, "opacity") or "1")
+    assert op <= 0.7, f"home-footer opacity {op} too prominent"
+    # Sits below the session list area
+    list_box = logged_in_page.locator("#sessions-active").bounding_box()
+    foot_box = footer.bounding_box()
+    assert list_box and foot_box
+    assert foot_box["y"] > list_box["y"], "footer should be below session list"
+
+
 def test_home_has_no_outer_frame(logged_in_page):
     """Spec §2: home content sits directly on the page bg, no card frame."""
     card = logged_in_page.locator("#view-home .card")
