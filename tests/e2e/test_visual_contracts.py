@@ -224,6 +224,33 @@ def test_long_name_doesnt_run_under_kebab(logged_in_page, spawned_session):
     )
 
 
+def test_rename_no_blank_period_after_commit(logged_in_page, spawned_session):
+    """Spec: after Enter, .name must continuously show non-empty text —
+    no destroy-and-rebuild blank moment during the WS-echo re-render."""
+    sid = spawned_session(name="orig")
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = hp.card_by_id(sid)
+    card.locator(".card-menu-btn").click()
+    card.locator('.card-menu-item[data-action="rename"]').click()
+    edit = card.locator(".name.editing")
+    expect(edit).to_be_visible()
+    logged_in_page.keyboard.press("Control+a")
+    logged_in_page.keyboard.type("renamed-no-flash")
+    logged_in_page.keyboard.press("Enter")
+
+    # Sample text content at multiple times; must never be blank
+    samples = []
+    for delta in (20, 30, 40, 60, 90, 150, 300, 600):
+        logged_in_page.wait_for_timeout(delta)
+        text = card.locator(".name").text_content() or ""
+        samples.append(text.strip())
+    for i, t in enumerate(samples):
+        assert t, f"name went blank at sample {i}: samples={samples}"
+    # Final state shows the new name
+    assert samples[-1] == "renamed-no-flash", samples
+
+
 def test_rename_editor_shows_full_original_name(logged_in_page, spawned_session):
     """Spec: entering rename on a truncated name reveals the FULL original
     text — no leaked '…' from the displayed ellipsis state, and the

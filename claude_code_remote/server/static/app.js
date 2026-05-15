@@ -415,6 +415,10 @@ function renderOneCard(s, container, isInactiveSection) {
         return;
       }
       nameEl.textContent = newName;   // optimistic
+      // Mark this rename in flight so the WS-echoed session_state doesn't
+      // trigger a full list rebuild while we're already showing the new
+      // name. Without this the card briefly blanks during innerHTML reset.
+      renameInFlight.add(s.id);
       try {
         await api(`/api/sessions/${encodeURIComponent(s.id)}/rename`,
                    { method: "PUT", body: JSON.stringify({ name: newName }) });
@@ -422,6 +426,10 @@ function renderOneCard(s, container, isInactiveSection) {
       } catch (err) {
         alert("Rename failed: " + err.message);
         nameEl.textContent = original;
+      } finally {
+        // Clear after a short grace window so any straggling broadcast
+        // also gets coalesced before normal re-render resumes.
+        setTimeout(() => renameInFlight.delete(s.id), 250);
       }
     }
     function cancel() {
@@ -594,6 +602,11 @@ function connectGlobalWS() {
   });
 }
 
+// Sessions currently in an optimistic-rename window. Skipping
+// renderSessionList for these IDs avoids destroying their cards and
+// recreating them just to show the same new name we already painted.
+const renameInFlight = new Set();
+
 function handleGlobalMsg(msg) {
   if (msg.type === "snapshot") {
     state.sessionsById.clear();
@@ -601,7 +614,10 @@ function handleGlobalMsg(msg) {
     renderSessionList();
   } else if (msg.type === "session_state") {
     state.sessionsById.set(msg.id, msg);
-    renderSessionList();
+    // Skip the full-list re-render if we just optimistically renamed
+    // this session — the card already shows the new name; rebuilding
+    // would just flash an empty cell during innerHTML="" reset.
+    if (!renameInFlight.has(msg.id)) renderSessionList();
     maybeNotify(msg);
     if (msg.id === state.sessionId) syncChatStatusFromSession(msg);
   } else if (msg.type === "session_deleted") {
