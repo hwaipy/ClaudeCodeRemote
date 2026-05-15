@@ -356,6 +356,37 @@ def test_rename_doesnt_shift_card_layout(logged_in_page, spawned_session):
             )
 
 
+def test_busy_card_has_no_green_border_or_glow(logged_in_page, spawned_session):
+    """Busy state is conveyed by the .state-dot color only — no green
+    border, no glow box-shadow, no pulse animation. Forces the classes
+    via JS since we can't trivially put a fake session into 'busy'."""
+    sid = spawned_session(name="busy-style-test")
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = hp.card_by_id(sid)
+    expect(card).to_be_visible(timeout=5000)
+    logged_in_page.evaluate(
+        f"""const c = document.querySelector(`[data-id='{sid}']`);
+            c.classList.remove('state-idle','state-hibernated');
+            c.classList.add('state-busy','session-busy');"""
+    )
+    border_color = computed(logged_in_page, card, "border-color").replace(" ", "")
+    box_shadow = computed(logged_in_page, card, "box-shadow")
+    animation = computed(logged_in_page, card, "animation-name")
+    # The "busy" green is rgb(46,160,67). Make sure that exact green is
+    # not the border-color anymore.
+    assert "rgb(46,160,67)" not in border_color, f"busy border still green: {border_color}"
+    # No glowing shadow
+    assert "rgba(46,160,67" not in box_shadow.replace(" ", ""), (
+        f"busy still has green glow: {box_shadow}"
+    )
+    # No active pulse keyframes
+    assert animation in ("none", ""), f"busy still pulses: {animation}"
+    # state-dot is still green
+    dot_bg = computed(logged_in_page, card.locator(".state-dot"), "background-color")
+    assert dot_bg.replace(" ", "") == "rgb(63,185,80)", f"dot should stay green: {dot_bg}"
+
+
 def test_session_card_kebab_visible_by_default(logged_in_page, spawned_session):
     """Spec: kebab ⋯ menu button lives at the card's top-right and is
     visible all the time (no hover required)."""

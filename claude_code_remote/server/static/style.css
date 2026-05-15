@@ -657,22 +657,12 @@ input:focus, textarea:focus { border-color: var(--accent); }
 }
 .session-card .name.editing:focus { outline-width: 2px; }
 .session-card:hover { background: var(--bg-hover); border-color: var(--border); }
-/* 工作中 session：荧光绿边框 + 加深的光晕 + 缓动呼吸 */
-.session-card.session-busy {
-  border-color: #2ea043;
-  border-width: 2px;
-  /* 边框加粗后内容会被往里压；用 negative margin 维持外尺寸 */
-  margin: -1px;
-  box-shadow: 0 0 14px rgba(46, 160, 67, 0.55), inset 0 0 0 1px rgba(46, 160, 67, 0.15);
-  animation: ccr-pulse-busy 2.4s ease-in-out infinite;
-}
-.session-card.session-busy:hover {
-  border-color: #2ea043;
-  box-shadow: 0 0 18px rgba(46, 160, 67, 0.7), inset 0 0 0 1px rgba(46, 160, 67, 0.2);
-}
-@keyframes ccr-pulse-busy {
-  0%, 100% { box-shadow: 0 0 12px rgba(46, 160, 67, 0.45), inset 0 0 0 1px rgba(46, 160, 67, 0.15); }
-  50%      { box-shadow: 0 0 18px rgba(46, 160, 67, 0.75), inset 0 0 0 1px rgba(46, 160, 67, 0.25); }
+/* Busy state: green is conveyed solely by the .state-dot. No glowing
+   border, no pulse — too much visual noise for what should just be a
+   subtle "this one is working" cue. */
+@keyframes _ccr_pulse_busy_legacy {
+  0%, 100% { box-shadow: none; }
+  50%      { box-shadow: none; }
 }
 .session-card .state-dot {
   width: 8px; height: 8px; border-radius: 50%;
@@ -771,7 +761,7 @@ body.theme-dark .state-badge.busy    { background: rgba(46, 160, 67, 0.22); colo
   border-color: var(--accent);
   box-shadow: 0 0 12px var(--accent-hover);
 }
-.session-card.state-busy { border-color: #2ea043; }
+/* Busy: no border-color override; the green dot is the indicator. */
 /* 当前正在打开的 session：左侧加蓝色色条，整体加微高亮，提示用户"这就是当前会话" */
 /* 当前打开的 session 高亮：只在宽屏双栏（session list 常驻可见）才需要 */
 @media (min-width: 900px) {
