@@ -64,6 +64,30 @@ def has_border(page: Page, loc: Locator) -> bool:
 
 # ---------- §1 login ----------
 
+def test_home_footer_sticks_to_bottom_when_content_short(logged_in_page):
+    """Sticky footer behaviour: with little content, .home-footer is
+    pushed to the bottom of the scroll container by margin-top:auto, so
+    visually it sits at the bottom of the viewport. NOT position:fixed."""
+    footer = logged_in_page.locator(".home-footer")
+    wrap = logged_in_page.locator("#view-home > .center-wrap")
+    fb = footer.bounding_box()
+    wb = wrap.bounding_box()
+    assert fb and wb
+    # Footer's bottom should be near .center-wrap's bottom (≤ padding + safe-area)
+    distance = (wb["y"] + wb["height"]) - (fb["y"] + fb["height"])
+    assert 0 <= distance <= 30, (
+        f"footer should sit at .center-wrap bottom: footer_bottom={fb['y']+fb['height']}, "
+        f"wrap_bottom={wb['y']+wb['height']}, gap={distance}"
+    )
+    # And not position:fixed
+    pos = computed(logged_in_page, footer, "position")
+    assert pos != "fixed", f"footer must not be fixed: {pos}"
+    # AND lives inside .center-wrap (i.e., participates in scroll)
+    assert logged_in_page.locator(
+        "#view-home > .center-wrap > .home-footer"
+    ).count() == 1, "footer should be a direct child of .center-wrap"
+
+
 def test_home_footer_is_at_bottom_dim_and_small(logged_in_page):
     """Spec §2: Sign out / Hard reload pinned to view-home bottom, dim+tiny."""
     footer = logged_in_page.locator(".home-footer")
