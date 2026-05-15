@@ -696,14 +696,17 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .session-card.state-busy .badge { color: #3fb950; border-color: #1f5333; background: rgba(63,185,80,.08); }
 .session-card.state-waiting .badge,
 .session-card.state-needs-input .badge { color: #d29922; border-color: #5b4421; background: rgba(210,153,34,.08); }
-/* Row 2: cwd-short on the left, ts (active time) right-aligned.
-   Single line, never wraps. When width is tight, cwd-short truncates
-   with ellipsis; ts stays whole — that's the whole point of the row. */
+/* Row 2: cwd-short on the left, ts (relative time) right-aligned.
+   Single line, never wraps. cwd shows the absolute path with $HOME→~,
+   color slightly stronger than ts for visual separation. Generous gap
+   between them. When width is tight, cwd-short truncates from the LEFT
+   (using direction:rtl + inner <bdo dir="ltr">) so the right tail —
+   the most informative part — is preserved. ts never shrinks. */
 .session-card .meta-line {
   display: flex; align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
-  font-size: 12px; color: var(--text-dim);
+  gap: 24px;
+  font-size: 12px;
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
   white-space: nowrap;
   overflow: hidden;
@@ -713,10 +716,15 @@ input:focus, textarea:focus { border-color: var(--accent); }
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: left;
+  color: var(--text-muted, #3a4248);
 }
+.session-card .cwd-short bdo { display: inline; }
 .session-card .ts {
-  flex: 0 0 auto;   /* never shrink — active time always fully shown */
+  flex: 0 0 auto;
   white-space: nowrap;
+  color: var(--text-dim);
+  opacity: 0.7;
 }
 
 .session-card .session-row1 {

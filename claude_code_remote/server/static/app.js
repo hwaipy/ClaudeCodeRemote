@@ -338,10 +338,12 @@ function renderOneCard(s, container, isInactiveSection) {
                + (isBusy ? " session-busy" : "")
                + (isCurrent ? " is-current" : "");
   el.setAttribute("data-id", s.id);
-  const segs = (s.cwd || "").split("/").filter(Boolean);
-  const cwdShort = segs.slice(-2).join("/") || (s.cwd || "");
-  const idSuffix = (s.id || "").replace(/^ccr-/, "").slice(0, 6);
-  const shortId  = "ccr-" + idSuffix;
+  // Absolute path, but $HOME → "~". Detect /home/<user> and /Users/<user>
+  // prefixes since we don't have access to the actual env from the browser.
+  let cwdShort = (s.cwd || "");
+  cwdShort = cwdShort
+    .replace(/^\/home\/[^/]+/, "~")
+    .replace(/^\/Users\/[^/]+/, "~");
   const badgeLabel = badge.label + (pp > 1 ? ` ×${pp}` : "");
   // Top-right kebab menu. Items differ per section:
   //   Active   → Rename / Move to Inactive / Delete
@@ -360,8 +362,8 @@ function renderOneCard(s, container, isInactiveSection) {
       ${showBadge ? `<span class="badge ${badge.cls}">${escHTML(badgeLabel)}</span>` : ""}
     </div>
     <div class="meta-line">
-      <span class="cwd-short" title="${escHTML(s.cwd || "")}">${escHTML(cwdShort)}</span>
-      <span class="ts">active ${escHTML(active)} ago</span>
+      <span class="cwd-short" title="${escHTML(s.cwd || "")}" dir="rtl"><bdo dir="ltr">${escHTML(cwdShort)}</bdo></span>
+      <span class="ts">${escHTML(active)} ago</span>
     </div>`;
 
   const menuBtn  = el.querySelector(".card-menu-btn");

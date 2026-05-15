@@ -263,7 +263,8 @@ def test_card_no_longer_shows_short_id(logged_in_page, spawned_session):
 
 
 def test_card_meta_line_has_active_time(logged_in_page, spawned_session):
-    """Active time moved to row 2 (.meta-line)."""
+    """Active time moved to row 2 (.meta-line). 'active' prefix dropped —
+    just '<relTime> ago'."""
     sid = spawned_session(name="ts-on-row2")
     hp = HomePage(logged_in_page)
     hp.expect_visible()
@@ -271,19 +272,27 @@ def test_card_meta_line_has_active_time(logged_in_page, spawned_session):
     expect(card).to_be_visible(timeout=5000)
     ts = card.locator(".meta-line .ts")
     expect(ts).to_be_visible()
-    expect(ts).to_contain_text("active")
+    text = ts.inner_text().strip()
+    assert text.endswith("ago"), f"ts should end with 'ago': {text!r}"
+    assert not text.startswith("active"), f"'active' prefix should be gone: {text!r}"
 
 
-def test_card_uses_cwd_short(logged_in_page, spawned_session, tmp_path):
-    sid = spawned_session(name="cwd-short-test", cwd=str(tmp_path))
+def test_card_cwd_is_absolute_with_home_abbrev(logged_in_page, spawned_session,
+                                               tmp_path):
+    """cwd-short now shows the full absolute path. If under $HOME it's
+    abbreviated to start with '~'."""
+    sid = spawned_session(name="cwd-abbrev-test", cwd=str(tmp_path))
     hp = HomePage(logged_in_page)
     hp.expect_visible()
     card = hp.card_by_id(sid)
     expect(card).to_be_visible(timeout=5000)
     short = card.locator(".cwd-short").inner_text().strip()
-    # tmp_path is /tmp/pytest-of-USER/pytest-N/test_X — last 2 segs only
-    assert short.count("/") == 1, f"expected exactly one separator: {short!r}"
-    assert len(short) < len(str(tmp_path))
+    # tmp_path is under /tmp, not /home/* — no ~ abbreviation expected.
+    # Path should be the full absolute path.
+    if str(tmp_path).startswith("/home/") or str(tmp_path).startswith("/Users/"):
+        assert short.startswith("~"), f"home abbrev expected: {short!r}"
+    else:
+        assert short == str(tmp_path), f"expected absolute path: got {short!r}"
 
 
 # ===== Recent cwds chips (§2 chip behavior) =====
