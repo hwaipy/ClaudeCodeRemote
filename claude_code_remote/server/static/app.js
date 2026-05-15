@@ -383,6 +383,10 @@ function renderOneCard(s, container, isInactiveSection) {
     const nameEl = el.querySelector(".name");
     if (!nameEl || nameEl.classList.contains("editing")) return;
     const original = s.name || "untitled";
+    // Defensively reset textContent — if the rendered ellipsis state
+    // ever leaked into the DOM (some old browsers did this on
+    // contenteditable activation), this restores the canonical name.
+    nameEl.textContent = original;
     nameEl.contentEditable = "true";
     nameEl.spellcheck = false;
     nameEl.classList.add("editing");

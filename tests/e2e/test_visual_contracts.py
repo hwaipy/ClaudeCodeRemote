@@ -224,6 +224,30 @@ def test_long_name_doesnt_run_under_kebab(logged_in_page, spawned_session):
     )
 
 
+def test_rename_editor_shows_full_original_name(logged_in_page, spawned_session):
+    """Spec: entering rename on a truncated name reveals the FULL original
+    text — no leaked '…' from the displayed ellipsis state, and the
+    text-overflow CSS switches to clip so no visual ellipsis is drawn."""
+    full = "this-is-a-very-long-original-session-name-for-edit-test"
+    sid = spawned_session(name=full)
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = hp.card_by_id(sid)
+    expect(card).to_be_visible(timeout=5000)
+    card.locator(".card-menu-btn").click()
+    card.locator('.card-menu-item[data-action="rename"]').click()
+    name_el = card.locator(".name.editing")
+    expect(name_el).to_be_visible(timeout=2000)
+    # DOM text content must equal the full original
+    text = name_el.evaluate("el => el.textContent")
+    assert text == full, f"editor content mismatch: got {text!r}, want {full!r}"
+    # No '…' character in the DOM text (sanity)
+    assert "…" not in text and "..." not in text
+    # CSS text-overflow disabled in edit mode → no visual ellipsis
+    text_overflow = computed(logged_in_page, name_el, "text-overflow")
+    assert text_overflow == "clip", f"text-overflow={text_overflow!r}"
+
+
 def test_rename_long_name_stays_in_card(logged_in_page, spawned_session):
     """Spec: entering rename on a long name must NOT make the .name
     element overflow the card boundary."""
