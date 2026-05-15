@@ -162,6 +162,45 @@ def test_ts_right_aligned_in_meta_line(logged_in_page, spawned_session):
     )
 
 
+def test_truncated_name_gets_title_tooltip(logged_in_page, spawned_session):
+    """Spec: truncated .name carries the full text in a title= tooltip."""
+    full = "this-is-a-really-long-session-name-that-must-be-truncated"
+    sid = spawned_session(name=full)
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = hp.card_by_id(sid)
+    expect(card).to_be_visible(timeout=5000)
+    name = card.locator(".name")
+    expect(name).to_have_attribute("title", full, timeout=2000)
+
+
+def test_short_name_has_no_title_tooltip(logged_in_page, spawned_session):
+    """Spec: a name that fits in the card has NO title (no useless tooltip
+    showing the same thing the user already sees)."""
+    sid = spawned_session(name="ab")
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = hp.card_by_id(sid)
+    expect(card).to_be_visible(timeout=5000)
+    logged_in_page.wait_for_timeout(100)   # let rAF settle
+    title = card.locator(".name").get_attribute("title")
+    assert not title, f"short name should have no tooltip: {title!r}"
+
+
+def test_truncated_cwd_gets_title_tooltip(logged_in_page, spawned_session, tmp_path):
+    """Spec: truncated .cwd-short carries the full path in a title= tooltip."""
+    long_dir = tmp_path / ("aaaa" * 10) / ("bbbb" * 10)
+    long_dir.mkdir(parents=True)
+    sid = spawned_session(name="cwd-tip-test", cwd=str(long_dir))
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = hp.card_by_id(sid)
+    expect(card).to_be_visible(timeout=5000)
+    cwd = card.locator(".cwd-short")
+    # title should be the full cwd path (not abbreviated)
+    expect(cwd).to_have_attribute("title", str(long_dir), timeout=2000)
+
+
 def test_long_name_doesnt_run_under_kebab(logged_in_page, spawned_session):
     """Truncated long names must end with a visible gap before the kebab,
     not run beneath it. .session-row1 reserves right-padding for that."""

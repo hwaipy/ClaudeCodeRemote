@@ -362,7 +362,7 @@ function renderOneCard(s, container, isInactiveSection) {
       ${showBadge ? `<span class="badge ${badge.cls}">${escHTML(badgeLabel)}</span>` : ""}
     </div>
     <div class="meta-line">
-      <span class="cwd-short" title="${escHTML(s.cwd || "")}" dir="rtl"><bdo dir="ltr">${escHTML(cwdShort)}</bdo></span>
+      <span class="cwd-short" dir="rtl"><bdo dir="ltr">${escHTML(cwdShort)}</bdo></span>
       <span class="ts">${escHTML(active)} ago</span>
     </div>`;
 
@@ -466,6 +466,40 @@ function renderOneCard(s, container, isInactiveSection) {
     enterChat(s.id, s.name, s.cwd, s.state);
   });
   container.appendChild(el);
+
+  // Attach overflow-only tooltips: title appears only when the text was
+  // actually truncated (scrollWidth > clientWidth). Defer to next frame
+  // so layout has settled.
+  const nameEl = el.querySelector(".name");
+  const cwdEl  = el.querySelector(".cwd-short");
+  requestAnimationFrame(() => {
+    setTitleIfClipped(nameEl, s.name || "untitled");
+    setTitleIfClipped(cwdEl, s.cwd || "");
+  });
+}
+
+function setTitleIfClipped(el, fullText) {
+  if (!el || !el.isConnected) return;
+  if (el.scrollWidth > el.clientWidth + 1) {
+    el.title = fullText;
+  } else {
+    el.removeAttribute("title");
+  }
+}
+
+// Re-evaluate clipping on window resize so a card that newly truncates
+// (or stops truncating) keeps its title attribute in sync.
+if (!window.__cardTooltipResizeBound) {
+  window.__cardTooltipResizeBound = true;
+  window.addEventListener("resize", () => {
+    document.querySelectorAll(".session-card").forEach(card => {
+      const sid = card.getAttribute("data-id");
+      const s = sid && state.sessionsById.get(sid);
+      if (!s) return;
+      setTitleIfClipped(card.querySelector(".name"), s.name || "untitled");
+      setTitleIfClipped(card.querySelector(".cwd-short"), s.cwd || "");
+    });
+  }, { passive: true });
 }
 
 // Close any open card-menu when clicking elsewhere (registered once).
