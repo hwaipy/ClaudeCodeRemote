@@ -834,6 +834,13 @@ body.theme-dark .state-badge.busy    { background: rgba(46, 160, 67, 0.22); colo
      of this file. */
   .session-card.is-current::before {
     top: -10px;
+    /* right: -1px (not 0) — absolute positioning's containing block is the
+       card's PADDING-box, so right:0 stops at card_right - border-right-width
+       (1px), leaving the divider F's column EXPOSED beneath the bulge.
+       That visible-through gray is exactly segment D (which §15.2 says
+       must NOT show). Shifting right by -1px lets the pseudo cover the
+       full sidebar-right column, hiding F under the bulge. */
+    right: -1px;
     background-color: var(--bg-page);
     background-image: var(--ccr-bulge-tr);
     background-size: 10px 11px;
@@ -841,6 +848,7 @@ body.theme-dark .state-badge.busy    { background: rgba(46, 160, 67, 0.22); colo
   }
   .session-card.is-current::after {
     bottom: -10px;
+    right: -1px;
     background-color: var(--bg-page);
     background-image: var(--ccr-bulge-br);
     background-size: 10px 11px;

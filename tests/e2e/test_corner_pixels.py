@@ -204,6 +204,18 @@ def test_corner_pixels_topright(wide_page, selected_card):
         at("inside bulge UL", cx - 8, cy - 8, expect_rgb=bg_elev_rgb),
         # Outside the bulge (lower-right of arc — chat panel area)
         at("outside bulge LR", cx - 1, cy + 1, expect_rgb=bg_page_rgb, tol=20),
+        # §15.2 contract D MUST NOT show: divider column WITHIN the bulge
+        # area must not be solid var(--border). Sample at cy-4 — well
+        # inside the pseudo, far from the arc tangent at cy-10..cy-6.
+        # If D is shown (CSS bug: pseudo doesn't cover the divider column),
+        # this pixel would be var(--border) gray (210, 210, 215).
+        at("D must NOT show (mid of bulge right edge)", cx - 1, cy - 4,
+           expect_rgb=bg_page_rgb, tol=30),
+        # And the pseudo's right edge column WELL inside the bulge area
+        # must NOT be solid var(--border). cy-3 is between the arc-bottom
+        # and the card-top-row.
+        at("D must NOT show (lower bulge right edge)", cx - 1, cy - 3,
+           expect_rgb=bg_page_rgb, tol=30),
     ]
 
     failures = [m for ok, m in checks if not ok]
@@ -236,14 +248,20 @@ def test_corner_pixels_bottomright(wide_page, selected_card):
 
     checks = [
         # Interior of card body — well away from any border so sub-pixel
-        # rendering of the card edge doesn't bleed in. Sub-pixel card height
-        # makes the very-corner pixel a blend.
+        # rendering of the card edge doesn't bleed in.
         at("card body interior", cx - 10, cy - 5, expect_rgb=bg_page_rgb),
         at("chat panel", cx + 5, cy - 5, expect_rgb=bg_page_rgb),
         at("sidebar below bulge", cx - 15, cy + 15, expect_rgb=bg_elev_rgb),
         at("A' (card bottom border)", cx - 14, cy - 1, expect_rgb=border_rgb),
         at("F' divider (just below bulge)", cx - 1, cy + 14, expect_rgb=border_rgb),
         at("inside bulge LL", cx - 8, cy + 8, expect_rgb=bg_elev_rgb),
+        # §15.2 contract D' MUST NOT show. Sample at cy+2..cy+4 — well
+        # inside the pseudo's right edge column, far from the arc tangent
+        # at cy+6..cy+10.
+        at("D' must NOT show (upper bulge right edge)", cx - 1, cy + 2,
+           expect_rgb=bg_page_rgb, tol=30),
+        at("D' must NOT show (mid bulge right edge)", cx - 1, cy + 4,
+           expect_rgb=bg_page_rgb, tol=30),
     ]
     failures = [m for ok, m in checks if not ok]
     if failures:
