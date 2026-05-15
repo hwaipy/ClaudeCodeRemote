@@ -205,13 +205,22 @@ def cleanup_test_sessions_for_recent_chips(server_env):
 # ===== Search button (§2.3) =====
 
 def test_search_button_opens_bar(logged_in_page):
+    """New architecture: bar is always in layout (36px when collapsed,
+    grows to fill when open). No appear/disappear — just width change."""
     hp = HomePage(logged_in_page)
     hp.expect_visible()
-    expect(logged_in_page.locator("#search-btn")).to_be_visible()
-    expect(logged_in_page.locator("#search-bar")).to_be_hidden()
+    bar = logged_in_page.locator("#search-bar")
+    expect(bar).to_be_visible()
+    collapsed_w = bar.bounding_box()["width"]
+    assert 30 <= collapsed_w <= 42, f"bar should be ~36px when collapsed: {collapsed_w}"
+
     logged_in_page.locator("#search-btn").click()
-    expect(logged_in_page.locator("#search-bar")).to_be_visible()
-    expect(logged_in_page.locator("#search-input")).to_be_focused()
+    expect(logged_in_page.locator(".home-top")).to_have_class(
+        __import__("re").compile(r"\bsearch-open\b"), timeout=2000
+    )
+    # After expansion, input is focusable (focus is set after a 280ms delay
+    # so the layout settles); allow time for it
+    expect(logged_in_page.locator("#search-input")).to_be_focused(timeout=2000)
 
 
 def test_search_filters_cards(logged_in_page, spawned_session):
@@ -289,36 +298,43 @@ def test_home_top_layout_new_left_search_right(logged_in_page):
     )
 
 
-def test_search_open_hides_home_top_covering_new_btn(logged_in_page):
-    """Clicking search → .home-top fades (opacity 0) under the expanded bar;
-    #search-bar shows + .home-top-wrap gains .search-open."""
+def test_search_open_collapses_new_btn(logged_in_page):
+    """Clicking the search icon → .home-top gains .search-open, new-btn
+    width animates to 0 (squeezed, NOT hidden), search-bar grows to fill
+    the row. Continuous width change, no opacity/display flips."""
     hp = HomePage(logged_in_page)
     hp.expect_visible()
-    home_top = logged_in_page.locator(".home-top")
-    expect(home_top).to_be_visible()
+    new_btn = logged_in_page.locator("#new-btn")
+    expect(new_btn).to_be_visible()
     logged_in_page.locator("#search-btn").click()
 
-    expect(logged_in_page.locator(".home-top-wrap")).to_have_class(
+    expect(logged_in_page.locator(".home-top")).to_have_class(
         __import__("re").compile(r"\bsearch-open\b"), timeout=2000
     )
-    expect(logged_in_page.locator("#search-input")).to_be_visible()
-    # .home-top is faded (opacity 0), pointer-events: none — visually covered
-    expect(home_top).to_have_css("opacity", "0")
-    expect(home_top).to_have_css("pointer-events", "none")
+    # Wait for transition to settle, then check the rendered width is 0
+    logged_in_page.wait_for_timeout(450)
+    box = new_btn.bounding_box()
+    assert box and box["width"] <= 5, f"new-btn should reach 0 width: {box}"
+    # Opacity stays 1 — button is not hidden, just squeezed.
+    expect(new_btn).to_have_css("opacity", "1")
 
 
-def test_search_close_restores_home_top(logged_in_page):
+def test_search_close_restores_new_btn(logged_in_page):
     hp = HomePage(logged_in_page)
     hp.expect_visible()
     logged_in_page.locator("#search-btn").click()
-    expect(logged_in_page.locator(".home-top-wrap")).to_have_class(
+    expect(logged_in_page.locator(".home-top")).to_have_class(
         __import__("re").compile(r"\bsearch-open\b"), timeout=2000
     )
     logged_in_page.locator("#search-clear").click()
-    expect(logged_in_page.locator(".home-top-wrap")).not_to_have_class(
+    expect(logged_in_page.locator(".home-top")).not_to_have_class(
         __import__("re").compile(r"\bsearch-open\b"), timeout=2000
     )
-    expect(logged_in_page.locator(".home-top")).to_have_css("opacity", "1")
+    # After 400ms close animation, new-btn back to full width
+    logged_in_page.wait_for_timeout(450)
+    expect(logged_in_page.locator("#new-btn")).to_have_css("opacity", "1")
+    new_box = logged_in_page.locator("#new-btn").bounding_box()
+    assert new_box and new_box["width"] >= 100, f"new-btn should restore: {new_box}"
 
 
 def test_inactive_chevron_is_left_of_label(logged_in_page):

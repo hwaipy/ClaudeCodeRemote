@@ -567,10 +567,11 @@ $("spawn-go").addEventListener("click", async () => {
 
 // ---------- Session list search ----------
 (function setupSearch() {
-  const btn   = $("search-btn");
-  const input = $("search-input");
-  const clear = $("search-clear");
-  const wrap  = document.querySelector(".home-top-wrap");
+  const btn    = $("search-btn");
+  const input  = $("search-input");
+  const clear  = $("search-clear");
+  const wrap   = document.querySelector(".home-top");
+  const newBtn = $("new-btn");
 
   function applyFilter() {
     const q = (input.value || "").trim().toLowerCase();
@@ -581,15 +582,28 @@ $("spawn-go").addEventListener("click", async () => {
     });
   }
   function open() {
-    if (!wrap) return;
+    if (!wrap || wrap.classList.contains("search-open")) return;
+    // Pin new-btn's current natural width as inline px so the transition
+    // has two concrete endpoints. Without this, transitioning max-width
+    // 1000 → 0 looks like a snap because the button doesn't *render*
+    // shrinkage until max-width crosses content-width.
+    if (newBtn) {
+      newBtn.style.width = newBtn.getBoundingClientRect().width + "px";
+      // Force reflow so the inline width applies before the class change.
+      void newBtn.offsetWidth;
+    }
     wrap.classList.add("search-open");
-    // Focus after the bar finishes expanding — otherwise iOS jumps the layout
-    setTimeout(() => { input.focus(); input.select(); }, 250);
+    setTimeout(() => { input.focus(); input.select(); }, 280);
   }
   function close() {
     input.value = "";
     if (wrap) wrap.classList.remove("search-open");
     applyFilter();
+    // After the open→close transition completes, drop the inline width so
+    // the button reverts to natural-content sizing for layout reflow.
+    if (newBtn) {
+      setTimeout(() => { newBtn.style.width = ""; }, 450);
+    }
   }
 
   btn.addEventListener("click", open);

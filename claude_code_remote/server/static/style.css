@@ -399,24 +399,34 @@ input:focus, textarea:focus { border-color: var(--accent); }
 }
 .err.show { display: block; }
 
-/* home-top wrap layers .home-top + .search-bar so the search bar can
-   slide out from the right with a transition. */
-.home-top-wrap { position: relative; height: 36px; margin-bottom: 12px; }
+/* Both #new-btn and #search-bar live in the same flex row.
+   - Initial: new-btn at its natural content width on the left, search-bar
+     as a 36px round chip on the right, with empty space between them
+     (justify-content: space-between handles the gap).
+   - Open: new-btn's max-width transitions to 0 (button is NOT hidden,
+     just squeezed to zero width — text is clipped by overflow:hidden).
+     The search-bar's width grows to fill the row.
+   - Single transition spec for both directions (iOS-safe). */
 .home-top {
-  position: absolute; inset: 0;
-  display: flex; justify-content: space-between; align-items: center; gap: 8px;
-  /* Single transition spec for both directions (iOS Safari reliability).
-     Close direction relies on the bar's 350ms width transition + this
-     350ms delay so home-top reappears only after the bar collapses.
-     Open direction would also delay 350ms, but since the .search-open
-     state immediately renders opacity 0 there's nothing to "fade out"
-     except the brief override below that bumps it to 0 instantly. */
-  transition: opacity .15s ease .35s;
-}
-.home-top-wrap.search-open .home-top {
-  opacity: 0; pointer-events: none;
+  display: flex; gap: 8px; align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
 }
 .home-top .btn { padding: 8px 18px; font-size: 14px; }
+#new-btn {
+  flex: 0 0 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  /* width is set inline by JS on first open so both endpoints are concrete
+     pixel values — max-width / auto won't transition smoothly. */
+  transition: width .35s cubic-bezier(.4,0,.2,1),
+              padding .35s ease;
+}
+.home-top.search-open #new-btn {
+  width: 0 !important;
+  padding-left: 0; padding-right: 0;
+}
 
 /* Section labels for "Active" / "Inactive" — small, dim, uppercase */
 .section-label {
@@ -470,47 +480,57 @@ input:focus, textarea:focus { border-color: var(--accent); }
    home-top row with a transition. Collapsed = width 0 / no border /
    children invisible. Expanded (via .home-top-wrap.search-open) = full
    width pill. The bar IS the container — children are borderless. */
+/* Search bar — single element, two states:
+   - collapsed (default): 36px round pill, only the lens icon visible
+   - expanded (.home-top.search-open): grows to fill the row, input + ✕ fade in
+   The width animation is the same in both directions (no per-state
+   override, so iOS Safari handles it identically). */
 .search-bar {
-  position: absolute; top: 0; right: 0; height: 36px;
-  width: 0;
-  display: flex; align-items: center; gap: 6px;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  display: flex; align-items: center;
   padding: 0;
-  border: 0 solid var(--border-soft); border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
   background: transparent;
   overflow: hidden;
-  /* Single transition spec for BOTH directions. iOS Safari is unreliable
-     about picking up a different transition declared in the target state,
-     so we use the same spec regardless of .search-open. Staging comes
-     from duration differences + the children's own fade timing. */
-  transition: width .35s cubic-bezier(.4,0,.2,1),
+  transition: flex-basis .35s cubic-bezier(.4,0,.2,1),
+              width .35s cubic-bezier(.4,0,.2,1),
               padding .35s ease,
-              border-width .15s ease,
               background-color .15s ease;
 }
-.home-top-wrap.search-open .search-bar {
+.home-top.search-open .search-bar {
+  flex: 1 1 100%;
   width: 100%;
-  padding: 0 6px 0 12px;
-  border-width: 1px;
+  padding: 0 4px 0 0;
   background: var(--bg-input);
 }
 .search-bar:focus-within { border-color: var(--accent); }
-/* Children stay invisible while the bar is narrow so they don't squeeze.
-   On close they fade out in the first 100ms; the bar's remaining 250ms
-   of width shrink then plays out empty — that's the visible left → right
-   collapse. */
-.search-bar > * { opacity: 0; transition: opacity .1s ease; }
-.home-top-wrap.search-open .search-bar > * { opacity: 1; transition-delay: .2s; }
-.search-bar-icon { color: var(--text-dim); display: inline-flex; }
+.search-bar-icon {
+  flex: 0 0 36px; width: 36px; height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 0; padding: 0;
+  color: var(--text-dim); cursor: pointer;
+}
+.home-top.search-open .search-bar-icon { cursor: default; }
+/* No opacity / display / pointer-events tricks on children — they're
+   always in the DOM at their natural sizes. When the bar is 36px wide,
+   overflow:hidden simply clips input (0 width) and ✕ (28px past the
+   right edge). As the bar grows, they're revealed by widening, not by
+   fading in. Pure width-driven motion. */
 .search-bar input {
-  flex: 1; min-width: 0;
+  flex: 1 1 0; min-width: 0;
   padding: 0; margin: 0;
   border: 0; background: transparent;
   color: var(--text); font: inherit;
   outline: none;
 }
 .search-clear {
+  flex: 0 0 28px;
   background: transparent; border: 0; border-radius: 50%;
-  width: 24px; height: 24px; padding: 0;
+  width: 28px; height: 28px; padding: 0;
+  margin-right: 4px;
   color: var(--text-dim); cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 14px;

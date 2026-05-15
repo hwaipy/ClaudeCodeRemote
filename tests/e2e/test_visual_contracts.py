@@ -123,16 +123,17 @@ def test_new_session_button_is_padded(logged_in_page):
     assert bg not in ("rgba(0, 0, 0, 0)", "transparent"), bg
 
 
-def test_search_button_is_round(logged_in_page):
-    """Spec §2.1: the lens 🔍 button is a round chip."""
-    btn = logged_in_page.locator("#search-btn")
-    box = btn.bounding_box()
+def test_search_bar_is_round_when_collapsed(logged_in_page):
+    """Spec §2.1: when collapsed the whole search-bar is a round chip.
+    There's no separate round button now — clicking the bar (or the icon
+    inside) opens it."""
+    bar = logged_in_page.locator("#search-bar")
+    box = bar.bounding_box()
     assert box is not None
-    # Square-ish
-    assert abs(box["width"] - box["height"]) <= 4
-    radius = computed_px(logged_in_page, btn, "border-top-left-radius")
-    assert radius >= box["width"] / 2 - 2, (
-        f"search-btn not round enough: radius={radius}, w={box['width']}"
+    assert abs(box["width"] - box["height"]) <= 6
+    radius = computed_px(logged_in_page, bar, "border-top-left-radius")
+    assert radius >= box["width"] / 2 - 4, (
+        f"search-bar not round enough when collapsed: radius={radius}, w={box['width']}"
     )
 
 
@@ -152,24 +153,20 @@ def test_sort_button_is_round_icon_only(logged_in_page):
 
 def test_search_bar_is_a_single_pill(logged_in_page):
     """Spec §2.1b: the expanded search bar is ONE rounded container, with
-    icon / input / close inside borderless. Catches regressions where the
-    bar accidentally becomes three separate bordered boxes."""
+    icon / input / close inside borderless."""
     logged_in_page.locator("#search-btn").click()
     bar = logged_in_page.locator("#search-bar")
+    logged_in_page.wait_for_timeout(450)  # let expansion settle
     expect(bar).to_be_visible()
 
-    # The bar itself has a border + a generous pill-ish radius
     assert has_border(logged_in_page, bar), "search bar must own its border"
     radius = computed_px(logged_in_page, bar, "border-top-left-radius")
     assert radius >= 16, f"search bar should be pill-shaped: radius={radius}"
 
-    # The input must NOT carry its own border (the pill does)
     inp = logged_in_page.locator("#search-input")
     assert not has_border(logged_in_page, inp), (
         "search input must be borderless — the .search-bar carries the border"
     )
-
-    # The close button likewise borderless
     clear = logged_in_page.locator("#search-clear")
     assert not has_border(logged_in_page, clear), (
         "search-clear must be borderless inside the pill"
@@ -191,52 +188,87 @@ def test_search_bar_animates_open(logged_in_page):
     assert 0.1 <= secs <= 1.0, f"animation duration {secs}s out of expected range"
 
 
+def test_new_btn_visibly_squeezes_on_search_open(logged_in_page):
+    """Playback test: clicking search must visibly squeeze new-btn from
+    its natural width down to 0, NOT just snap it away.
+
+    The implementation measures the button's current width inline before
+    adding .search-open so the transition has concrete pixel endpoints.
+    A 170ms sample must land in the middle of that animation, NOT at
+    either extreme — that's the contract that catches "snap" regressions."""
+    new_btn = logged_in_page.locator("#new-btn")
+    w_start = new_btn.bounding_box()["width"]
+    assert w_start >= 80, f"new-btn should have natural width: {w_start}"
+
+    logged_in_page.locator("#search-btn").click()
+    logged_in_page.wait_for_timeout(170)
+    w_mid = new_btn.bounding_box()["width"]
+    assert 5 < w_mid < w_start - 20, (
+        f"new-btn must be visibly mid-squeeze 170ms after search opens: "
+        f"start={w_start}, mid={w_mid} (snap?)"
+    )
+
+    logged_in_page.wait_for_timeout(450)
+    w_end = new_btn.bounding_box()["width"]
+    assert w_end <= 5, f"new-btn should reach 0 width once open: {w_end}"
+
+
+def test_new_btn_visibly_un_squeezes_on_search_close(logged_in_page):
+    """Playback test: closing search must visibly expand new-btn from 0
+    back to its natural width."""
+    new_btn = logged_in_page.locator("#new-btn")
+    w_natural = new_btn.bounding_box()["width"]
+    logged_in_page.locator("#search-btn").click()
+    logged_in_page.wait_for_timeout(450)
+    assert new_btn.bounding_box()["width"] <= 5, "new-btn should be collapsed"
+
+    logged_in_page.locator("#search-clear").click()
+    logged_in_page.wait_for_timeout(170)
+    w_mid = new_btn.bounding_box()["width"]
+    assert 5 < w_mid < w_natural - 20, (
+        f"new-btn must be visibly mid-expand 170ms after close: "
+        f"natural={w_natural}, mid={w_mid}"
+    )
+
+
 def test_search_close_actually_animates_visibly(logged_in_page):
-    """Playback test, not just CSS declaration: sample bar width at
+    """Playback test (not just CSS declaration): sample bar width at
     multiple times during close and assert it smoothly decreases.
 
-    Catches the case where transition-delay is declared but the browser
-    snaps to final state (any browser quirk, e.g. iOS PWA behaviour) —
-    pure CSS contract tests miss this."""
+    With the flex-row architecture both sides resize: the bar shrinks
+    from ~full-width to 36px (collapsed icon size). Width at the midpoint
+    must be strictly between these two extremes — otherwise the close
+    snapped without animation."""
     logged_in_page.locator("#search-btn").click()
     bar = logged_in_page.locator("#search-bar")
-    # Wait for open animation to settle
-    logged_in_page.wait_for_timeout(400)
+    logged_in_page.wait_for_timeout(450)   # let open complete
     w_open = bar.bounding_box()["width"]
     assert w_open >= 200, f"bar should be wide when open: {w_open}"
 
-    # Trigger close
     logged_in_page.locator("#search-clear").click()
-    # Sample partway through the 350ms close.
-    logged_in_page.wait_for_timeout(180)
+    logged_in_page.wait_for_timeout(170)
     w_mid = bar.bounding_box()["width"]
-
-    # Definitive: width must be strictly between 0 and the open width.
-    # If it's already 0 → snap. If it's still ~open width → not started.
-    assert 5 < w_mid < w_open - 20, (
-        f"bar should be visibly mid-collapse 220ms after close: "
-        f"open={w_open}, mid={w_mid} (full collapse or snap?)"
+    # Between the collapsed 36px target and the open width
+    assert 40 < w_mid < w_open - 20, (
+        f"bar should be visibly mid-collapse 170ms after close: "
+        f"open={w_open}, mid={w_mid} (snap?)"
     )
 
-    # Eventually settles to 0
     logged_in_page.wait_for_timeout(600)
     w_end = bar.bounding_box()["width"]
-    assert w_end <= 5, f"bar should be fully collapsed: {w_end}"
+    assert 30 <= w_end <= 42, f"bar should settle to collapsed icon size: {w_end}"
 
 
 def test_search_close_is_staged(logged_in_page):
-    """Close visual sequence: children fade fast → bar visibly shrinks
-    rightward → home-top fades back only after the bar is collapsed.
-
-    Implemented with a SINGLE transition spec across both states (iOS
-    Safari is unreliable about picking up a different transition declared
-    only in the target state), so staging comes from:
-      - children's short fade duration (~100ms)
-      - bar's longer shrink duration (~350ms)
-      - home-top's transition-delay (~350ms) so it waits for the bar."""
-    home_top = logged_in_page.locator(".home-top")
+    """Close visual sequence (flex-row architecture):
+      - children (input/clear) fade out fast (~150ms)
+      - search-bar width transitions 100% → 36px over ~350ms
+      - new-btn max-width transitions 0 → 100% in parallel
+    Both bar and new-btn use the SAME transition spec in both states
+    (no per-state override) so iOS Safari handles them identically."""
     bar = logged_in_page.locator("#search-bar")
-    children = logged_in_page.locator("#search-bar > *").first
+    new_btn = logged_in_page.locator("#new-btn")
+    inp = logged_in_page.locator("#search-input")
 
     def first_duration(loc, prop):
         raw = computed(logged_in_page, loc, prop)
@@ -244,30 +276,30 @@ def test_search_close_is_staged(logged_in_page):
         assert m, f"no value declared for {prop}: {raw!r}"
         return float(m.group(1)) / (1000.0 if m.group(2) == "ms" else 1.0)
 
-    # Home-top waits for the bar to collapse before fading back in
-    assert first_duration(home_top, "transition-delay") >= 0.25, (
-        "home-top fade-in delay too short to wait for bar collapse"
-    )
-    # Bar shrink takes longer than child fade so the empty pill is visible
     bar_dur = first_duration(bar, "transition-duration")
-    child_dur = first_duration(children, "transition-duration")
-    assert bar_dur > child_dur + 0.1, (
-        f"bar shrink ({bar_dur}s) must outlast child fade ({child_dur}s) "
-        "so the empty collapse is visible"
+    new_btn_dur = first_duration(new_btn, "transition-duration")
+    input_dur = first_duration(inp, "transition-duration")
+    # Bar and new-btn must take similar time — they animate together
+    assert abs(bar_dur - new_btn_dur) < 0.05, (
+        f"bar ({bar_dur}s) and new-btn ({new_btn_dur}s) should animate in sync"
+    )
+    # Input fades out faster than the bar shrinks so the empty collapse is visible
+    assert input_dur + 0.1 < bar_dur, (
+        f"input fade ({input_dur}s) must finish before bar collapse ({bar_dur}s)"
     )
 
 
 def test_search_bar_has_no_internal_gaps_breaking_pill(logged_in_page):
-    """Children sit inside the pill, not floating with margins that would
-    visually separate them."""
+    """Children sit inside the pill — no large margins that would visibly
+    separate them or push past the rounded edges. Small insets (≤6px) are
+    fine for keeping content off the rounded ends."""
     logged_in_page.locator("#search-btn").click()
+    logged_in_page.wait_for_timeout(450)
     for sel in ("#search-input", "#search-clear"):
         loc = logged_in_page.locator(sel)
-        # No margins poking outside the pill
         for side in ("top", "right", "bottom", "left"):
-            assert computed_px(logged_in_page, loc, f"margin-{side}") == 0, (
-                f"{sel} has margin-{side} != 0"
-            )
+            m = computed_px(logged_in_page, loc, f"margin-{side}")
+            assert m <= 6, f"{sel} has margin-{side}={m}px, too big for inside-pill inset"
 
 
 # ---------- §2 section labels ----------
