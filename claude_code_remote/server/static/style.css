@@ -419,9 +419,11 @@ input:focus, textarea:focus { border-color: var(--accent); }
   white-space: nowrap;
   overflow: hidden;
   /* width is set inline by JS on first open so both endpoints are concrete
-     pixel values — max-width / auto won't transition smoothly. */
+     pixel values — max-width / auto won't transition smoothly.
+     Same easing on width AND padding so the text inside doesn't visually
+     shift during the squeeze (different easings = jitter). */
   transition: width .35s cubic-bezier(.4,0,.2,1),
-              padding .35s ease;
+              padding .35s cubic-bezier(.4,0,.2,1);
 }
 .home-top.search-open #new-btn {
   width: 0 !important;

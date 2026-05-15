@@ -570,6 +570,7 @@ $("spawn-go").addEventListener("click", async () => {
   const btn    = $("search-btn");
   const input  = $("search-input");
   const clear  = $("search-clear");
+  const bar    = $("search-bar");
   const wrap   = document.querySelector(".home-top");
   const newBtn = $("new-btn");
 
@@ -581,37 +582,51 @@ $("spawn-go").addEventListener("click", async () => {
       card.hidden = !match;
     });
   }
+  function isOpen() { return wrap && wrap.classList.contains("search-open"); }
+
   function open() {
-    if (!wrap || wrap.classList.contains("search-open")) return;
+    if (!wrap || isOpen()) return;
     // Pin new-btn's current natural width as inline px so the transition
-    // has two concrete endpoints. Without this, transitioning max-width
-    // 1000 → 0 looks like a snap because the button doesn't *render*
-    // shrinkage until max-width crosses content-width.
+    // has two concrete endpoints (max-width / auto won't transition smoothly).
     if (newBtn) {
       newBtn.style.width = newBtn.getBoundingClientRect().width + "px";
-      // Force reflow so the inline width applies before the class change.
-      void newBtn.offsetWidth;
+      void newBtn.offsetWidth;   // force reflow
     }
     wrap.classList.add("search-open");
-    setTimeout(() => { input.focus(); input.select(); }, 280);
+    // Focus synchronously in the click handler so iOS keeps the user
+    // gesture and shows the keyboard. setTimeout would lose that context.
+    input.focus();
+    input.select();
   }
   function close() {
     input.value = "";
     if (wrap) wrap.classList.remove("search-open");
     applyFilter();
-    // After the open→close transition completes, drop the inline width so
-    // the button reverts to natural-content sizing for layout reflow.
     if (newBtn) {
-      setTimeout(() => { newBtn.style.width = ""; }, 450);
+      setTimeout(() => { newBtn.style.width = ""; }, 500);
     }
   }
 
   btn.addEventListener("click", open);
-  clear.addEventListener("click", close);
+  clear.addEventListener("click", e => { e.stopPropagation(); close(); });
   input.addEventListener("input", applyFilter);
   input.addEventListener("keydown", e => {
     if (e.key === "Escape") close();
   });
+
+  // Auto-collapse on click outside the bar. Use mousedown so the close
+  // animation starts even before the user releases the button. Skip
+  // touches that target the bar itself (e.g., tapping the input).
+  document.addEventListener("mousedown", e => {
+    if (!isOpen()) return;
+    if (bar.contains(e.target)) return;
+    close();
+  });
+  document.addEventListener("touchstart", e => {
+    if (!isOpen()) return;
+    if (bar.contains(e.target)) return;
+    close();
+  }, { passive: true });
 })();
 
 // ---------- Chat ----------

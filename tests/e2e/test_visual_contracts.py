@@ -250,6 +250,50 @@ def test_new_btn_visibly_un_squeezes_on_search_close(logged_in_page):
     )
 
 
+def test_new_btn_width_grows_monotonically_during_close(logged_in_page):
+    """Stronger smoothness check: sample new-btn width 4× during the
+    close transition and assert each sample is ≥ the previous. Catches
+    'jitter' regressions where width oscillates or backsteps mid-animation."""
+    new_btn = logged_in_page.locator("#new-btn")
+    # Open and let it settle
+    logged_in_page.locator("#search-btn").click()
+    logged_in_page.wait_for_timeout(450)
+
+    logged_in_page.locator("#search-clear").click()
+    samples = []
+    for step in (60, 60, 60, 100, 100):
+        logged_in_page.wait_for_timeout(step)
+        samples.append(new_btn.bounding_box()["width"])
+    for i in range(1, len(samples)):
+        assert samples[i] + 1.5 >= samples[i - 1], (
+            f"new-btn width should grow monotonically during close: {samples}"
+        )
+    assert samples[-1] >= samples[0] + 30, (
+        f"close should have made visible progress: {samples}"
+    )
+
+
+def test_search_input_focused_immediately_on_open(logged_in_page):
+    """Spec: clicking search focuses the input synchronously (no setTimeout)
+    so iOS Safari honours the user gesture and pops the keyboard."""
+    logged_in_page.locator("#search-btn").click()
+    expect(logged_in_page.locator("#search-input")).to_be_focused(timeout=200)
+
+
+def test_click_outside_bar_auto_closes(logged_in_page):
+    """Spec: clicking outside the search bar while it's open auto-closes it."""
+    import re as _re
+    logged_in_page.locator("#search-btn").click()
+    expect(logged_in_page.locator(".home-top")).to_have_class(
+        _re.compile(r"\bsearch-open\b")
+    )
+    # Click somewhere outside the bar — the section label is harmless
+    logged_in_page.locator("#sessions-active .section-label-text").click()
+    expect(logged_in_page.locator(".home-top")).not_to_have_class(
+        _re.compile(r"\bsearch-open\b"), timeout=1000
+    )
+
+
 def test_search_close_actually_animates_visibly(logged_in_page):
     """Playback test (not just CSS declaration): sample bar width at
     multiple times during close and assert it smoothly decreases.
