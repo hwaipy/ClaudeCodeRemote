@@ -112,6 +112,29 @@ def test_home_footer_is_at_bottom_dim_and_small(logged_in_page):
     assert foot_box["y"] > list_box["y"], "footer should be below session list"
 
 
+def test_long_name_doesnt_run_under_kebab(logged_in_page, spawned_session):
+    """Truncated long names must end with a visible gap before the kebab,
+    not run beneath it. .session-row1 reserves right-padding for that."""
+    long_name = "this-is-a-really-long-session-name-that-must-be-truncated"
+    sid = spawned_session(name=long_name)
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
+    expect(card).to_be_visible(timeout=5000)
+
+    name_box = card.locator(".name").bounding_box()
+    kebab_box = card.locator(".card-menu-btn").bounding_box()
+    assert name_box and kebab_box
+
+    # Right edge of name must be left of kebab's left edge with ≥8px gap
+    gap = kebab_box["x"] - (name_box["x"] + name_box["width"])
+    assert gap >= 8, (
+        f"name should end before kebab with breathing room: "
+        f"name_right={name_box['x']+name_box['width']}, "
+        f"kebab_left={kebab_box['x']}, gap={gap}px"
+    )
+
+
 def test_rename_doesnt_shift_card_layout(logged_in_page, spawned_session):
     """Entering and leaving the rename editor must not change the card's
     rendered bounding box. The .name-edit input has to occupy the exact

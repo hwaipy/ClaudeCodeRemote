@@ -705,6 +705,10 @@ input:focus, textarea:focus { border-color: var(--accent); }
 
 .session-card .session-row1 {
   display: flex; align-items: center; gap: 8px;
+  /* Reserve space at the right edge for the kebab (absolutely
+     positioned at right:4 / width:26). Long names then truncate with a
+     visible gap before the ⋯, instead of running under it. */
+  padding-right: 32px;
 }
 .session-card .name { flex: 1; font-weight: 600;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
