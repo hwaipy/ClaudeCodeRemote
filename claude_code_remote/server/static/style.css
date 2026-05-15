@@ -222,7 +222,10 @@ a:hover { text-decoration: underline; }
      env(safe-area-inset-bottom) (~34px). The footer's own tiny padding
      keeps text just clear of the home indicator anyway. */
   padding-bottom: 0 !important;
+  /* Hide the scrollbar on the session list — scrolling still works. */
+  scrollbar-width: none;            /* Firefox */
 }
+#view-home > .center-wrap::-webkit-scrollbar { display: none; }   /* WebKit */
 #view-home .card {
   background: transparent;
   border: 0;
@@ -762,16 +765,60 @@ body.theme-dark .state-badge.busy    { background: rgba(46, 160, 67, 0.22); colo
   box-shadow: 0 0 12px var(--accent-hover);
 }
 /* Busy: no border-color override; the green dot is the indicator. */
-/* 当前正在打开的 session：左侧加蓝色色条，整体加微高亮，提示用户"这就是当前会话" */
-/* 当前打开的 session 高亮：只在宽屏双栏（session list 常驻可见）才需要 */
+/* Selected session card on wide layout: no blue border. Instead the
+   card "merges" into the chat panel — it matches the chat bg, drops
+   its right border + right border-radius, and extends past the
+   sidebar's right padding so its right edge meets the sidebar's
+   right border (and thus the chat area). */
 @media (min-width: 900px) {
   .session-card.is-current {
-    background: var(--accent-bg);
-    border-color: var(--accent-border);
-    box-shadow: inset 3px 0 0 var(--accent);
+    background: var(--bg-page);
+    /* Keep the subtle gray border on top/left/bottom; right edge dissolves. */
+    border-right-color: transparent;
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    /* Bleed past center-wrap's 16px right padding so the card meets the
+       sidebar's right edge — and paints over view-home::after (the
+       divider) at the card's height. */
+    margin-right: -16px;
+    /* Compensate padding-right by exactly the bleed amount so the card's
+       INNER content layout (state-dot/name/badge/cwd/ts/kebab) stays at
+       the same screen position as before. */
+    padding-right: 30px;
+    z-index: 2;   /* over view-home::after (z-index: 1) */
     cursor: default;
   }
-  .session-card.is-current:hover { background: var(--accent-bg); }
+  /* Kebab is absolute right:4 — the padding-edge moved with the extra
+     right padding, so adjust to keep the kebab pinned to the same x. */
+  .session-card.is-current .card-menu-btn,
+  .session-card.is-current .card-menu { right: 20px; }
+  .session-card.is-current:hover { background: var(--bg-page); }
+
+  /* "Opened" feel at the card↔chat junction: two bg-elev (sidebar color)
+     quarter-pies sit at the card's top-right and bottom-right corners.
+     With a 10×10 box and a 10px radius on the INNER corner (bottom-left
+     for ::before, top-left for ::after), each pseudo becomes a quarter-pie
+     whose apex points OUT to the card corner — visually carving a concave
+     "reverse rounded" indent into the merged card+chat bg-page area. */
+  .session-card.is-current::before,
+  .session-card.is-current::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    width: 10px;
+    height: 10px;
+    background: var(--bg-elev);
+    pointer-events: none;
+    z-index: 3;            /* above card content but below kebab menu (z-index varies) */
+  }
+  .session-card.is-current::before {
+    top: 0;
+    border-bottom-left-radius: 10px;
+  }
+  .session-card.is-current::after {
+    bottom: 0;
+    border-top-left-radius: 10px;
+  }
 }
 @keyframes ccr-pulse-yellow {
   0%, 100% { box-shadow: 0 0 0 1px var(--warn-border), 0 0 12px var(--warn-glow); }
@@ -1694,9 +1741,23 @@ body.theme-dark .conv-status .cs-spark { color: #e8a690; }
     height: 100vh;
   }
   body.stage-app #view-home {
-    border-right: 1px solid var(--border-soft);
+    /* The right divider is rendered as a pseudo so .is-current can paint
+       over its segment, creating a "notch" that visually merges the
+       selected card with the chat panel. */
+    border-right: 0;
     background: var(--bg-elev);
     overflow: hidden;
+    position: relative;
+    z-index: 0;   /* establish stacking context for ::after vs cards */
+  }
+  body.stage-app #view-home::after {
+    content: "";
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: 1px;
+    background: var(--border-soft);
+    z-index: 1;
+    pointer-events: none;
   }
   body.stage-app #view-home .center-wrap {
     flex: 1;

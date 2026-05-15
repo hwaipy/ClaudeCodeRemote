@@ -356,6 +356,209 @@ def test_rename_doesnt_shift_card_layout(logged_in_page, spawned_session):
             )
 
 
+def test_current_card_merges_into_chat_on_wide(wide_page, base_url, test_token):
+    """Wide layout: selected card visually merges into the chat panel.
+    - Its left/top/bottom keep the subtle gray border
+    - Right border + right radius dissolve
+    - Right edge reaches the sidebar's right edge (covers the divider
+      pseudo at this card's height, so the divider has a notch here)
+    - Internal kebab position is unchanged by the extension"""
+    from tests.helpers import api_spawn, api_delete_session
+    import re as _re
+    sid = api_spawn(base_url, test_token, "/tmp", "merge-test")
+    try:
+        hp = HomePage(wide_page)
+        hp.expect_visible()
+        card = hp.card_by_id(sid)
+        expect(card).to_be_visible(timeout=5000)
+        # Capture kebab position BEFORE click (not yet is-current)
+        kebab_before = card.locator(".card-menu-btn").bounding_box()
+        card.click()
+        expect(card).to_have_class(_re.compile(r"\bis-current\b"), timeout=5000)
+
+        # Right edge stuff
+        border_color = computed(wide_page, card, "border-right-color").replace(" ", "")
+        assert border_color in ("rgba(0,0,0,0)", "transparent"), (
+            f"is-current right border-color: {border_color}"
+        )
+        radius = computed_px(wide_page, card, "border-top-right-radius")
+        assert radius <= 1, f"top-right radius should be 0: {radius}"
+
+        # Right edge meets sidebar's right edge
+        sidebar = wide_page.locator("#view-home")
+        card_box = card.bounding_box()
+        side_box = sidebar.bounding_box()
+        side_right = side_box["x"] + side_box["width"]
+        card_right = card_box["x"] + card_box["width"]
+        assert card_right >= side_right - 2, (
+            f"card right ({card_right}) should reach sidebar right ({side_right})"
+        )
+
+        # Kebab x position should NOT have shifted by the bleed amount
+        kebab_after = card.locator(".card-menu-btn").bounding_box()
+        kebab_drift = abs(kebab_after["x"] - kebab_before["x"])
+        assert kebab_drift <= 3, (
+            f"kebab should stay at same x: before={kebab_before['x']}, "
+            f"after={kebab_after['x']}, drift={kebab_drift}"
+        )
+    finally:
+        api_delete_session(base_url, test_token, sid)
+
+
+def test_current_card_has_inverse_rounded_right_corners(wide_page, base_url, test_token):
+    """Spec §15 (wide): selected card has concave 'reverse rounded' corners
+    at its top-right and bottom-right, giving a visual 'opened' feel where
+    the chat panel appears to wrap around the card.
+
+    Implementation: two pseudo-elements (::before / ::after) of bg-elev color
+    sit at the card's top-right / bottom-right corners, with an inner
+    border-radius so the bg-elev quarter-pie indents into the card body."""
+    from tests.helpers import api_spawn, api_delete_session
+    import re as _re
+    sid = api_spawn(base_url, test_token, "/tmp", "inverse-corner-test")
+    try:
+        hp = HomePage(wide_page)
+        hp.expect_visible()
+        card = hp.card_by_id(sid)
+        expect(card).to_be_visible(timeout=5000)
+        card.click()
+        expect(card).to_have_class(_re.compile(r"\bis-current\b"), timeout=5000)
+
+        # Read computed styles of ::before and ::after on the .is-current card
+        info = wide_page.evaluate(
+            f"""() => {{
+                const c = document.querySelector(`[data-id='{sid}']`);
+                const before = getComputedStyle(c, '::before');
+                const after  = getComputedStyle(c, '::after');
+                return {{
+                  before: {{
+                    content: before.content,
+                    width: before.width,
+                    height: before.height,
+                    top: before.top,
+                    right: before.right,
+                    bg: before.backgroundColor,
+                    radiusTL: before.borderTopLeftRadius,
+                    radiusTR: before.borderTopRightRadius,
+                    radiusBL: before.borderBottomLeftRadius,
+                    radiusBR: before.borderBottomRightRadius,
+                  }},
+                  after: {{
+                    content: after.content,
+                    width: after.width,
+                    height: after.height,
+                    bottom: after.bottom,
+                    right: after.right,
+                    bg: after.backgroundColor,
+                    radiusTL: after.borderTopLeftRadius,
+                    radiusTR: after.borderTopRightRadius,
+                    radiusBL: after.borderBottomLeftRadius,
+                    radiusBR: after.borderBottomRightRadius,
+                  }},
+                }};
+            }}"""
+        )
+
+        def _px(s):
+            try:
+                return float(str(s).replace("px", "").strip())
+            except Exception:
+                return 0.0
+
+        # Both pseudos must be rendered (content not 'none')
+        assert info["before"]["content"] not in ("none", "normal"), (
+            f"::before content was {info['before']['content']!r}; pseudo must render"
+        )
+        assert info["after"]["content"] not in ("none", "normal"), (
+            f"::after content was {info['after']['content']!r}; pseudo must render"
+        )
+
+        # Each pseudo is at least 6×6 (visible curve) and at most ~16
+        for tag in ("before", "after"):
+            w = _px(info[tag]["width"])
+            h = _px(info[tag]["height"])
+            assert 6 <= w <= 20, f"::{tag} width {w} out of range"
+            assert 6 <= h <= 20, f"::{tag} height {h} out of range"
+
+        # The concave curve on ::before is at its bottom-left
+        # (apex at top-right of card → curve sweeps into card body).
+        before_bl = _px(info["before"]["radiusBL"])
+        assert before_bl >= 6, (
+            f"::before bottom-left radius should be ≥6 (the concave curve), "
+            f"got {info['before']['radiusBL']!r}"
+        )
+        # The concave curve on ::after is at its top-left
+        # (apex at bottom-right of card → curve sweeps into card body).
+        after_tl = _px(info["after"]["radiusTL"])
+        assert after_tl >= 6, (
+            f"::after top-left radius should be ≥6 (the concave curve), "
+            f"got {info['after']['radiusTL']!r}"
+        )
+
+        # The pseudo must use the sidebar (--bg-elev) color, NOT the card
+        # body color — otherwise no visible indent.
+        sidebar_bg = computed(wide_page, wide_page.locator("#view-home"),
+                              "background-color")
+        card_bg = computed(wide_page, card, "background-color")
+        # Pseudo bg should match sidebar bg, not card bg.
+        assert info["before"]["bg"].replace(" ", "") == sidebar_bg.replace(" ", ""), (
+            f"::before bg {info['before']['bg']} should equal sidebar bg {sidebar_bg}"
+        )
+        assert info["before"]["bg"] != card_bg, (
+            f"::before bg ({info['before']['bg']}) must differ from card bg "
+            f"({card_bg}) so the indent is visible"
+        )
+    finally:
+        api_delete_session(base_url, test_token, sid)
+
+
+def test_non_current_card_has_no_inverse_corner_pseudos(wide_page, base_url, test_token):
+    """Only the selected (.is-current) card gets the inverse-corner pseudos.
+    A normal active card must not render bg-elev quarter-pies at its corners."""
+    from tests.helpers import api_spawn, api_delete_session
+    sid = api_spawn(base_url, test_token, "/tmp", "no-inverse-corner-test")
+    try:
+        hp = HomePage(wide_page)
+        hp.expect_visible()
+        card = hp.card_by_id(sid)
+        expect(card).to_be_visible(timeout=5000)
+        # Do NOT click → card stays non-current.
+        info = wide_page.evaluate(
+            f"""() => {{
+                const c = document.querySelector(`[data-id='{sid}']`);
+                const b = getComputedStyle(c, '::before');
+                const a = getComputedStyle(c, '::after');
+                return {{
+                  before_content: b.content,
+                  after_content: a.content,
+                  before_w: b.width, before_h: b.height,
+                  after_w: a.width, after_h: a.height,
+                }};
+            }}"""
+        )
+
+        def _px(s):
+            try:
+                return float(str(s).replace("px", "").strip())
+            except Exception:
+                return 0.0
+
+        # Either content is none, or the pseudo has zero size — both mean
+        # the inverse-corner indent isn't drawn on this card.
+        for tag in ("before", "after"):
+            content = info[f"{tag}_content"]
+            w = _px(info[f"{tag}_w"])
+            h = _px(info[f"{tag}_h"])
+            drawn = content not in ("none", "normal") and w > 1 and h > 1
+            assert not drawn, (
+                f"non-current card has ::{tag} drawn "
+                f"(content={content!r}, {w}x{h}); inverse corners must only "
+                f"apply to .is-current"
+            )
+    finally:
+        api_delete_session(base_url, test_token, sid)
+
+
 def test_busy_card_has_no_green_border_or_glow(logged_in_page, spawned_session):
     """Busy state is conveyed by the .state-dot color only — no green
     border, no glow box-shadow, no pulse animation. Forces the classes
@@ -834,10 +1037,53 @@ def test_modal_has_semi_transparent_backdrop(logged_in_page):
 # ---------- §15 wide ----------
 
 def test_wide_sidebar_has_border(wide_page):
-    """Spec §15: 320px sidebar visually separated from chat with a divider."""
+    """Spec §15: 320px sidebar visually separated from chat with a 1px divider.
+
+    Implementation uses a ::after pseudo so the selected card can paint over
+    its segment of the line (merging the card into the chat panel). The
+    contract is: a visible 1px-ish vertical line at the sidebar's right edge.
+    """
     hp = HomePage(wide_page)
     hp.expect_visible()
     sidebar = wide_page.locator("#view-home")
-    # Right border or just a divider via border-right
-    rb = computed_px(wide_page, sidebar, "border-right-width")
-    assert rb >= 1, f"sidebar should have right border, got {rb}"
+    pseudo_w = wide_page.evaluate(
+        """() => {
+            const el = document.querySelector('#view-home');
+            const cs = getComputedStyle(el, '::after');
+            return parseFloat(cs.width || '0');
+        }"""
+    )
+    border_w = computed_px(wide_page, sidebar, "border-right-width")
+    assert (pseudo_w >= 1) or (border_w >= 1), (
+        f"sidebar needs a visible right divider; pseudo width={pseudo_w}, "
+        f"border-right={border_w}"
+    )
+
+
+def test_session_list_scrollbar_hidden(wide_page):
+    """User: 'session list 的滚动条不显示'. Scrolling still works, but the
+    scrollbar must not be drawn (matches the recent-cwds chip strip pattern)."""
+    hp = HomePage(wide_page)
+    hp.expect_visible()
+    wrap = wide_page.locator("#view-home > .center-wrap")
+    sw = computed(wide_page, wrap, "scrollbar-width")
+    pseudo_display = wide_page.evaluate(
+        """() => {
+            const el = document.querySelector('#view-home > .center-wrap');
+            const cs = getComputedStyle(el, '::-webkit-scrollbar');
+            return cs.display;
+        }"""
+    )
+    assert sw == "none", f"scrollbar-width should be none, got {sw!r}"
+    assert pseudo_display == "none", (
+        f"::-webkit-scrollbar should be display:none, got {pseudo_display!r}"
+    )
+
+
+def test_narrow_session_list_scrollbar_hidden(logged_in_page):
+    """Same rule on narrow/PWA: no scrollbar on the session list."""
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    wrap = logged_in_page.locator("#view-home > .center-wrap")
+    sw = computed(logged_in_page, wrap, "scrollbar-width")
+    assert sw == "none", f"scrollbar-width should be none on narrow, got {sw!r}"
