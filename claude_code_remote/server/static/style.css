@@ -218,15 +218,17 @@ a:hover { text-decoration: underline; }
   padding: 0;
   max-width: none;
 }
-/* Home footer: pinned to the bottom of view-home, deliberately dim
-   and tiny so it never competes with sessions for attention. */
+/* Home footer: deliberately dim + tiny, sits at the end of the home
+   content and scrolls with it (not pinned to the viewport). When the
+   page is short the footer is just below Inactive; when sessions
+   overflow, scroll to the bottom to find it. */
 .home-footer {
   text-align: center;
   font-size: 11px;
+  margin-top: 28px;
   padding: 10px 12px max(10px, env(safe-area-inset-bottom));
   color: var(--text-dim);
   opacity: 0.55;
-  flex-shrink: 0;
 }
 .home-footer a {
   color: inherit;
@@ -403,9 +405,15 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .home-top {
   position: absolute; inset: 0;
   display: flex; justify-content: space-between; align-items: center; gap: 8px;
-  transition: opacity .15s ease;
+  /* Default (close direction): wait for the bar to collapse first, then
+     fade home-top back in. Open direction overrides delay to 0 below so
+     the fade-out is instant. */
+  transition: opacity .15s ease .2s;
 }
-.home-top-wrap.search-open .home-top { opacity: 0; pointer-events: none; }
+.home-top-wrap.search-open .home-top {
+  opacity: 0; pointer-events: none;
+  transition: opacity .12s ease 0s;
+}
 .home-top .btn { padding: 8px 18px; font-size: 14px; }
 
 /* Section labels for "Active" / "Inactive" — small, dim, uppercase */

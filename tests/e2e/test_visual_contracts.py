@@ -191,6 +191,18 @@ def test_search_bar_animates_open(logged_in_page):
     assert 0.1 <= secs <= 1.0, f"animation duration {secs}s out of expected range"
 
 
+def test_search_close_is_staged(logged_in_page):
+    """Close direction: home-top fade-in is delayed so the bar fully
+    collapses before new-btn snaps back into view."""
+    home_top = logged_in_page.locator(".home-top")
+    delay_raw = computed(logged_in_page, home_top, "transition-delay")
+    # transition-delay can be "0.2s" or "200ms" or even comma-separated
+    m = re.search(r"(-?[0-9.]+)\s*(ms|s)", delay_raw)
+    assert m, f"home-top should declare a transition-delay for close: {delay_raw!r}"
+    secs = float(m.group(1)) / (1000.0 if m.group(2) == "ms" else 1.0)
+    assert secs >= 0.1, f"close-direction delay {secs}s too short"
+
+
 def test_search_bar_has_no_internal_gaps_breaking_pill(logged_in_page):
     """Children sit inside the pill, not floating with margins that would
     visually separate them."""
