@@ -224,6 +224,30 @@ def test_long_name_doesnt_run_under_kebab(logged_in_page, spawned_session):
     )
 
 
+def test_rename_long_name_stays_in_card(logged_in_page, spawned_session):
+    """Spec: entering rename on a long name must NOT make the .name
+    element overflow the card boundary."""
+    long_name = "a" * 60
+    sid = spawned_session(name=long_name)
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = hp.card_by_id(sid)
+    expect(card).to_be_visible(timeout=5000)
+    card_box = card.bounding_box()
+
+    card.locator(".card-menu-btn").click()
+    card.locator('.card-menu-item[data-action="rename"]').click()
+    expect(card.locator(".name.editing")).to_be_visible(timeout=2000)
+
+    name_box = card.locator(".name").bounding_box()
+    card_right = card_box["x"] + card_box["width"]
+    name_right = name_box["x"] + name_box["width"]
+    # Name's right edge must stay within the card (allow a 4px outline halo)
+    assert name_right <= card_right + 4, (
+        f"name overflows card: name_right={name_right}, card_right={card_right}"
+    )
+
+
 def test_rename_doesnt_shift_card_layout(logged_in_page, spawned_session):
     """Entering and leaving the rename editor must not change the card's
     rendered bounding box. The .name-edit input has to occupy the exact
