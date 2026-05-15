@@ -346,13 +346,13 @@ function renderOneCard(s, container, isInactiveSection) {
     .replace(/^\/Users\/[^/]+/, "~");
   const badgeLabel = badge.label + (pp > 1 ? ` ×${pp}` : "");
   // Top-right kebab menu. Items differ per section:
-  //   Active   → Rename / Move to Inactive / Delete
+  //   Active   → Rename / Deactivate / Delete
   //   Inactive → Activate / Delete
   const menuItemsHtml = isInactiveSection
     ? `<button class="card-menu-item" role="menuitem" data-action="activate">Activate</button>
        <button class="card-menu-item card-menu-item-danger" role="menuitem" data-action="delete">Delete</button>`
     : `<button class="card-menu-item" role="menuitem" data-action="rename">Rename</button>
-       <button class="card-menu-item" role="menuitem" data-action="deactivate">Move to Inactive</button>
+       <button class="card-menu-item" role="menuitem" data-action="deactivate">Deactivate</button>
        <button class="card-menu-item card-menu-item-danger" role="menuitem" data-action="delete">Delete</button>`;
   el.innerHTML = `
     <button class="card-menu-btn" aria-label="More" title="More">⋯</button>
