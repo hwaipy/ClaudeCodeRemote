@@ -45,8 +45,8 @@ def test_clicking_inactive_header_toggles(logged_in_page):
 
 
 def test_inactive_card_menu_can_reactivate(logged_in_page, spawned_session):
-    """Inactive card menu has 'Move to Active'; click → card moves back
-    to the Active section."""
+    """Inactive card menu has 'Activate'; click → card moves back to the
+    Active section."""
     sid = spawned_session(name="reactivate-me")
     hp = HomePage(logged_in_page)
     hp.expect_visible()
@@ -58,7 +58,7 @@ def test_inactive_card_menu_can_reactivate(logged_in_page, spawned_session):
     card.locator('.card-menu-item[data-action="deactivate"]').click()
     expect(card).to_have_count(0, timeout=5000)
 
-    # Expand Inactive, find the card, use the menu's Move to Active
+    # Expand Inactive, find the card, use the menu's Activate item
     logged_in_page.locator("#sessions-inactive h2.inactive-toggle").click()
     inactive = logged_in_page.locator(f"#sessions-inactive [data-id='{sid}']")
     expect(inactive).to_be_visible(timeout=5000)
