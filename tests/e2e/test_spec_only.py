@@ -252,16 +252,26 @@ def test_idle_card_has_no_badge(logged_in_page, spawned_session):
     expect(card.locator(".badge")).to_have_count(0)
 
 
-def test_card_uses_short_id(logged_in_page, spawned_session):
-    sid = spawned_session(name="short-id-test")
+def test_card_no_longer_shows_short_id(logged_in_page, spawned_session):
+    """Spec update: session id removed from card."""
+    sid = spawned_session(name="no-shortid-test")
     hp = HomePage(logged_in_page)
     hp.expect_visible()
     card = hp.card_by_id(sid)
     expect(card).to_be_visible(timeout=5000)
-    short = card.locator(".short-id")
-    expect(short).to_have_count(1)
-    # short-id is "ccr-" + 6 chars = 10 chars
-    assert len(short.inner_text().strip()) == 10
+    expect(card.locator(".short-id")).to_have_count(0)
+
+
+def test_card_meta_line_has_active_time(logged_in_page, spawned_session):
+    """Active time moved to row 2 (.meta-line)."""
+    sid = spawned_session(name="ts-on-row2")
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = hp.card_by_id(sid)
+    expect(card).to_be_visible(timeout=5000)
+    ts = card.locator(".meta-line .ts")
+    expect(ts).to_be_visible()
+    expect(ts).to_contain_text("active")
 
 
 def test_card_uses_cwd_short(logged_in_page, spawned_session, tmp_path):

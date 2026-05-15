@@ -112,6 +112,56 @@ def test_home_footer_is_at_bottom_dim_and_small(logged_in_page):
     assert foot_box["y"] > list_box["y"], "footer should be below session list"
 
 
+def test_long_cwd_truncates_to_preserve_active_time(logged_in_page,
+                                                    spawned_session, tmp_path):
+    """Spec: when row 2 is tight, cwd-short truncates with ellipsis BUT
+    the 'active X ago' span stays whole. ts has flex: 0 0 auto. Spawn a
+    session in a deliberately long path to force tightness."""
+    long_dir = tmp_path / ("a" * 30) / ("b" * 30)
+    long_dir.mkdir(parents=True)
+    sid = spawned_session(name="cwd-overflow", cwd=str(long_dir))
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = hp.card_by_id(sid)
+    expect(card).to_be_visible(timeout=5000)
+
+    cwd = card.locator(".cwd-short")
+    ts = card.locator(".ts")
+    cwd_box = cwd.bounding_box()
+    ts_box = ts.bounding_box()
+    card_box = card.bounding_box()
+    assert cwd_box and ts_box and card_box
+
+    ts_right = ts_box["x"] + ts_box["width"]
+    card_right = card_box["x"] + card_box["width"]
+    assert ts_right <= card_right - 4, (
+        f"active-time should fit fully: ts_right={ts_right} card_right={card_right}"
+    )
+    overflow = computed(logged_in_page, cwd, "overflow")
+    text_overflow = computed(logged_in_page, cwd, "text-overflow")
+    assert overflow == "hidden", f"cwd-short overflow={overflow!r}"
+    assert text_overflow == "ellipsis", f"cwd-short text-overflow={text_overflow!r}"
+
+
+def test_ts_right_aligned_in_meta_line(logged_in_page, spawned_session):
+    """ts should sit at the right edge of the .meta-line. Concretely:
+    its right edge should be (close to) the meta-line's right edge."""
+    sid = spawned_session(name="ts-right-align")
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = hp.card_by_id(sid)
+    expect(card).to_be_visible(timeout=5000)
+    line = card.locator(".meta-line")
+    ts = card.locator(".ts")
+    lb = line.bounding_box()
+    tb = ts.bounding_box()
+    assert lb and tb
+    drift = (lb["x"] + lb["width"]) - (tb["x"] + tb["width"])
+    assert 0 <= drift <= 2, (
+        f"ts should hug meta-line right edge: drift={drift}px"
+    )
+
+
 def test_long_name_doesnt_run_under_kebab(logged_in_page, spawned_session):
     """Truncated long names must end with a visible gap before the kebab,
     not run beneath it. .session-row1 reserves right-padding for that."""

@@ -696,11 +696,27 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .session-card.state-busy .badge { color: #3fb950; border-color: #1f5333; background: rgba(63,185,80,.08); }
 .session-card.state-waiting .badge,
 .session-card.state-needs-input .badge { color: #d29922; border-color: #5b4421; background: rgba(210,153,34,.08); }
+/* Row 2: cwd-short on the left, ts (active time) right-aligned.
+   Single line, never wraps. When width is tight, cwd-short truncates
+   with ellipsis; ts stays whole — that's the whole point of the row. */
 .session-card .meta-line {
-  font-size: 12px; color: var(--text-dim); font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  display: flex; align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px; color: var(--text-dim);
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  white-space: nowrap;
+  overflow: hidden;
 }
-.session-card .ts-line {
-  font-size: 11px; color: var(--text-dim);
+.session-card .cwd-short {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-card .ts {
+  flex: 0 0 auto;   /* never shrink — active time always fully shown */
+  white-space: nowrap;
 }
 
 .session-card .session-row1 {

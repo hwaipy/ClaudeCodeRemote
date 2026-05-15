@@ -361,10 +361,8 @@ function renderOneCard(s, container, isInactiveSection) {
     </div>
     <div class="meta-line">
       <span class="cwd-short" title="${escHTML(s.cwd || "")}">${escHTML(cwdShort)}</span>
-      <span class="meta-sep"> · </span>
-      <span class="short-id" title="${escHTML(s.id || "")}">${escHTML(shortId)}</span>
-    </div>
-    <div class="ts-line">active ${active} ago${needs ? " · " + escHTML(needs.slice(0, 40)) : ""}</div>`;
+      <span class="ts">active ${escHTML(active)} ago</span>
+    </div>`;
 
   const menuBtn  = el.querySelector(".card-menu-btn");
   const menu     = el.querySelector(".card-menu");
