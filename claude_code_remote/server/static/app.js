@@ -368,7 +368,6 @@ function renderOneCard(s, container, isInactiveSection) {
 
   const menuBtn  = el.querySelector(".card-menu-btn");
   const menu     = el.querySelector(".card-menu");
-  const nameEl   = el.querySelector(".name");
 
   function openMenu() {
     document.querySelectorAll(".card-menu:not([hidden])").forEach(m => {
@@ -379,6 +378,11 @@ function renderOneCard(s, container, isInactiveSection) {
   function closeMenu() { menu.setAttribute("hidden", ""); }
 
   function startRename() {
+    // Re-query the .name element on every invocation — the commit/cancel
+    // path replaces it with a fresh DOM node, so a captured reference
+    // from card-render time would be detached on the second click.
+    const nameEl = el.querySelector(".name");
+    if (!nameEl) return;
     const input = document.createElement("input");
     input.type = "text";
     input.className = "name-edit";

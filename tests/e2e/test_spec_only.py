@@ -112,6 +112,50 @@ def test_rename_inline_edit_persists(logged_in_page, spawned_session):
     ).to_have_text("renamed-session", timeout=5000)
 
 
+def test_rename_can_be_done_repeatedly(logged_in_page, spawned_session):
+    """Each click of Rename must spawn a fresh editor. Regression test:
+    earlier version cached the .name reference at card-render time, so
+    after the first commit the input replaced the cached node and the
+    second click did nothing."""
+    sid = spawned_session(name="first")
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
+    expect(card.locator(".name")).to_have_text("first")
+
+    for n in ("second", "third"):
+        card.locator(".card-menu-btn").click()
+        card.locator('.card-menu-item[data-action="rename"]').click()
+        edit = card.locator(".name-edit")
+        expect(edit).to_be_visible(timeout=2000)
+        edit.fill(n)
+        edit.press("Enter")
+        expect(card.locator(".name")).to_have_text(n, timeout=3000)
+
+
+def test_rename_after_cancel_works(logged_in_page, spawned_session):
+    """Tighter regression: after Esc-cancelling rename (which does NOT
+    fire a WS re-render of the card), a second Rename click must still
+    open a fresh editor. This is the path that actually broke in
+    production — the commit path was saved by an incidental WS re-render."""
+    sid = spawned_session(name="original")
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
+
+    # 1. Open rename then Esc to cancel (no WS event fires)
+    card.locator(".card-menu-btn").click()
+    card.locator('.card-menu-item[data-action="rename"]').click()
+    expect(card.locator(".name-edit")).to_be_visible(timeout=2000)
+    card.locator(".name-edit").press("Escape")
+    expect(card.locator(".name")).to_have_text("original")
+
+    # 2. Open rename AGAIN — must show a fresh editor
+    card.locator(".card-menu-btn").click()
+    card.locator('.card-menu-item[data-action="rename"]').click()
+    expect(card.locator(".name-edit")).to_be_visible(timeout=2000)
+
+
 def test_rename_escape_cancels(logged_in_page, spawned_session):
     sid = spawned_session(name="keep-this")
     hp = HomePage(logged_in_page)
