@@ -299,8 +299,14 @@ function renderSessionList() {
   const inactiveBox  = $("sessions-inactive");
   const mode = getSortMode();
   const all = Array.from(state.sessionsById.values()).sort((a, b) => {
-    const ka = mode === "active" ? (a.last_activity_at || 0) : (a.created_at || 0);
-    const kb = mode === "active" ? (b.last_activity_at || 0) : (b.created_at || 0);
+    // active mode uses the hysteresis snapshot (_sortKey) so small bumps
+    // in last_activity_at (≤ 180 s) don't reshuffle the list.
+    const ka = mode === "active"
+      ? ((typeof a._sortKey === "number") ? a._sortKey : (a.last_activity_at || 0))
+      : (a.created_at || 0);
+    const kb = mode === "active"
+      ? ((typeof b._sortKey === "number") ? b._sortKey : (b.last_activity_at || 0))
+      : (b.created_at || 0);
     return kb - ka;
   });
   const active   = all.filter(s => !s.is_inactive);
@@ -638,13 +644,43 @@ function connectGlobalWS() {
 // recreating them just to show the same new name we already painted.
 const renameInFlight = new Set();
 
+// §2 active-sort hysteresis: when last_activity_at jumps by ≤ 180 s on a
+// SINGLE update (compared to the previously-received last_activity_at),
+// the sort snapshot stays put — small consecutive bumps cannot drift the
+// snapshot forward cumulatively either. The snapshot only rolls forward
+// when a single bump exceeds the threshold.
+const ACTIVE_SORT_HYSTERESIS_S = 180;
+
+function _withSortKey(msg, existing) {
+  const newLA = msg.last_activity_at || 0;
+  let snap;
+  if (!existing) {
+    snap = newLA;
+  } else {
+    const prevLA = (typeof existing._prevLA === "number")
+      ? existing._prevLA
+      : (existing.last_activity_at || 0);
+    const prevSnap = (typeof existing._sortKey === "number")
+      ? existing._sortKey
+      : prevLA;
+    // SINGLE-delta hysteresis: compare new LA to the previously RECEIVED
+    // value (which always advances), not to the snapshot. This keeps the
+    // snapshot truly sticky across many small bumps.
+    snap = Math.abs(newLA - prevLA) > ACTIVE_SORT_HYSTERESIS_S ? newLA : prevSnap;
+  }
+  return { ...msg, _sortKey: snap, _prevLA: newLA };
+}
+
 function handleGlobalMsg(msg) {
   if (msg.type === "snapshot") {
     state.sessionsById.clear();
-    for (const s of msg.sessions || []) state.sessionsById.set(s.id, s);
+    for (const s of msg.sessions || []) {
+      state.sessionsById.set(s.id, _withSortKey(s, null));
+    }
     renderSessionList();
   } else if (msg.type === "session_state") {
-    state.sessionsById.set(msg.id, msg);
+    const existing = state.sessionsById.get(msg.id);
+    state.sessionsById.set(msg.id, _withSortKey(msg, existing));
     // Skip the full-list re-render if we just optimistically renamed
     // this session — the card already shows the new name; rebuilding
     // would just flash an empty cell during innerHTML="" reset.
@@ -1305,6 +1341,22 @@ function refreshConvStatus() {
 }
 // 每秒刷新一次（让 turn 计时器跑起来）
 setInterval(refreshConvStatus, 1000);
+
+// §2: keep "active N ago" labels ticking even when no new session_state
+// arrives. Updates only the .ts text node — no card-DOM rebuild — so we
+// don't lose focus/scroll/animation state.
+setInterval(() => {
+  document.querySelectorAll(".session-card").forEach((card) => {
+    const sid = card.dataset.id;
+    if (!sid) return;
+    const sess = state.sessionsById.get(sid);
+    if (!sess) return;
+    const tsEl = card.querySelector(".ts");
+    if (!tsEl) return;
+    const txt = relTime(sess.last_activity_at) + " ago";
+    if (tsEl.textContent !== txt) tsEl.textContent = txt;
+  });
+}, 1000);
 
 // iOS 键盘弹出时把整个 visual viewport 下移让焦点可见；fixed body 跟随上移 = 屏幕顶。
 // chat-head 钉在 visual viewport 顶端（用户可见区顶），需要正向 translate offsetTop。
