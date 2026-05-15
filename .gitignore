@@ -15,3 +15,4 @@ venv/
 # Test fixtures snapshot from local prod data — never commit
 tests/fixtures/
 .pytest_cache/
+tmp/

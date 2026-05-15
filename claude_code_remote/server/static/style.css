@@ -64,6 +64,12 @@
   --shadow-card:    rgba(0,0,0,0.06) 0 1px 3px;
   --shadow-soft:    rgba(0,0,0,0.04) 0 1px 2px;
   --shadow-toast:   rgba(0,0,0,0.22) 3px 5px 30px 0;
+
+  /* §15.2 selected-card bulge SVGs (10×11 px each). Colors are hardcoded
+     because SVG data URIs cannot reference CSS variables. Light theme:
+     pie = #f5f5f7 (bg-elev), arc = #d2d2d7 (border). */
+  --ccr-bulge-tr: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 11' preserveAspectRatio='none'><path d='M 0 0 L 10 0 A 10 10 0 0 1 0 10 Z' fill='%23f5f5f7'/><path d='M 0 10 A 10 10 0 0 0 10 0' fill='none' stroke='%23d2d2d7' stroke-width='1'/></svg>");
+  --ccr-bulge-br: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 11' preserveAspectRatio='none'><path d='M 0 11 L 10 11 A 10 10 0 0 0 0 1 Z' fill='%23f5f5f7'/><path d='M 0 1 A 10 10 0 0 1 10 11' fill='none' stroke='%23d2d2d7' stroke-width='1'/></svg>");
 }
 
 :root[data-theme="dark"] {
@@ -119,6 +125,11 @@
   --shadow-card:    rgba(0,0,0,0.4) 0 1px 3px;
   --shadow-soft:    rgba(0,0,0,0.3) 0 1px 2px;
   --shadow-toast:   rgba(0,0,0,0.5) 0 10px 30px;
+
+  /* §15.2 dark-theme bulge SVGs. Pie = #1d1d1f (bg-elev), arc = a translucent
+     white that matches dark theme's var(--border). */
+  --ccr-bulge-tr: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 11' preserveAspectRatio='none'><path d='M 0 0 L 10 0 A 10 10 0 0 1 0 10 Z' fill='%231d1d1f'/><path d='M 0 10 A 10 10 0 0 0 10 0' fill='none' stroke='rgba(255%2C255%2C255%2C0.12)' stroke-width='1'/></svg>");
+  --ccr-bulge-br: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 11' preserveAspectRatio='none'><path d='M 0 11 L 10 11 A 10 10 0 0 0 0 1 Z' fill='%231d1d1f'/><path d='M 0 1 A 10 10 0 0 1 10 11' fill='none' stroke='rgba(255%2C255%2C255%2C0.12)' stroke-width='1'/></svg>");
 }
 
 * { box-sizing: border-box; }
@@ -813,35 +824,27 @@ body.theme-dark .state-badge.busy    { background: rgba(46, 160, 67, 0.22); colo
     pointer-events: none;
     z-index: 3;
   }
+  /* Per §15.2: bulges are rendered via inline SVG (NOT radial-gradient)
+     so the C arc stroke has consistent 1 CSS px perpendicular thickness
+     with proper SVG anti-aliasing — radial-gradient stretches in the
+     tangent direction at A and F connection points, producing a
+     stair-stepped curve that doesn't match the design.
+     SVG inside a data URI cannot reach the host's CSS variables, so the
+     theme colors are hardcoded; a dark-theme override sits at the bottom
+     of this file. */
   .session-card.is-current::before {
     top: -10px;
-    /* Three regions painted by the gradient (per §15.2 pixel contract):
-     *   - bg-elev (sidebar color) inside radius 9.2  →  upper-left quadrant
-     *   - var(--border) gray ring  9.5px → 10.7px    →  the C arc (1px stroke)
-     *   - bg-page outside radius 11.0                →  bulge + card body
-     * Ring boundaries chosen so:
-     *   • A's row pixel at (col=0..2, row=10) lands inside the ring → C
-     *     connects with A pixel-for-pixel.
-     *   • F's column pixel at (col=9, row=0) lands inside the ring → C
-     *     connects with F pixel-for-pixel.
-     *   • Soft (0.3px) AA edges on both sides for clean rendering. */
-    background: radial-gradient(
-      circle at top left,
-      var(--bg-elev) 9.2px,
-      var(--border) 9.5px,
-      var(--border) 10.7px,
-      var(--bg-page) 11.0px
-    );
+    background-color: var(--bg-page);
+    background-image: var(--ccr-bulge-tr);
+    background-size: 10px 11px;
+    background-repeat: no-repeat;
   }
   .session-card.is-current::after {
     bottom: -10px;
-    background: radial-gradient(
-      circle at bottom left,
-      var(--bg-elev) 9.2px,
-      var(--border) 9.5px,
-      var(--border) 10.7px,
-      var(--bg-page) 11.0px
-    );
+    background-color: var(--bg-page);
+    background-image: var(--ccr-bulge-br);
+    background-size: 10px 11px;
+    background-repeat: no-repeat;
   }
 
   /* §15.2 hover invariance: .session-card:hover sets border-color so the
@@ -1786,7 +1789,9 @@ body.theme-dark .conv-status .cs-spark { color: #e8a690; }
     position: absolute;
     top: 0; right: 0; bottom: 0;
     width: 1px;
-    background: var(--border-soft);
+    /* §15.2 F-segment: divider uses var(--border) so A / C / F all share
+       the SAME gray everywhere along the continuous bulge outline. */
+    background: var(--border);
     z-index: 1;
     pointer-events: none;
   }

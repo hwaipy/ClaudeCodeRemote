@@ -486,38 +486,35 @@ def test_current_card_has_inverse_rounded_right_corners(wide_page, base_url, tes
             f"got {info['after']['bottom']!r}"
         )
 
-        # The boundary curve is rendered via a radial-gradient on the
-        # pseudo (NOT a solid color, NOT a border-radius).
+        # The bulge is rendered via inline SVG (data: URI) — this gives
+        # a crisp 1-px anti-aliased arc stroke, which CSS radial-gradient
+        # cannot produce (gradient produces a stair-stepped curve at the
+        # tangent points). See §15.2 of the SPEC.
         for tag in ("before", "after"):
             bg_image = info[tag]["bgImage"]
-            assert "radial-gradient" in bg_image, (
-                f"::{tag} background-image should be a radial-gradient, "
+            assert "data:image/svg+xml" in bg_image, (
+                f"::{tag} background-image should be an inline SVG (data URI), "
                 f"got {bg_image!r}"
             )
-            # Must include both colors so the boundary is visible
-            sidebar_bg = computed(wide_page, wide_page.locator("#view-home"),
-                                  "background-color").replace(" ", "")
-            card_bg = computed(wide_page, card, "background-color").replace(" ", "")
-            # The CSS uses var(--bg-elev) and var(--bg-page); resolved as
-            # rgb() in computed bg-image. Strip whitespace for comparison.
-            bg_norm = bg_image.replace(" ", "")
-            assert sidebar_bg in bg_norm, (
-                f"::{tag} gradient should include sidebar color {sidebar_bg}, "
-                f"got {bg_image!r}"
-            )
-            assert card_bg in bg_norm, (
-                f"::{tag} gradient should include card color {card_bg}, "
-                f"got {bg_image!r}"
-            )
+            # SVG must contain the pie fill (bg-elev hex) AND the arc
+            # stroke (border hex). Light theme hardcodes #f5f5f7 + #d2d2d7;
+            # dark theme overrides via :root[data-theme='dark'] with
+            # #1d1d1f + rgba(255,255,255,0.12).
+            assert "<path" in bg_image, f"::{tag} SVG should contain <path> elements"
+            assert "fill=" in bg_image, f"::{tag} SVG should fill the pie"
+            assert "stroke=" in bg_image, f"::{tag} SVG should stroke the arc"
     finally:
         api_delete_session(base_url, test_token, sid)
 
 
 def test_current_card_arc_includes_border_color(wide_page, base_url, test_token):
     """Spec §15.2 segment C: the concave arc has a 1px gray stroke
-    (var(--border)) embedded in the pseudo's radial-gradient. Without that
-    color stop, A and F would have nothing to visually connect with through
-    the bulge."""
+    embedded in the pseudo's inline SVG. Without that, A and F would have
+    nothing visible to connect with through the bulge.
+
+    The pseudo uses a data: URI SVG with hardcoded hex colors (cannot
+    reference CSS vars). The arc stroke is %23d2d2d7 (#d2d2d7) in light
+    theme; the pie fill is %23f5f5f7 (#f5f5f7)."""
     from tests.helpers import api_spawn, api_delete_session
     import re as _re
     sid = api_spawn(base_url, test_token, "/tmp", "arc-border-test")
@@ -529,23 +526,22 @@ def test_current_card_arc_includes_border_color(wide_page, base_url, test_token)
         card.click()
         expect(card).to_have_class(_re.compile(r"\bis-current\b"), timeout=5000)
 
-        # Read the resolved background-image of each pseudo. It must include
-        # the same color as the divider line (view-home::after / card border).
-        border_color = computed(
-            wide_page,
-            wide_page.locator("#view-home"),
-            "border-right-color",  # falls back to fetching divider via getComputedStyle
-        )
-        # Use a known good source: card's border-top-color (always gray).
-        gray = computed(wide_page, card, "border-top-color").replace(" ", "")
         for tag in ("before", "after"):
             bg = wide_page.evaluate(
                 f"() => {{ const c = document.querySelector(`[data-id='{sid}']`); "
                 f"return getComputedStyle(c, '::{tag}').backgroundImage; }}"
-            ).replace(" ", "")
-            assert gray in bg, (
-                f"::{tag} gradient must include border gray {gray} to stroke "
-                f"the C arc; got {bg!r}"
+            )
+            # Border color hex (light theme #d2d2d7 → URL-encoded as %23d2d2d7),
+            # or the dark-theme equivalent rgba(255,255,255,0.12).
+            assert ("%23d2d2d7" in bg) or ("rgba(255%2C255%2C255%2C0.12)" in bg), (
+                f"::{tag} SVG must contain the var(--border) stroke color "
+                f"(light: %23d2d2d7 / dark: rgba(255%2C255%2C255%2C0.12)); "
+                f"got {bg!r}"
+            )
+            # Pie fill: bg-elev hex (light: %23f5f5f7 / dark: %231d1d1f)
+            assert ("%23f5f5f7" in bg) or ("%231d1d1f" in bg), (
+                f"::{tag} SVG must contain the var(--bg-elev) pie fill "
+                f"(light: %23f5f5f7 / dark: %231d1d1f); got {bg!r}"
             )
     finally:
         api_delete_session(base_url, test_token, sid)
