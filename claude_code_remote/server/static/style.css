@@ -64,12 +64,6 @@
   --shadow-card:    rgba(0,0,0,0.06) 0 1px 3px;
   --shadow-soft:    rgba(0,0,0,0.04) 0 1px 2px;
   --shadow-toast:   rgba(0,0,0,0.22) 3px 5px 30px 0;
-
-  /* §15.2 selected-card bulge SVGs (10×11 px each). Colors are hardcoded
-     because SVG data URIs cannot reference CSS variables. Light theme:
-     pie = #f5f5f7 (bg-elev), arc = #d2d2d7 (border). */
-  --ccr-bulge-tr: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 11' preserveAspectRatio='none'><path d='M 0 0 L 10 0 A 10 10 0 0 1 0 10 Z' fill='%23f5f5f7'/><path d='M 0 10 A 10 10 0 0 0 10 0' fill='none' stroke='%23d2d2d7' stroke-width='1'/></svg>");
-  --ccr-bulge-br: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 11' preserveAspectRatio='none'><path d='M 0 11 L 10 11 A 10 10 0 0 0 0 1 Z' fill='%23f5f5f7'/><path d='M 0 1 A 10 10 0 0 1 10 11' fill='none' stroke='%23d2d2d7' stroke-width='1'/></svg>");
 }
 
 :root[data-theme="dark"] {
@@ -125,11 +119,6 @@
   --shadow-card:    rgba(0,0,0,0.4) 0 1px 3px;
   --shadow-soft:    rgba(0,0,0,0.3) 0 1px 2px;
   --shadow-toast:   rgba(0,0,0,0.5) 0 10px 30px;
-
-  /* §15.2 dark-theme bulge SVGs. Pie = #1d1d1f (bg-elev), arc = a translucent
-     white that matches dark theme's var(--border). */
-  --ccr-bulge-tr: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 11' preserveAspectRatio='none'><path d='M 0 0 L 10 0 A 10 10 0 0 1 0 10 Z' fill='%231d1d1f'/><path d='M 0 10 A 10 10 0 0 0 10 0' fill='none' stroke='rgba(255%2C255%2C255%2C0.12)' stroke-width='1'/></svg>");
-  --ccr-bulge-br: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 11' preserveAspectRatio='none'><path d='M 0 11 L 10 11 A 10 10 0 0 0 0 1 Z' fill='%231d1d1f'/><path d='M 0 1 A 10 10 0 0 1 10 11' fill='none' stroke='rgba(255%2C255%2C255%2C0.12)' stroke-width='1'/></svg>");
 }
 
 * { box-sizing: border-box; }
@@ -805,59 +794,9 @@ body.theme-dark .state-badge.busy    { background: rgba(46, 160, 67, 0.22); colo
   .session-card.is-current .card-menu { right: 20px; }
   .session-card.is-current:hover { background: var(--bg-page); }
 
-  /* "Opened" feel at the card↔chat junction: the white (bg-page) region
-     extends OUTWARD past the card top and bottom along the sidebar's
-     right edge, with a concave arc scooping the boundary inward. Each
-     pseudo is a 10-wide × 11-tall box (1px overlap into the card body
-     so the bulge merges through the card's top/bottom border) painted
-     with a radial-gradient: bg-elev (sidebar color) inside a 10px-radius
-     circle anchored at the corner away from the card, bg-page outside.
-     The boundary of that circle is the concave arc — same geometry as
-     the SVG mockup's <path A 10 10 0 0 0 …>. */
-  .session-card.is-current::before,
-  .session-card.is-current::after {
-    content: "";
-    position: absolute;
-    right: 0;
-    width: 10px;
-    height: 11px;
-    pointer-events: none;
-    z-index: 3;
-  }
-  /* Per §15.2: bulges are rendered via inline SVG (NOT radial-gradient)
-     so the C arc stroke has consistent 1 CSS px perpendicular thickness
-     with proper SVG anti-aliasing — radial-gradient stretches in the
-     tangent direction at A and F connection points, producing a
-     stair-stepped curve that doesn't match the design.
-     SVG inside a data URI cannot reach the host's CSS variables, so the
-     theme colors are hardcoded; a dark-theme override sits at the bottom
-     of this file. */
-  .session-card.is-current::before {
-    top: -10px;
-    /* right: -1px (not 0) — absolute positioning's containing block is the
-       card's PADDING-box, so right:0 stops at card_right - border-right-width
-       (1px), leaving the divider F's column EXPOSED beneath the bulge.
-       That visible-through gray is exactly segment D (which §15.2 says
-       must NOT show). Shifting right by -1px lets the pseudo cover the
-       full sidebar-right column, hiding F under the bulge. */
-    right: -1px;
-    background-color: var(--bg-page);
-    background-image: var(--ccr-bulge-tr);
-    background-size: 10px 11px;
-    background-repeat: no-repeat;
-  }
-  .session-card.is-current::after {
-    bottom: -10px;
-    right: -1px;
-    background-color: var(--bg-page);
-    background-image: var(--ccr-bulge-br);
-    background-size: 10px 11px;
-    background-repeat: no-repeat;
-  }
-
-  /* §15.2 hover invariance: .session-card:hover sets border-color so the
-   * right border (which we keep transparent on .is-current) doesn't get
-   * flipped back to gray on hover. Re-assert transparent on this state. */
+  /* Hover invariance: the base .session-card:hover sets border-color, which
+     would re-flip the right border (kept transparent on .is-current to merge
+     visually with the chat panel) back to gray. Re-assert transparent here. */
   .session-card.is-current:hover {
     border-right-color: transparent;
   }
@@ -1797,9 +1736,7 @@ body.theme-dark .conv-status .cs-spark { color: #e8a690; }
     position: absolute;
     top: 0; right: 0; bottom: 0;
     width: 1px;
-    /* §15.2 F-segment: divider uses var(--border) so A / C / F all share
-       the SAME gray everywhere along the continuous bulge outline. */
-    background: var(--border);
+    background: var(--border-soft);
     z-index: 1;
     pointer-events: none;
   }
