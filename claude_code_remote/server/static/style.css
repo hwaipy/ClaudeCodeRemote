@@ -773,10 +773,8 @@ body.theme-dark .state-badge.busy    { background: rgba(46, 160, 67, 0.22); colo
 @media (min-width: 900px) {
   .session-card.is-current {
     background: var(--bg-page);
-    /* Keep the gray border on ALL four sides — the right border at x=320
-       is the middle segment of the continuous outline that connects the
-       two concave bulges (see ::before / ::after below). Square the right
-       corners so the border meets the arcs cleanly. */
+    /* Keep the subtle gray border on top/left/bottom; right edge dissolves. */
+    border-right-color: transparent;
     border-top-right-radius: 0;
     border-bottom-right-radius: 0;
     /* Bleed past center-wrap's 16px right padding so the card meets the
@@ -817,26 +815,40 @@ body.theme-dark .state-badge.busy    { background: rgba(46, 160, 67, 0.22); colo
   }
   .session-card.is-current::before {
     top: -10px;
-    /* 1) 1×10 vertical gray line at the bulge's right edge (continues the
-     *    divider above the bulge into the bulge area).
-     * 2) Radial gradient with a thin gray ring on the arc itself. */
-    background:
-      linear-gradient(var(--border), var(--border)) top right / 1px 10px no-repeat,
-      radial-gradient(circle at top left,
-        var(--bg-elev) 9.3px,
-        var(--border) 9.6px,
-        var(--border) 10.2px,
-        var(--bg-page) 10.5px);
+    /* Three regions painted by the gradient (per §15.2 pixel contract):
+     *   - bg-elev (sidebar color) inside radius 9.2  →  upper-left quadrant
+     *   - var(--border) gray ring  9.5px → 10.7px    →  the C arc (1px stroke)
+     *   - bg-page outside radius 11.0                →  bulge + card body
+     * Ring boundaries chosen so:
+     *   • A's row pixel at (col=0..2, row=10) lands inside the ring → C
+     *     connects with A pixel-for-pixel.
+     *   • F's column pixel at (col=9, row=0) lands inside the ring → C
+     *     connects with F pixel-for-pixel.
+     *   • Soft (0.3px) AA edges on both sides for clean rendering. */
+    background: radial-gradient(
+      circle at top left,
+      var(--bg-elev) 9.2px,
+      var(--border) 9.5px,
+      var(--border) 10.7px,
+      var(--bg-page) 11.0px
+    );
   }
   .session-card.is-current::after {
     bottom: -10px;
-    background:
-      linear-gradient(var(--border), var(--border)) bottom right / 1px 10px no-repeat,
-      radial-gradient(circle at bottom left,
-        var(--bg-elev) 9.3px,
-        var(--border) 9.6px,
-        var(--border) 10.2px,
-        var(--bg-page) 10.5px);
+    background: radial-gradient(
+      circle at bottom left,
+      var(--bg-elev) 9.2px,
+      var(--border) 9.5px,
+      var(--border) 10.7px,
+      var(--bg-page) 11.0px
+    );
+  }
+
+  /* §15.2 hover invariance: .session-card:hover sets border-color so the
+   * right border (which we keep transparent on .is-current) doesn't get
+   * flipped back to gray on hover. Re-assert transparent on this state. */
+  .session-card.is-current:hover {
+    border-right-color: transparent;
   }
 }
 @keyframes ccr-pulse-yellow {

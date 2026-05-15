@@ -357,11 +357,11 @@ def test_rename_doesnt_shift_card_layout(logged_in_page, spawned_session):
 
 
 def test_current_card_merges_into_chat_on_wide(wide_page, base_url, test_token):
-    """Wide layout: selected card sits flush against the chat panel.
-    - All four borders are gray (the right border is the middle segment of
-      the continuous outline that joins the two concave bulges above/below)
-    - Right radius is squared so the gray border meets the arcs cleanly
-    - Right edge reaches the sidebar's right edge
+    """Wide layout: selected card visually merges into the chat panel.
+    - Its left/top/bottom keep the subtle gray border
+    - Right border + right radius dissolve
+    - Right edge reaches the sidebar's right edge (covers the divider
+      pseudo at this card's height, so the divider has a notch here)
     - Internal kebab position is unchanged by the extension"""
     from tests.helpers import api_spawn, api_delete_session
     import re as _re
@@ -376,11 +376,10 @@ def test_current_card_merges_into_chat_on_wide(wide_page, base_url, test_token):
         card.click()
         expect(card).to_have_class(_re.compile(r"\bis-current\b"), timeout=5000)
 
-        # Right border is now gray (part of the continuous outline)
+        # Right edge stuff
         border_color = computed(wide_page, card, "border-right-color").replace(" ", "")
-        assert border_color not in ("rgba(0,0,0,0)", "transparent"), (
-            f"is-current right border-color must be visible (gray segment "
-            f"between the two bulges), got {border_color}"
+        assert border_color in ("rgba(0,0,0,0)", "transparent"), (
+            f"is-current right border-color: {border_color}"
         )
         radius = computed_px(wide_page, card, "border-top-right-radius")
         assert radius <= 1, f"top-right radius should be 0: {radius}"
@@ -509,6 +508,96 @@ def test_current_card_has_inverse_rounded_right_corners(wide_page, base_url, tes
             assert card_bg in bg_norm, (
                 f"::{tag} gradient should include card color {card_bg}, "
                 f"got {bg_image!r}"
+            )
+    finally:
+        api_delete_session(base_url, test_token, sid)
+
+
+def test_current_card_arc_includes_border_color(wide_page, base_url, test_token):
+    """Spec §15.2 segment C: the concave arc has a 1px gray stroke
+    (var(--border)) embedded in the pseudo's radial-gradient. Without that
+    color stop, A and F would have nothing to visually connect with through
+    the bulge."""
+    from tests.helpers import api_spawn, api_delete_session
+    import re as _re
+    sid = api_spawn(base_url, test_token, "/tmp", "arc-border-test")
+    try:
+        hp = HomePage(wide_page)
+        hp.expect_visible()
+        card = hp.card_by_id(sid)
+        expect(card).to_be_visible(timeout=5000)
+        card.click()
+        expect(card).to_have_class(_re.compile(r"\bis-current\b"), timeout=5000)
+
+        # Read the resolved background-image of each pseudo. It must include
+        # the same color as the divider line (view-home::after / card border).
+        border_color = computed(
+            wide_page,
+            wide_page.locator("#view-home"),
+            "border-right-color",  # falls back to fetching divider via getComputedStyle
+        )
+        # Use a known good source: card's border-top-color (always gray).
+        gray = computed(wide_page, card, "border-top-color").replace(" ", "")
+        for tag in ("before", "after"):
+            bg = wide_page.evaluate(
+                f"() => {{ const c = document.querySelector(`[data-id='{sid}']`); "
+                f"return getComputedStyle(c, '::{tag}').backgroundImage; }}"
+            ).replace(" ", "")
+            assert gray in bg, (
+                f"::{tag} gradient must include border gray {gray} to stroke "
+                f"the C arc; got {bg!r}"
+            )
+    finally:
+        api_delete_session(base_url, test_token, sid)
+
+
+def test_current_card_right_border_stays_transparent_on_hover(
+    wide_page, base_url, test_token
+):
+    """Spec §15.2 hover契约: 选中卡的 border-right-color must remain
+    transparent in both normal and :hover states. Otherwise the base
+    .session-card:hover rule (which sets border-color) would flip the right
+    border to gray, breaking the E='not visible' contract and changing
+    the visible borders' appearance under hover."""
+    from tests.helpers import api_spawn, api_delete_session
+    import re as _re
+    sid = api_spawn(base_url, test_token, "/tmp", "hover-border-test")
+    try:
+        hp = HomePage(wide_page)
+        hp.expect_visible()
+        card = hp.card_by_id(sid)
+        expect(card).to_be_visible(timeout=5000)
+        card.click()
+        expect(card).to_have_class(_re.compile(r"\bis-current\b"), timeout=5000)
+
+        # Normal state — right border should be transparent
+        normal_color = computed(wide_page, card, "border-right-color").replace(" ", "")
+        assert normal_color in ("rgba(0,0,0,0)", "transparent"), (
+            f"normal state: right border should be transparent, got {normal_color}"
+        )
+
+        # Hover state — must STILL be transparent
+        card.hover()
+        # Give the browser a tick to apply :hover styles
+        wide_page.wait_for_timeout(50)
+        hover_color = computed(wide_page, card, "border-right-color").replace(" ", "")
+        assert hover_color in ("rgba(0,0,0,0)", "transparent"), (
+            f"hover state: right border should be transparent (was {normal_color} "
+            f"in normal state, became {hover_color} on hover — :hover rule must "
+            f"not flip the right border to gray)"
+        )
+
+        # The other three borders should keep the same color (var(--border)).
+        for side in ("top", "left", "bottom"):
+            n = computed(wide_page, card, f"border-{side}-color").replace(" ", "")
+            wide_page.wait_for_timeout(0)
+            h = wide_page.evaluate(
+                f"() => getComputedStyle(document.querySelector(`[data-id='{sid}']`))"
+                f".getPropertyValue('border-{side}-color').replace(/\\s/g, '')"
+            )
+            assert n == h, (
+                f"border-{side}-color changed on hover: normal={n}, hover={h} "
+                f"— §15.2 contract requires hover invariance"
             )
     finally:
         api_delete_session(base_url, test_token, sid)
