@@ -224,6 +224,33 @@ def test_long_name_doesnt_run_under_kebab(logged_in_page, spawned_session):
     )
 
 
+def test_rename_to_long_name_keeps_card_layout(logged_in_page, spawned_session):
+    """Spec: after renaming to a long string the .name should keep its
+    flex:1 share of row 1 (ellipsizes long content). Its rendered width
+    must not collapse to a sliver."""
+    sid = spawned_session(name="short")
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = hp.card_by_id(sid)
+    expect(card).to_be_visible(timeout=5000)
+    name_w_before = card.locator(".name").bounding_box()["width"]
+    assert name_w_before > 40
+
+    card.locator(".card-menu-btn").click()
+    card.locator('.card-menu-item[data-action="rename"]').click()
+    expect(card.locator(".name.editing")).to_be_visible(timeout=2000)
+    logged_in_page.keyboard.press("Control+a")
+    logged_in_page.keyboard.type("a" * 80)
+    logged_in_page.keyboard.press("Enter")
+    logged_in_page.wait_for_timeout(800)   # past renameInFlight grace
+
+    name_w_after = card.locator(".name").bounding_box()["width"]
+    assert abs(name_w_before - name_w_after) <= 5, (
+        f"name width collapsed after long rename: "
+        f"before={name_w_before}, after={name_w_after}"
+    )
+
+
 def test_rename_no_blank_period_after_commit(logged_in_page, spawned_session):
     """Spec: after Enter, .name must continuously show non-empty text —
     no destroy-and-rebuild blank moment during the WS-echo re-render."""

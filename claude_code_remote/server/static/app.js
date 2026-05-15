@@ -415,20 +415,23 @@ function renderOneCard(s, container, isInactiveSection) {
         return;
       }
       nameEl.textContent = newName;   // optimistic
-      // Mark this rename in flight so the WS-echoed session_state doesn't
-      // trigger a full list rebuild while we're already showing the new
-      // name. Without this the card briefly blanks during innerHTML reset.
+      // Patch the state map so a fresh re-render uses the new name.
+      const stateSess = state.sessionsById.get(s.id);
+      if (stateSess) stateSess.name = newName;
+      // Skip the WS-echo full-list rebuild — we'll do a clean single-card
+      // re-render below once the server confirms, which avoids the blank
+      // moment but still gives us a fresh DOM with correct layout (iOS
+      // Safari caches stale intrinsic widths after contenteditable exits).
       renameInFlight.add(s.id);
       try {
         await api(`/api/sessions/${encodeURIComponent(s.id)}/rename`,
                    { method: "PUT", body: JSON.stringify({ name: newName }) });
         s.name = newName;
+        rerenderOneCardInPlace(s.id);
       } catch (err) {
         alert("Rename failed: " + err.message);
         nameEl.textContent = original;
       } finally {
-        // Clear after a short grace window so any straggling broadcast
-        // also gets coalesced before normal re-render resumes.
         setTimeout(() => renameInFlight.delete(s.id), 250);
       }
     }
@@ -497,6 +500,28 @@ function setTitleIfClipped(el, fullText) {
   } else {
     el.removeAttribute("title");
   }
+}
+
+// Replace a single .session-card in place with a freshly-rendered one
+// (using current state.sessionsById). Used after rename commit so iOS
+// Safari can't keep a stale intrinsic-width from the contenteditable
+// session. Lighter than renderSessionList() — no full innerHTML reset,
+// only one card flips.
+function rerenderOneCardInPlace(sid) {
+  const old = document.querySelector(`.session-card[data-id="${CSS.escape(sid)}"]`);
+  if (!old || !old.parentNode) return;
+  const sess = state.sessionsById.get(sid);
+  if (!sess) return;
+  const container = old.parentNode;
+  const isInactiveSection = container.id === "session-list-inactive";
+  // renderOneCard appends to container; remember the position to slot
+  // the new card into and then move it to where the old one was.
+  const placeholder = document.createComment("rerender-slot");
+  old.replaceWith(placeholder);
+  renderOneCard(sess, container, isInactiveSection);
+  const fresh = container.lastElementChild;
+  if (fresh) placeholder.replaceWith(fresh);
+  else placeholder.remove();
 }
 
 // Re-evaluate clipping on window resize so a card that newly truncates
