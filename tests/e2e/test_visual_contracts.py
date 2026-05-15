@@ -250,6 +250,50 @@ def test_new_btn_visibly_un_squeezes_on_search_close(logged_in_page):
     )
 
 
+def test_search_bar_right_edge_stable_during_close(logged_in_page):
+    """The bar is anchored to the row's right edge. During close, its
+    LEFT edge slides rightward (width shrinks) but its RIGHT edge must
+    stay put — any wobble = layout overflow / flex snap regression."""
+    bar = logged_in_page.locator("#search-bar")
+    logged_in_page.locator("#search-btn").click()
+    logged_in_page.wait_for_timeout(450)
+    box = bar.bounding_box()
+    right_open = box["x"] + box["width"]
+
+    logged_in_page.locator("#search-clear").click()
+    samples = []
+    for step in (30, 60, 80, 80, 80, 80, 80):
+        logged_in_page.wait_for_timeout(step)
+        b = bar.bounding_box()
+        samples.append(b["x"] + b["width"])
+    drift = [abs(r - right_open) for r in samples]
+    # Allow 1.5px sub-pixel rounding tolerance
+    assert max(drift) <= 1.5, (
+        f"search-bar right edge drifted during close: open={right_open}, "
+        f"samples={samples}, max drift={max(drift)}px"
+    )
+
+
+def test_search_bar_right_edge_stable_during_open(logged_in_page):
+    """Mirror: during open the right edge must stay put while only the
+    left edge moves leftward."""
+    bar = logged_in_page.locator("#search-bar")
+    box = bar.bounding_box()
+    right_initial = box["x"] + box["width"]
+
+    logged_in_page.locator("#search-btn").click()
+    samples = []
+    for step in (30, 60, 80, 80, 80, 80, 80):
+        logged_in_page.wait_for_timeout(step)
+        b = bar.bounding_box()
+        samples.append(b["x"] + b["width"])
+    drift = [abs(r - right_initial) for r in samples]
+    assert max(drift) <= 1.5, (
+        f"search-bar right edge drifted during open: initial={right_initial}, "
+        f"samples={samples}, max drift={max(drift)}px"
+    )
+
+
 def test_new_btn_width_grows_monotonically_during_close(logged_in_page):
     """Stronger smoothness check: sample new-btn width 4× during the
     close transition and assert each sample is ≥ the previous. Catches

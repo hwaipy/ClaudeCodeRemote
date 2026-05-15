@@ -411,7 +411,11 @@ input:focus, textarea:focus { border-color: var(--accent); }
   display: flex; gap: 8px; align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+  /* Transition gap so the bar can take the full container width when
+     open (without the 8px gap overflowing) and snap back when closed. */
+  transition: gap .35s cubic-bezier(.4,0,.2,1);
 }
+.home-top.search-open { gap: 0; }
 .home-top .btn { padding: 8px 18px; font-size: 14px; }
 #new-btn {
   flex: 0 0 auto;
@@ -483,12 +487,17 @@ input:focus, textarea:focus { border-color: var(--accent); }
    children invisible. Expanded (via .home-top-wrap.search-open) = full
    width pill. The bar IS the container — children are borderless. */
 /* Search bar — single element, two states:
-   - collapsed (default): 36px round pill, only the lens icon visible
-   - expanded (.home-top.search-open): grows to fill the row, input + ✕ fade in
-   The width animation is the same in both directions (no per-state
-   override, so iOS Safari handles it identically). */
+   - collapsed (default): 36px round chip, only the lens icon visible
+   - expanded (.home-top.search-open): grows to fill the row
+   IMPORTANT: flex grow/shrink stay constant across both states (0 / 1).
+   When the previous version flipped flex from "1 1 100%" → "0 0 36px" on
+   close, the grow/shrink snapped instantly (non-animatable) while basis
+   tried to transition — that brief mismatch overflowed the row by ~8px
+   for one frame, which manifested as the bar's right-edge jittering.
+   Now ONLY width transitions; flex-shrink:1 quietly absorbs any sub-pixel
+   overflow without moving the right edge. */
 .search-bar {
-  flex: 0 0 36px;
+  flex: 0 1 auto;
   width: 36px;
   height: 36px;
   display: flex; align-items: center;
@@ -497,13 +506,11 @@ input:focus, textarea:focus { border-color: var(--accent); }
   border-radius: 999px;
   background: transparent;
   overflow: hidden;
-  transition: flex-basis .35s cubic-bezier(.4,0,.2,1),
-              width .35s cubic-bezier(.4,0,.2,1),
-              padding .35s ease,
+  transition: width .35s cubic-bezier(.4,0,.2,1),
+              padding .35s cubic-bezier(.4,0,.2,1),
               background-color .15s ease;
 }
 .home-top.search-open .search-bar {
-  flex: 1 1 100%;
   width: 100%;
   padding: 0 4px 0 0;
   background: var(--bg-input);
