@@ -378,53 +378,62 @@ function renderOneCard(s, container, isInactiveSection) {
   function closeMenu() { menu.setAttribute("hidden", ""); }
 
   function startRename() {
-    // Re-query the .name element on every invocation — the commit/cancel
-    // path replaces it with a fresh DOM node, so a captured reference
-    // from card-render time would be detached on the second click.
+    // Edit the .name div in-place via contenteditable — same element,
+    // same box dimensions, zero layout shift on enter/exit.
     const nameEl = el.querySelector(".name");
-    if (!nameEl) return;
-    const input = document.createElement("input");
-    input.type = "text";
-    input.className = "name-edit";
-    input.value = s.name || "";
-    input.maxLength = 80;
-    nameEl.replaceWith(input);
-    input.focus();
-    input.select();
-    let committed = false;
+    if (!nameEl || nameEl.classList.contains("editing")) return;
+    const original = s.name || "untitled";
+    nameEl.contentEditable = "true";
+    nameEl.spellcheck = false;
+    nameEl.classList.add("editing");
+    nameEl.focus();
+    // Select all of the existing text
+    const range = document.createRange();
+    range.selectNodeContents(nameEl);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    let settled = false;
+    function leaveEdit() {
+      nameEl.contentEditable = "false";
+      nameEl.classList.remove("editing");
+      nameEl.removeEventListener("keydown", onKey);
+      nameEl.removeEventListener("blur", onBlur);
+    }
     async function commit() {
-      if (committed) return;
-      committed = true;
-      const newName = input.value.trim();
-      // Restore name span first (so WS-pushed re-render doesn't fight us)
-      const span = document.createElement("div");
-      span.className = "name";
-      span.textContent = newName || s.name || "untitled";
-      input.replaceWith(span);
-      if (!newName || newName === s.name) return;
+      if (settled) return;
+      settled = true;
+      const newName = (nameEl.textContent || "").trim();
+      leaveEdit();
+      if (!newName || newName === original) {
+        nameEl.textContent = original;
+        return;
+      }
+      nameEl.textContent = newName;   // optimistic
       try {
         await api(`/api/sessions/${encodeURIComponent(s.id)}/rename`,
                    { method: "PUT", body: JSON.stringify({ name: newName }) });
         s.name = newName;
       } catch (err) {
         alert("Rename failed: " + err.message);
-        span.textContent = s.name || "untitled";
+        nameEl.textContent = original;
       }
     }
     function cancel() {
-      if (committed) return;
-      committed = true;
-      const span = document.createElement("div");
-      span.className = "name";
-      span.textContent = s.name || "untitled";
-      input.replaceWith(span);
+      if (settled) return;
+      settled = true;
+      nameEl.textContent = original;
+      leaveEdit();
     }
-    input.addEventListener("keydown", e => {
+    function onKey(e) {
       if (e.key === "Enter") { e.preventDefault(); commit(); }
       else if (e.key === "Escape") { e.preventDefault(); cancel(); }
-    });
-    input.addEventListener("blur", commit);
-    input.addEventListener("click", e => e.stopPropagation());
+    }
+    function onBlur() { commit(); }
+    nameEl.addEventListener("keydown", onKey);
+    nameEl.addEventListener("blur", onBlur);
+    nameEl.addEventListener("click", e => e.stopPropagation());
   }
 
   menuBtn.addEventListener("click", (e) => {

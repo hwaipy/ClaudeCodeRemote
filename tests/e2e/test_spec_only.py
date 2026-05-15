@@ -98,11 +98,14 @@ def test_rename_inline_edit_persists(logged_in_page, spawned_session):
     card.locator(".card-menu-btn").click()
     card.locator('.card-menu-item[data-action="rename"]').click()
 
-    edit = card.locator(".name-edit")
+    edit = card.locator(".name.editing")
     expect(edit).to_be_visible()
     expect(edit).to_be_focused()
-    edit.fill("renamed-session")
-    edit.press("Enter")
+    # contenteditable: clear text + type new name (fill doesn't work on
+    # contenteditable elements directly — they're not <input>)
+    logged_in_page.keyboard.press("Control+a")
+    logged_in_page.keyboard.type("renamed-session")
+    logged_in_page.keyboard.press("Enter")
 
     expect(card.locator(".name")).to_have_text("renamed-session", timeout=3000)
     # Refresh and verify backend stored it
@@ -126,10 +129,11 @@ def test_rename_can_be_done_repeatedly(logged_in_page, spawned_session):
     for n in ("second", "third"):
         card.locator(".card-menu-btn").click()
         card.locator('.card-menu-item[data-action="rename"]').click()
-        edit = card.locator(".name-edit")
+        edit = card.locator(".name.editing")
         expect(edit).to_be_visible(timeout=2000)
-        edit.fill(n)
-        edit.press("Enter")
+        logged_in_page.keyboard.press("Control+a")
+        logged_in_page.keyboard.type(n)
+        logged_in_page.keyboard.press("Enter")
         expect(card.locator(".name")).to_have_text(n, timeout=3000)
 
 
@@ -146,14 +150,14 @@ def test_rename_after_cancel_works(logged_in_page, spawned_session):
     # 1. Open rename then Esc to cancel (no WS event fires)
     card.locator(".card-menu-btn").click()
     card.locator('.card-menu-item[data-action="rename"]').click()
-    expect(card.locator(".name-edit")).to_be_visible(timeout=2000)
-    card.locator(".name-edit").press("Escape")
+    expect(card.locator(".name.editing")).to_be_visible(timeout=2000)
+    card.locator(".name.editing").press("Escape")
     expect(card.locator(".name")).to_have_text("original")
 
     # 2. Open rename AGAIN — must show a fresh editor
     card.locator(".card-menu-btn").click()
     card.locator('.card-menu-item[data-action="rename"]').click()
-    expect(card.locator(".name-edit")).to_be_visible(timeout=2000)
+    expect(card.locator(".name.editing")).to_be_visible(timeout=2000)
 
 
 def test_rename_escape_cancels(logged_in_page, spawned_session):
@@ -163,9 +167,11 @@ def test_rename_escape_cancels(logged_in_page, spawned_session):
     card = logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
     card.locator(".card-menu-btn").click()
     card.locator('.card-menu-item[data-action="rename"]').click()
-    edit = card.locator(".name-edit")
-    edit.fill("typed-but-cancelled")
-    edit.press("Escape")
+    edit = card.locator(".name.editing")
+    expect(edit).to_be_visible()
+    logged_in_page.keyboard.press("Control+a")
+    logged_in_page.keyboard.type("typed-but-cancelled")
+    logged_in_page.keyboard.press("Escape")
     expect(card.locator(".name")).to_have_text("keep-this")
 
 

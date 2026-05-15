@@ -112,6 +112,36 @@ def test_home_footer_is_at_bottom_dim_and_small(logged_in_page):
     assert foot_box["y"] > list_box["y"], "footer should be below session list"
 
 
+def test_rename_doesnt_shift_card_layout(logged_in_page, spawned_session):
+    """Entering and leaving the rename editor must not change the card's
+    rendered bounding box. The .name-edit input has to occupy the exact
+    same footprint as the .name div it replaces."""
+    sid = spawned_session(name="layout-stable")
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
+    expect(card).to_be_visible(timeout=5000)
+
+    box_before = card.bounding_box()
+
+    card.locator(".card-menu-btn").click()
+    card.locator('.card-menu-item[data-action="rename"]').click()
+    expect(card.locator(".name.editing")).to_be_visible(timeout=2000)
+    box_editing = card.bounding_box()
+
+    card.locator(".name.editing").press("Escape")
+    expect(card.locator(".name")).to_be_visible(timeout=2000)
+    box_after = card.bounding_box()
+
+    for prop in ("width", "height"):
+        for label, b in (("editing", box_editing), ("after", box_after)):
+            diff = abs(box_before[prop] - b[prop])
+            assert diff <= 1, (
+                f"card {prop} shifted on {label}: "
+                f"before={box_before[prop]} {label}={b[prop]} diff={diff}"
+            )
+
+
 def test_session_card_kebab_visible_by_default(logged_in_page, spawned_session):
     """Spec: kebab ⋯ menu button lives at the card's top-right and is
     visible all the time (no hover required)."""
