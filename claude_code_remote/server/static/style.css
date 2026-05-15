@@ -578,6 +578,7 @@ input:focus, textarea:focus { border-color: var(--accent); }
 
 .session-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
 .session-card {
+  position: relative;   /* anchor for the absolutely-positioned ✕ */
   background: var(--bg-card);
   border: 1px solid var(--border-soft);   /* Apple: barely-there divider, no harsh border */
   border-radius: 12px;
@@ -587,6 +588,42 @@ input:focus, textarea:focus { border-color: var(--accent); }
   transition: background 0.15s ease;
 }
 .session-card[hidden] { display: none; }   /* search filter relies on this */
+
+/* Delete / deactivate ✕ — hidden by default, on hover-capable devices
+   it appears in the card's top-right with a red glow, no border. Touch
+   devices stay clean (no clutter); deletion there needs a different
+   gesture (TODO: long-press or swipe). */
+.session-card .deactivate-btn,
+.session-card .delete-btn {
+  display: none;
+  position: absolute;
+  top: 4px; right: 6px;
+  width: 22px; height: 22px;
+  padding: 0;
+  border: 0; background: transparent;
+  color: #cf222e;
+  cursor: pointer;
+  font-size: 13px; line-height: 1;
+  border-radius: 4px;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+  text-shadow: 0 0 8px rgba(207, 34, 46, 0.45);
+}
+.session-card .deactivate-btn:focus,
+.session-card .delete-btn:focus,
+.session-card .deactivate-btn:active,
+.session-card .delete-btn:active { outline: none; }
+@media (hover: hover) {
+  .session-card:hover .deactivate-btn,
+  .session-card:hover .delete-btn {
+    display: inline-flex;
+    align-items: center; justify-content: center;
+  }
+  .session-card .deactivate-btn:hover,
+  .session-card .delete-btn:hover {
+    text-shadow: 0 0 12px rgba(207, 34, 46, 0.7);
+  }
+}
 .session-card:hover { background: var(--bg-hover); border-color: var(--border); }
 /* 工作中 session：荧光绿边框 + 加深的光晕 + 缓动呼吸 */
 .session-card.session-busy {

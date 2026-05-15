@@ -50,12 +50,12 @@ def test_active_card_x_moves_to_inactive(logged_in_page, spawned_session):
     hp.expect_visible()
     expect(logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
            ).to_be_visible(timeout=5000)
-    logged_in_page.locator(
-        f"#sessions-active [data-id='{sid}'] .deactivate-btn"
-    ).click()
+    # ✕ is hover-only; hover the card to reveal, then click.
+    card = logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
+    card.hover()
+    card.locator(".deactivate-btn").click()
     expect(logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
            ).to_have_count(0, timeout=5000)
-    # Inactive header always visible; expand to see the card
     logged_in_page.locator("#sessions-inactive h2.inactive-toggle").click()
     expect(logged_in_page.locator(f"#sessions-inactive [data-id='{sid}']")
            ).to_have_count(1)
