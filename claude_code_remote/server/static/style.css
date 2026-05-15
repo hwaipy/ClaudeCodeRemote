@@ -16,6 +16,7 @@
   --bg-soft:        #f5f5f7;
   --border:         #d2d2d7;
   --border-soft:    #e8e8ed;
+  --border-hover:   #b0b0b8;        /* slightly darker on hover (border-only cue) */
   --text:           #1d1d1f;        /* DESIGN.md "Near Black" */
   --text-muted:     rgba(0,0,0,0.80);  /* DESIGN.md "Black 80%" */
   --text-dim:       rgba(0,0,0,0.48);  /* DESIGN.md "Black 48%" */
@@ -76,6 +77,7 @@
   --bg-soft:        #1d1d1f;
   --border:         rgba(255,255,255,0.12);
   --border-soft:    rgba(255,255,255,0.06);
+  --border-hover:   rgba(255,255,255,0.28);
   --text:           #ffffff;
   --text-muted:     rgba(255,255,255,0.80);
   --text-dim:       rgba(255,255,255,0.48);
@@ -585,7 +587,8 @@ input:focus, textarea:focus { border-color: var(--accent); }
   background: var(--bg-card);
   border: 1px solid var(--border-soft);   /* Apple: barely-there divider, no harsh border */
   border-radius: 12px;
-  padding: 12px 14px;
+  /* Horizontal padding halved (was 14) so cards hug the sidebar tighter. */
+  padding: 12px 7px;
   cursor: pointer;
   display: flex; flex-direction: column; gap: 4px;
   transition: background 0.15s ease;
@@ -659,7 +662,9 @@ input:focus, textarea:focus { border-color: var(--accent); }
   text-overflow: clip;
 }
 .session-card .name.editing:focus { outline-width: 2px; }
-.session-card:hover { background: var(--bg-hover); border-color: var(--border); }
+/* Hover indicates "this card is the click target" via a slightly darker
+   border ONLY — no background fill. Keeps the card row visually quiet. */
+.session-card:hover { border-color: var(--border-hover); }
 /* Busy state: green is conveyed solely by the .state-dot. No glowing
    border, no pulse — too much visual noise for what should just be a
    subtle "this one is working" cue. */
@@ -781,10 +786,10 @@ body.theme-dark .state-badge.busy    { background: rgba(46, 160, 67, 0.22); colo
        sidebar's right edge — and paints over view-home::after (the
        divider) at the card's height. */
     margin-right: -16px;
-    /* Compensate padding-right by exactly the bleed amount so the card's
-       INNER content layout (state-dot/name/badge/cwd/ts/kebab) stays at
-       the same screen position as before. */
-    padding-right: 30px;
+    /* Compensate padding-right by exactly the bleed amount (16px) so the
+       card's INNER content stays at the same screen x position as before
+       (base padding-right is now 7px → 7 + 16 = 23px). */
+    padding-right: 23px;
     z-index: 2;   /* over view-home::after (z-index: 1) */
     cursor: default;
   }
