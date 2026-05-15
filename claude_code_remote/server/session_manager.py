@@ -27,6 +27,16 @@ HIBERNATE_TICK_S = float(os.environ.get("CCR_HIBERNATE_TICK_S", "60"))
 # 哪些事件落 DB（其它视为流式噪音，可从落了 DB 的事件重建 UI）
 _PERSIST_TOP = {"assistant", "user", "result", "user_input"}
 
+# Only these "kind" values bump last_activity_at. CLI-initiated events
+# (system_init from resume/spawn, perm_req / askuser_req while the user
+# hasn't responded yet) must NOT bump it — opening an old session would
+# otherwise reset its "N ago" label to "1s ago" purely from the resume's
+# init envelope.
+_LA_BUMP_KINDS = {
+    "user", "user_input", "assistant", "result",
+    "perm_resolved", "askuser_resolved",
+}
+
 
 def _classify(evt: dict[str, Any]) -> str | None:
     """决定一个事件的持久化 kind，None 表示不存。"""
@@ -391,10 +401,14 @@ class SessionManager:
             try:
                 # DB 始终入全量原文；前端按需走 /tool/{id} 拉回
                 await db.append_message(sess.id, env["seq"], env["ts"], kind, evt)
-                await db.update_activity(sess.id, env["ts"])
+                if kind in _LA_BUMP_KINDS:
+                    await db.update_activity(sess.id, env["ts"])
             except Exception:
                 log.exception("persist message failed for %s", sess.id)
-        sess.last_activity_at = env["ts"]
+        # Only bump last_activity_at for real user/assistant activity —
+        # see _LA_BUMP_KINDS comment.
+        if kind in _LA_BUMP_KINDS:
+            sess.last_activity_at = env["ts"]
         # 状态变化检测（必须在 envelope/落库之后；并在 fan-out 之前确定，
         # 以便 broadcast_status 时拿到最新值）
         state_dirty = self._apply_state_signals(sess, evt)
