@@ -188,6 +188,25 @@ def test_search_bar_animates_open(logged_in_page):
     assert 0.1 <= secs <= 1.0, f"animation duration {secs}s out of expected range"
 
 
+def test_search_button_no_focus_ring(logged_in_page):
+    """Spec: the search lens should feel like an icon, not a button.
+    No outline on focus, no press-darkening on :active."""
+    btn = logged_in_page.locator("#search-btn")
+    # Force focus
+    btn.focus()
+    outline_w = computed(logged_in_page, btn, "outline-width")
+    outline_s = computed(logged_in_page, btn, "outline-style")
+    assert outline_w in ("0px", "") or outline_s in ("none", ""), (
+        f"search-btn should have no focus ring: outline={outline_w} {outline_s}"
+    )
+    # No webkit tap highlight either (matters on iOS)
+    tap = computed(logged_in_page, btn, "-webkit-tap-highlight-color")
+    if tap:
+        assert "0)" in tap or tap == "transparent", (
+            f"-webkit-tap-highlight-color should be transparent: {tap!r}"
+        )
+
+
 def test_new_btn_visibly_squeezes_on_search_open(logged_in_page):
     """Playback test: clicking search must visibly squeeze new-btn from
     its natural width down to 0, NOT just snap it away.
