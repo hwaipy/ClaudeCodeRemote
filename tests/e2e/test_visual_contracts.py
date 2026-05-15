@@ -192,15 +192,24 @@ def test_search_bar_animates_open(logged_in_page):
 
 
 def test_search_close_is_staged(logged_in_page):
-    """Close direction: home-top fade-in is delayed so the bar fully
-    collapses before new-btn snaps back into view."""
+    """Close direction is the mirror of open:
+      1. Children fade out first
+      2. Bar visibly shrinks rightward (with its own delay so it doesn't
+         race with the fade)
+      3. Home-top fades back in only after the bar is fully collapsed
+    Encoded via transition-delay on .search-bar (close-direction width
+    delay) and on .home-top (close-direction fade-in delay)."""
+    bar = logged_in_page.locator("#search-bar")
     home_top = logged_in_page.locator(".home-top")
-    delay_raw = computed(logged_in_page, home_top, "transition-delay")
-    # transition-delay can be "0.2s" or "200ms" or even comma-separated
-    m = re.search(r"(-?[0-9.]+)\s*(ms|s)", delay_raw)
-    assert m, f"home-top should declare a transition-delay for close: {delay_raw!r}"
-    secs = float(m.group(1)) / (1000.0 if m.group(2) == "ms" else 1.0)
-    assert secs >= 0.1, f"close-direction delay {secs}s too short"
+
+    def first_delay(loc):
+        raw = computed(logged_in_page, loc, "transition-delay")
+        m = re.search(r"(-?[0-9.]+)\s*(ms|s)", raw)
+        assert m, f"no delay declared: {raw!r}"
+        return float(m.group(1)) / (1000.0 if m.group(2) == "ms" else 1.0)
+
+    assert first_delay(bar) >= 0.05, "bar shrink delay too short for staged close"
+    assert first_delay(home_top) >= 0.25, "home-top fade-in delay too short"
 
 
 def test_search_bar_has_no_internal_gaps_breaking_pill(logged_in_page):
@@ -217,6 +226,18 @@ def test_search_bar_has_no_internal_gaps_breaking_pill(logged_in_page):
 
 
 # ---------- §2 section labels ----------
+
+def test_active_and_inactive_labels_match(logged_in_page):
+    """Spec: Active and Inactive section labels share font + vertical
+    spacing so they read as the same kind of header."""
+    a = logged_in_page.locator("#sessions-active .section-label")
+    i = logged_in_page.locator("#sessions-inactive .section-label")
+    for prop in ("font-size", "font-weight", "text-transform", "letter-spacing",
+                 "color", "margin-top", "margin-bottom"):
+        va = computed(logged_in_page, a, prop)
+        vi = computed(logged_in_page, i, prop)
+        assert va == vi, f"{prop} mismatch: active={va!r} inactive={vi!r}"
+
 
 def test_section_labels_are_small_and_dim(logged_in_page):
     """Active/Inactive labels: small (≤14px), font-weight bold-ish, color
