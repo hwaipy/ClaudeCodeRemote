@@ -343,16 +343,20 @@ function renderOneCard(s, container, isInactiveSection) {
   const idSuffix = (s.id || "").replace(/^ccr-/, "").slice(0, 6);
   const shortId  = "ccr-" + idSuffix;
   const badgeLabel = badge.label + (pp > 1 ? ` ×${pp}` : "");
-  // Active cards get .deactivate-btn (no confirm, moves to inactive).
-  // Inactive cards get .delete-btn (confirm, soft-deletes via existing API).
-  const xClass = isInactiveSection ? "delete-btn" : "deactivate-btn";
-  const xTitle = isInactiveSection ? "Delete session" : "Move to Inactive";
+  // Top-right kebab menu, always visible. Menu items differ per section:
+  //   Active card  → "Move to Inactive" (no confirm)
+  //   Inactive card → "Delete"           (with confirm)
+  const menuAction = isInactiveSection ? "delete" : "deactivate";
+  const menuLabel  = isInactiveSection ? "Delete" : "Move to Inactive";
   el.innerHTML = `
+    <button class="card-menu-btn" aria-label="More" title="More">⋯</button>
+    <div class="card-menu" hidden role="menu">
+      <button class="card-menu-item" role="menuitem" data-action="${menuAction}">${menuLabel}</button>
+    </div>
     <div class="session-row1">
       <span class="state-dot" aria-hidden="true"></span>
       <div class="name">${escHTML(s.name || "untitled")}</div>
       ${showBadge ? `<span class="badge ${badge.cls}">${escHTML(badgeLabel)}</span>` : ""}
-      <button class="${xClass}" title="${xTitle}">✕</button>
     </div>
     <div class="meta-line">
       <span class="cwd-short" title="${escHTML(s.cwd || "")}">${escHTML(cwdShort)}</span>
@@ -360,30 +364,57 @@ function renderOneCard(s, container, isInactiveSection) {
       <span class="short-id" title="${escHTML(s.id || "")}">${escHTML(shortId)}</span>
     </div>
     <div class="ts-line">active ${active} ago${needs ? " · " + escHTML(needs.slice(0, 40)) : ""}</div>`;
-  const xBtn = el.querySelector("." + xClass);
-  xBtn.addEventListener("click", async (e) => {
+
+  const menuBtn = el.querySelector(".card-menu-btn");
+  const menu    = el.querySelector(".card-menu");
+  const menuItem = el.querySelector(".card-menu-item");
+
+  function openMenu() {
+    // Close any other open card-menus first
+    document.querySelectorAll(".card-menu:not([hidden])").forEach(m => {
+      if (m !== menu) m.setAttribute("hidden", "");
+    });
+    menu.removeAttribute("hidden");
+  }
+  function closeMenu() { menu.setAttribute("hidden", ""); }
+
+  menuBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    if (isInactiveSection) {
+    if (menu.hasAttribute("hidden")) openMenu(); else closeMenu();
+  });
+  menuItem.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    closeMenu();
+    if (menuAction === "delete") {
       if (!confirm(`Delete session "${s.name}"? This cannot be undone.`)) return;
       try {
         await api(`/api/sessions/${encodeURIComponent(s.id)}`, { method: "DELETE" });
-      } catch (err) {
-        alert("Delete failed: " + err.message);
-      }
+      } catch (err) { alert("Delete failed: " + err.message); }
     } else {
       try {
         await api(`/api/sessions/${encodeURIComponent(s.id)}/deactivate`,
                    { method: "POST", body: JSON.stringify({}) });
-      } catch (err) {
-        alert("Deactivate failed: " + err.message);
-      }
+      } catch (err) { alert("Deactivate failed: " + err.message); }
     }
   });
+
   el.addEventListener("click", () => {
     if (state.sessionId === s.id) return;
     enterChat(s.id, s.name, s.cwd, s.state);
   });
   container.appendChild(el);
+}
+
+// Close any open card-menu when clicking elsewhere (registered once).
+if (!window.__cardMenuCloseBound) {
+  window.__cardMenuCloseBound = true;
+  document.addEventListener("mousedown", (e) => {
+    document.querySelectorAll(".card-menu:not([hidden])").forEach(m => {
+      if (!m.contains(e.target) && !m.previousElementSibling?.contains(e.target)) {
+        m.setAttribute("hidden", "");
+      }
+    });
+  });
 }
 
 // ---------- Inactive section collapse toggle ----------

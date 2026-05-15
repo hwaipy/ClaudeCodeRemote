@@ -589,41 +589,53 @@ input:focus, textarea:focus { border-color: var(--accent); }
 }
 .session-card[hidden] { display: none; }   /* search filter relies on this */
 
-/* Delete / deactivate ✕ — hidden by default, on hover-capable devices
-   it appears in the card's top-right with a red glow, no border. Touch
-   devices stay clean (no clutter); deletion there needs a different
-   gesture (TODO: long-press or swipe). */
-.session-card .deactivate-btn,
-.session-card .delete-btn {
-  display: none;
+/* Kebab menu button (top-right corner of each card) + its popup menu.
+   Always visible (desktop + touch), tiny + dim so it doesn't compete
+   with the card content. */
+.session-card .card-menu-btn {
   position: absolute;
-  top: 4px; right: 6px;
-  width: 22px; height: 22px;
+  top: 4px; right: 4px;
+  width: 26px; height: 26px;
   padding: 0;
   border: 0; background: transparent;
-  color: #cf222e;
+  color: var(--text-dim);
   cursor: pointer;
-  font-size: 13px; line-height: 1;
-  border-radius: 4px;
+  font-size: 16px; line-height: 1;
+  border-radius: 6px;
   outline: none;
   -webkit-tap-highlight-color: transparent;
-  text-shadow: 0 0 8px rgba(207, 34, 46, 0.45);
+  display: inline-flex; align-items: center; justify-content: center;
 }
-.session-card .deactivate-btn:focus,
-.session-card .delete-btn:focus,
-.session-card .deactivate-btn:active,
-.session-card .delete-btn:active { outline: none; }
-@media (hover: hover) {
-  .session-card:hover .deactivate-btn,
-  .session-card:hover .delete-btn {
-    display: inline-flex;
-    align-items: center; justify-content: center;
-  }
-  .session-card .deactivate-btn:hover,
-  .session-card .delete-btn:hover {
-    text-shadow: 0 0 12px rgba(207, 34, 46, 0.7);
-  }
+.session-card .card-menu-btn:hover { background: var(--bg-hover); color: var(--text); }
+.session-card .card-menu-btn:focus,
+.session-card .card-menu-btn:focus-visible,
+.session-card .card-menu-btn:active { outline: none; }
+.session-card .card-menu-btn::-moz-focus-inner { border: 0; }
+
+.session-card .card-menu {
+  position: absolute;
+  top: 32px; right: 4px;
+  min-width: 160px;
+  z-index: 10;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  box-shadow: var(--shadow-card);
+  padding: 4px;
+  display: flex; flex-direction: column;
 }
+.session-card .card-menu[hidden] { display: none; }
+.session-card .card-menu-item {
+  background: transparent; border: 0;
+  padding: 8px 12px;
+  text-align: left;
+  color: var(--text);
+  font: inherit; font-size: 13px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.session-card .card-menu-item:hover { background: var(--bg-hover); }
+.session-card .card-menu-item[data-action="delete"] { color: #cf222e; }
 .session-card:hover { background: var(--bg-hover); border-color: var(--border); }
 /* 工作中 session：荧光绿边框 + 加深的光晕 + 缓动呼吸 */
 .session-card.session-busy {

@@ -44,18 +44,17 @@ def test_clicking_inactive_header_toggles(logged_in_page):
     expect(logged_in_page.locator("#sessions-inactive.expanded")).to_have_count(0)
 
 
-def test_active_card_x_moves_to_inactive(logged_in_page, spawned_session):
+def test_active_card_menu_moves_to_inactive(logged_in_page, spawned_session):
+    """Active card kebab menu → 'Move to Inactive'."""
     sid = spawned_session(name="moves-to-inactive")
     hp = HomePage(logged_in_page)
     hp.expect_visible()
-    expect(logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
-           ).to_be_visible(timeout=5000)
-    # ✕ is hover-only; hover the card to reveal, then click.
     card = logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
-    card.hover()
-    card.locator(".deactivate-btn").click()
-    expect(logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
-           ).to_have_count(0, timeout=5000)
+    expect(card).to_be_visible(timeout=5000)
+    # Open kebab menu and pick the action
+    card.locator(".card-menu-btn").click()
+    card.locator('.card-menu-item[data-action="deactivate"]').click()
+    expect(card).to_have_count(0, timeout=5000)
     logged_in_page.locator("#sessions-inactive h2.inactive-toggle").click()
     expect(logged_in_page.locator(f"#sessions-inactive [data-id='{sid}']")
            ).to_have_count(1)

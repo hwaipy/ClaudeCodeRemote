@@ -33,11 +33,11 @@ def test_spawned_session_appears_as_card(logged_in_page, spawned_session):
 
 
 def test_delete_inactive_card_removes_it(logged_in_page, spawned_session):
-    """Soft-delete pipeline: active card → deactivate → expand inactive →
-    confirm delete → card gone from both sections.
+    """Soft-delete pipeline via kebab menu: active card → menu →
+    'Move to Inactive' → expand inactive → menu → 'Delete' → confirm.
 
-    Note: ✕ buttons are hover-only on desktop, hidden on touch. Tests
-    hover the card before clicking to reveal them."""
+    Cards now use a kebab (⋯) menu in the top-right instead of a direct
+    ✕ button. Test opens the menu and picks the action."""
     sid = spawned_session(name="to-delete")
 
     hp = HomePage(logged_in_page)
@@ -45,9 +45,9 @@ def test_delete_inactive_card_removes_it(logged_in_page, spawned_session):
     card = hp.card_by_id(sid)
     expect(card).to_be_visible(timeout=5000)
 
-    # 1. Hover the active card, click ✕ → moves to Inactive (no confirm)
-    card.hover()
-    card.locator(".deactivate-btn").click()
+    # 1. Active card menu → Move to Inactive (no confirm)
+    card.locator(".card-menu-btn").click()
+    card.locator('.card-menu-item[data-action="deactivate"]').click()
 
     # 2. Expand Inactive section
     logged_in_page.locator("#sessions-inactive h2.inactive-toggle").click()
@@ -56,10 +56,10 @@ def test_delete_inactive_card_removes_it(logged_in_page, spawned_session):
     )
     expect(inactive_card).to_be_visible(timeout=5000)
 
-    # 3. Hover the inactive card, click ✕ → soft delete (with confirm)
-    inactive_card.hover()
+    # 3. Inactive card menu → Delete (with confirm)
+    inactive_card.locator(".card-menu-btn").click()
     logged_in_page.once("dialog", lambda d: d.accept())
-    inactive_card.locator(".delete-btn").click()
+    inactive_card.locator('.card-menu-item[data-action="delete"]').click()
 
     expect(card).to_have_count(0, timeout=5000)
 

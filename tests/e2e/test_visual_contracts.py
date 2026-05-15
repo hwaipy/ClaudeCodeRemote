@@ -112,58 +112,60 @@ def test_home_footer_is_at_bottom_dim_and_small(logged_in_page):
     assert foot_box["y"] > list_box["y"], "footer should be below session list"
 
 
-def test_session_card_x_hidden_by_default(logged_in_page, spawned_session):
-    """Spec: ✕ is hidden in the resting state of a card."""
-    sid = spawned_session(name="x-default-test")
+def test_session_card_kebab_visible_by_default(logged_in_page, spawned_session):
+    """Spec: kebab ⋯ menu button lives at the card's top-right and is
+    visible all the time (no hover required)."""
+    sid = spawned_session(name="kebab-visible-test")
     hp = HomePage(logged_in_page)
     hp.expect_visible()
     card = hp.card_by_id(sid)
     expect(card).to_be_visible(timeout=5000)
-    btn = card.locator(".deactivate-btn, .delete-btn")
-    # CSS computed display is "none" before hover
-    display = computed(logged_in_page, btn, "display")
-    assert display == "none", f"✕ should be hidden by default, got display={display!r}"
-
-
-def test_session_card_x_appears_on_hover(logged_in_page, spawned_session):
-    """Spec: on a hover-capable device (Chromium = pointer:fine), hovering
-    the card reveals ✕ in the top-right with no border, red color."""
-    sid = spawned_session(name="x-hover-test")
-    hp = HomePage(logged_in_page)
-    hp.expect_visible()
-    card = hp.card_by_id(sid)
-    expect(card).to_be_visible(timeout=5000)
-    card.hover()
-    btn = card.locator(".deactivate-btn, .delete-btn")
+    btn = card.locator(".card-menu-btn")
     expect(btn).to_be_visible()
-    # No border
-    assert not has_border(logged_in_page, btn), "✕ button should be borderless"
-    # Reddish color (computed rgb shows the red channel dominant)
-    color = computed(logged_in_page, btn, "color")
-    m = re.search(r"rgba?\((\d+),\s*(\d+),\s*(\d+)", color)
-    assert m, f"unexpected color value: {color!r}"
-    r, g, b = int(m.group(1)), int(m.group(2)), int(m.group(3))
-    assert r > 150 and r > g + 50 and r > b + 50, (
-        f"✕ should be red: rgb({r},{g},{b})"
-    )
 
 
-def test_session_card_x_anchored_top_right(logged_in_page, spawned_session):
-    """Spec: ✕ sits in the top-right corner of the card (offset ≤12px)."""
-    sid = spawned_session(name="x-pos-test")
+def test_session_card_kebab_anchored_top_right(logged_in_page, spawned_session):
+    """Kebab sits in the card's top-right corner (≤14px inset)."""
+    sid = spawned_session(name="kebab-pos-test")
     hp = HomePage(logged_in_page)
     hp.expect_visible()
     card = hp.card_by_id(sid)
     expect(card).to_be_visible(timeout=5000)
-    card.hover()
-    btn = card.locator(".deactivate-btn, .delete-btn")
+    btn = card.locator(".card-menu-btn")
     cb = card.bounding_box()
     bb = btn.bounding_box()
     assert cb and bb
     right_inset = (cb["x"] + cb["width"]) - (bb["x"] + bb["width"])
     top_inset = bb["y"] - cb["y"]
-    assert 0 <= right_inset <= 14, f"✕ should hug the right edge: inset={right_inset}"
-    assert 0 <= top_inset <= 14, f"✕ should hug the top edge: inset={top_inset}"
+    assert 0 <= right_inset <= 14, f"kebab right inset {right_inset}"
+    assert 0 <= top_inset <= 14, f"kebab top inset {top_inset}"
+
+
+def test_clicking_kebab_opens_menu(logged_in_page, spawned_session):
+    sid = spawned_session(name="kebab-open-test")
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = hp.card_by_id(sid)
+    expect(card).to_be_visible(timeout=5000)
+    menu = card.locator(".card-menu")
+    expect(menu).to_be_hidden()
+    card.locator(".card-menu-btn").click()
+    expect(menu).to_be_visible()
+    expect(card.locator('.card-menu-item[data-action="deactivate"]')).to_be_visible()
+
+
+def test_clicking_outside_menu_closes_it(logged_in_page, spawned_session):
+    sid = spawned_session(name="kebab-close-test")
+    hp = HomePage(logged_in_page)
+    hp.expect_visible()
+    card = hp.card_by_id(sid)
+    expect(card).to_be_visible(timeout=5000)
+    card.locator(".card-menu-btn").click()
+    menu = card.locator(".card-menu")
+    expect(menu).to_be_visible()
+    # Click on the section label outside the menu
+    logged_in_page.locator("#sessions-active .section-label-text").click()
+    expect(menu).to_be_hidden()
 
 
 def test_home_has_no_outer_frame(logged_in_page):
