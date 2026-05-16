@@ -92,16 +92,17 @@ claude \
 
 ## 四、里程碑（建议）
 
-| # | 里程碑 | 范围 | 验收 |
-|---|--------|------|------|
-| M0 | 协议侦察 | 跑一次 stream-json，把所有事件类型抓下来存成 fixture | 写在 `docs/stream-json-events.md` |
-| M1 | 单会话裸聊 | 一个 WS，能 spawn → 发 user msg → 看 assistant 文本流 | 手机能跟 claude 说一句话拿回答 |
-| M2 | 工具调用渲染 | tool_use / tool_result 展开 | bash、read、edit 都看得见 |
-| M3 | 权限门 | UI 弹批准框，决定写回 stdin | 默认 deny，UI 上点允许才执行 Bash |
-| M4 | 会话管理 | list / resume / delete，SQLite 持久化 | 重启服务后能看到/恢复会话 |
-| M5 | 多 agent + 通知 | 状态板 + Web Push | 后台 claude 等输入时手机收到推送 |
-| M6 | 文件 diff + 附件 | 渲染改动 / 接收图片粘贴 | 改一个文件能在 UI 上看 diff |
-| M7 | PWA 抛光 | manifest / SW / 主屏图标 / 离线壳 | 安装后离线打开仍能看到历史 |
+| # | 里程碑 | 范围 | 验收 | 状态 |
+|---|--------|------|------|------|
+| M0 | 协议侦察 | 跑一次 stream-json，把所有事件类型抓下来存成 fixture | 写在 `docs/stream-json-events.md` | ✅ |
+| M1 | 单会话裸聊 | 一个 WS，能 spawn → 发 user msg → 看 assistant 文本流 | 手机能跟 claude 说一句话拿回答 | ✅ |
+| M2 | 工具调用渲染 | tool_use / tool_result 展开 | bash、read、edit 都看得见 | ✅ |
+| M3 | 权限门 | UI 弹批准框，决定写回 stdin | 默认 deny，UI 上点允许才执行 Bash | ✅ |
+| M4 | 会话管理 | list / resume / delete，SQLite 持久化 | 重启服务后能看到/恢复会话 | ✅ |
+| **M4.5** | **主页 / session list 完成** | 三档桶 (Active / Stash / Inactive)、kebab 菜单全套动作 (Rename / Stash / Activate / Deactivate / Delete)、搜索条 + sort 切换 (created ↔ active)、session card 实时状态 (busy 绿点 / waiting / needs-input / stalled 黄)、"Xs ago" 1s 内 ticker、新建会话 modal (含权限选择 + cwd browse)、设置页 (默认 cwd / 默认权限, 左滑入)、sticky 顶部工具栏、移动端 hover / 菜单交互修正 | 用户可以在主页里完整管理多会话生命周期 — 创建、命名、归档、移回、永久删除 | ✅ |
+| M5 | 多 agent + 通知 | 状态板 + Web Push | 后台 claude 等输入时手机收到推送 | |
+| M6 | 文件 diff + 附件 | 渲染改动 / 接收图片粘贴 | 改一个文件能在 UI 上看 diff | |
+| M7 | PWA 抛光 | manifest / SW / 主屏图标 / 离线壳 | 安装后离线打开仍能看到历史 | |
 
 > M0 是关键。先把 stream-json 实际事件格式摸清楚，剩下的设计才有根。
 
