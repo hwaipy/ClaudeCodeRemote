@@ -106,8 +106,8 @@ async def ws_session(ws: WebSocket, session_id: str) -> None:
                 msg = await ws.receive_json()
                 kind = msg.get("type")
                 if kind == "user_message":
-                    # First user message after deactivate → reactivate
-                    if sess.deactivated_at is not None:
+                    # First user message after deactivate/stash → reactivate
+                    if sess.deactivated_at is not None or sess.stashed_at is not None:
                         await manager.activate(sess.id)
                     raw = msg.get("content")
                     # 支持 str 或 [{type:text|image, ...}, ...]

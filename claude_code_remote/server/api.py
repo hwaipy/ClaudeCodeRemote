@@ -24,6 +24,7 @@ router = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
 class SpawnRequest(BaseModel):
     cwd: str = Field(..., min_length=1)
     name: str = ""
+    permission_mode: str = "manual"
 
 
 class DbgLogRequest(BaseModel):
@@ -44,6 +45,11 @@ async def spawn(req: SpawnRequest) -> dict[str, Any]:
     if not Path(cwd).is_dir():
         raise HTTPException(400, f"cwd not a directory: {cwd}")
     sess = await manager.spawn(cwd=cwd, name=req.name)
+    if req.permission_mode and req.permission_mode != "manual":
+        try:
+            await gateway.set_mode(sess.id, req.permission_mode)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
     return {
         "id": sess.id,
         "cwd": sess.cwd,
@@ -334,6 +340,16 @@ async def activate_session(session_id: str) -> dict[str, Any]:
 async def deactivate_session(session_id: str) -> dict[str, Any]:
     """Move session into the 'Inactive' bucket; no process change."""
     ok = await manager.deactivate(session_id)
+    if not ok:
+        raise HTTPException(404, "session not found")
+    return {"ok": True}
+
+
+@router.post("/sessions/{session_id}/stash")
+async def stash_session(session_id: str) -> dict[str, Any]:
+    """Move session into the 'Stash' bucket (above Inactive, default
+    expanded). No process change. Mutually exclusive with Inactive."""
+    ok = await manager.stash(session_id)
     if not ok:
         raise HTTPException(404, "session not found")
     return {"ok": True}

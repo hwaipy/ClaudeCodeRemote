@@ -206,10 +206,8 @@ async function browseLoad(path) {
       const child = j.path === "/" ? "/" + d : j.path + "/" + d;
       rows.push(`<div class="modal-row" data-path="${escHTML(child)}"><span class="icon">📁</span><span class="name">${escHTML(d)}</span></div>`);
     }
-    if (!j.dirs.length && j.parent === null) {
-      rows.push('<div class="modal-empty">(no subdirectories)</div>');
-    } else if (!j.dirs.length) {
-      rows.push('<div class="modal-empty">(no subdirectories)</div>');
+    if (!j.dirs.length) {
+      rows.push('<div class="modal-empty">empty</div>');
     }
     list.innerHTML = rows.join("");
     list.querySelectorAll(".modal-row").forEach(el => {
@@ -219,20 +217,26 @@ async function browseLoad(path) {
     list.innerHTML = `<div class="modal-empty err show">Load failed: ${escHTML(e.message)}</div>`;
   }
 }
-function openBrowse() {
+let _browseTargetId = "spawn-cwd";
+function openBrowse(targetId = "spawn-cwd") {
+  _browseTargetId = targetId;
   $("modal-browse").hidden = false;
-  browseLoad($("spawn-cwd").value.trim() || "~");
+  browseLoad($(_browseTargetId).value.trim() || "~");
 }
 function closeBrowse() {
   $("modal-browse").hidden = true;
 }
-$("browse-btn").addEventListener("click", openBrowse);
+$("browse-btn").addEventListener("click", () => openBrowse("spawn-cwd"));
 $("modal-close").addEventListener("click", closeBrowse);
 $("modal-cancel").addEventListener("click", closeBrowse);
 $("modal-confirm").addEventListener("click", () => {
   if (_browse.curPath) {
-    $("spawn-cwd").value = _browse.curPath;
-    syncPresetChips();
+    const target = $(_browseTargetId);
+    if (target) target.value = _browse.curPath;
+    if (_browseTargetId === "spawn-cwd") syncPresetChips();
+    if (_browseTargetId === "settings-default-cwd") {
+      localStorage.setItem("ccr.defaultCwd", _browse.curPath);
+    }
   }
   closeBrowse();
 });
@@ -273,7 +277,7 @@ state.attachments = [];           // 待发送附件列表：[{kind, media_type,
 function relTime(ts) {
   if (!ts) return "";
   const d = Date.now()/1000 - ts;
-  if (d < 60)     return Math.max(1, Math.floor(d)) + "s";
+  if (d < 60)     return Math.floor(d) + "s";
   if (d < 3600)   return Math.floor(d/60) + "m";
   if (d < 86400)  return Math.floor(d/3600) + "h";
   return Math.floor(d/86400) + "d";
@@ -295,7 +299,9 @@ function setSortMode(mode) {
 }
 function renderSessionList() {
   const listActive   = $("session-list-active");
+  const listStash    = $("session-list-stash");
   const listInactive = $("session-list-inactive");
+  const stashBox     = $("sessions-stash");
   const inactiveBox  = $("sessions-inactive");
   const mode = getSortMode();
   const all = Array.from(state.sessionsById.values()).sort((a, b) => {
@@ -309,10 +315,14 @@ function renderSessionList() {
       : (b.created_at || 0);
     return kb - ka;
   });
-  const active   = all.filter(s => !s.is_inactive);
+  // Three mutually-exclusive buckets. Stash sits between Active and
+  // Inactive. is_stash and is_inactive are mutually exclusive server-side.
+  const active   = all.filter(s => !s.is_inactive && !s.is_stash);
+  const stash    = all.filter(s =>  s.is_stash);
   const inactive = all.filter(s =>  s.is_inactive);
 
-  // Inactive section header always visible; count is empty when 0.
+  // Section headers always visible; count is empty when 0.
+  stashBox.querySelector(".count").textContent = stash.length ? `(${stash.length})` : "";
   inactiveBox.querySelector(".count").textContent = inactive.length ? `(${inactive.length})` : "";
 
   // Render active
@@ -320,14 +330,19 @@ function renderSessionList() {
     listActive.innerHTML = `<div class="session-empty">No sessions</div>`;
   } else {
     listActive.innerHTML = "";
-    for (const s of active) renderOneCard(s, listActive, /*inactive=*/false);
+    for (const s of active) renderOneCard(s, listActive, /*section=*/"active");
   }
-  // Render inactive
+  listStash.innerHTML = "";
+  for (const s of stash) renderOneCard(s, listStash, /*section=*/"stash");
   listInactive.innerHTML = "";
-  for (const s of inactive) renderOneCard(s, listInactive, /*inactive=*/true);
+  for (const s of inactive) renderOneCard(s, listInactive, /*section=*/"inactive");
 }
 
-function renderOneCard(s, container, isInactiveSection) {
+function renderOneCard(s, container, section) {
+  // section: "active" | "stash" | "inactive"
+  // Legacy callers passed a boolean isInactiveSection; map that here so
+  // any straggler still works.
+  if (typeof section === "boolean") section = section ? "inactive" : "active";
   const badge = STATE_BADGES[s.state] || STATE_BADGES.idle;
   const active = relTime(s.last_activity_at);
   const pp = s.pending_permissions || 0;
@@ -351,15 +366,31 @@ function renderOneCard(s, container, isInactiveSection) {
     .replace(/^\/home\/[^/]+/, "~")
     .replace(/^\/Users\/[^/]+/, "~");
   const badgeLabel = badge.label + (pp > 1 ? ` ×${pp}` : "");
-  // Top-right kebab menu. Items differ per section:
-  //   Active   → Rename / Deactivate / Delete
-  //   Inactive → Activate / Delete
-  const menuItemsHtml = isInactiveSection
-    ? `<button class="card-menu-item" role="menuitem" data-action="activate">Activate</button>
-       <button class="card-menu-item card-menu-item-danger" role="menuitem" data-action="delete">Delete</button>`
-    : `<button class="card-menu-item" role="menuitem" data-action="rename">Rename</button>
-       <button class="card-menu-item" role="menuitem" data-action="deactivate">Deactivate</button>
-       <button class="card-menu-item card-menu-item-danger" role="menuitem" data-action="delete">Delete</button>`;
+  // Top-right kebab menu. Items per section:
+  //   Active   → Rename / Stash / Deactivate / Delete
+  //   Stash    → Rename / Activate / Deactivate / Delete
+  //   Inactive → Rename / Activate / Stash / Delete
+  let menuItemsHtml;
+  if (section === "active") {
+    menuItemsHtml = `
+      <button class="card-menu-item" role="menuitem" data-action="rename">Rename</button>
+      <button class="card-menu-item" role="menuitem" data-action="stash">Stash</button>
+      <button class="card-menu-item" role="menuitem" data-action="deactivate">Deactivate</button>
+      <button class="card-menu-item card-menu-item-danger" role="menuitem" data-action="delete">Delete</button>`;
+  } else if (section === "stash") {
+    menuItemsHtml = `
+      <button class="card-menu-item" role="menuitem" data-action="rename">Rename</button>
+      <button class="card-menu-item" role="menuitem" data-action="activate">Activate</button>
+      <button class="card-menu-item" role="menuitem" data-action="deactivate">Deactivate</button>
+      <button class="card-menu-item card-menu-item-danger" role="menuitem" data-action="delete">Delete</button>`;
+  } else {
+    // inactive: Rename / Activate / Stash / Delete
+    menuItemsHtml = `
+      <button class="card-menu-item" role="menuitem" data-action="rename">Rename</button>
+      <button class="card-menu-item" role="menuitem" data-action="activate">Activate</button>
+      <button class="card-menu-item" role="menuitem" data-action="stash">Stash</button>
+      <button class="card-menu-item card-menu-item-danger" role="menuitem" data-action="delete">Delete</button>`;
+  }
   el.innerHTML = `
     <button class="card-menu-btn" aria-label="More" title="More">⋯</button>
     <div class="card-menu" hidden role="menu">${menuItemsHtml}</div>
@@ -479,6 +510,11 @@ function renderOneCard(s, container, isInactiveSection) {
           await api(`/api/sessions/${encodeURIComponent(s.id)}/deactivate`,
                      { method: "POST", body: JSON.stringify({}) });
         } catch (err) { alert("Deactivate failed: " + err.message); }
+      } else if (action === "stash") {
+        try {
+          await api(`/api/sessions/${encodeURIComponent(s.id)}/stash`,
+                     { method: "POST", body: JSON.stringify({}) });
+        } catch (err) { alert("Stash failed: " + err.message); }
       } else if (action === "activate") {
         try {
           await api(`/api/sessions/${encodeURIComponent(s.id)}/activate`,
@@ -489,6 +525,13 @@ function renderOneCard(s, container, isInactiveSection) {
   });
 
   el.addEventListener("click", () => {
+    // 用户在卡片里拖选文字时, mouseup 也会触发 click, 然后切到 chat ——
+    // 让选中文本变得不可能. 这里检测是否存在非空选区, 有就不导航.
+    const sel = window.getSelection && window.getSelection();
+    if (sel && sel.toString().length > 0) return;
+    // 如果这次点击的 mousedown / touchstart 刚好关掉了一个 open card-menu,
+    // 这次 click 只算"关菜单", 不应导航到卡片.
+    if (_cardMenuJustClosed) return;
     if (state.sessionId === s.id) return;
     enterChat(s.id, s.name, s.cwd, s.state);
   });
@@ -551,19 +594,58 @@ if (!window.__cardTooltipResizeBound) {
   }, { passive: true });
 }
 
-// Close any open card-menu when clicking elsewhere (registered once).
+// Close any open card-menu when tapping elsewhere (registered once).
+// 同时记录这次 down/start 是否关掉了至少一个菜单 — 紧跟着 mouseup / 合成
+// click 触发的 card click 必须吞掉, 否则用户摸到背后的卡片就会被误导航进去.
+//
+// 桌面: mousedown → click 同一 event-loop turn, 0ms 即可清.
+// 触屏: touchstart → touchend → 合成 click 跨多个 turn, 用 500ms 兜底 +
+//       documnet 的 bubble-phase click 即时清 (card 的 click 是 bubble 阶段,
+//       document 比 card 后到, 所以 card handler 能先读到 flag).
+let _cardMenuJustClosed = false;
+let _cardMenuClearTimer = null;
+function _armCardMenuClosedFlag() {
+  _cardMenuJustClosed = true;
+  if (_cardMenuClearTimer) clearTimeout(_cardMenuClearTimer);
+  _cardMenuClearTimer = setTimeout(() => {
+    _cardMenuJustClosed = false;
+    _cardMenuClearTimer = null;
+  }, 500);
+}
+function _maybeCloseMenusForTap(target) {
+  let closedAny = false;
+  document.querySelectorAll(".card-menu:not([hidden])").forEach(m => {
+    if (!m.contains(target) && !m.previousElementSibling?.contains(target)) {
+      m.setAttribute("hidden", "");
+      closedAny = true;
+    }
+  });
+  if (closedAny) _armCardMenuClosedFlag();
+}
 if (!window.__cardMenuCloseBound) {
   window.__cardMenuCloseBound = true;
   document.addEventListener("mousedown", (e) => {
-    document.querySelectorAll(".card-menu:not([hidden])").forEach(m => {
-      if (!m.contains(e.target) && !m.previousElementSibling?.contains(e.target)) {
-        m.setAttribute("hidden", "");
+    _maybeCloseMenusForTap(e.target);
+  }, true);
+  document.addEventListener("touchstart", (e) => {
+    _maybeCloseMenusForTap(e.target);
+  }, { passive: true, capture: true });
+  // 在 click 完成 bubble 之后清 flag — card 的 click handler 是 bubble,
+  // document 比 card 后到, 这条不会抢在 card 之前清.
+  document.addEventListener("click", () => {
+    if (_cardMenuJustClosed) {
+      _cardMenuJustClosed = false;
+      if (_cardMenuClearTimer) {
+        clearTimeout(_cardMenuClearTimer);
+        _cardMenuClearTimer = null;
       }
-    });
+    }
   });
 }
 
 // ---------- Inactive section collapse toggle ----------
+// 用户偏好: 每次加载都是收起状态, 不持久化 — 防止"上次我打开了, 这次还
+// 张着"的状态意外保留. 折叠/展开仅在本次会话内有效.
 (function setupInactiveToggle() {
   const box = $("sessions-inactive");
   if (!box) return;
@@ -571,6 +653,22 @@ if (!window.__cardMenuCloseBound) {
   if (!header) return;
   header.addEventListener("click", () => {
     box.classList.toggle("expanded");
+  });
+})();
+
+// ---------- Stash section collapse toggle (default expanded) ----------
+(function setupStashToggle() {
+  const box = $("sessions-stash");
+  if (!box) return;
+  const header = box.querySelector(".stash-toggle");
+  if (!header) return;
+  // Default expanded; collapse only if user explicitly closed it before.
+  const saved = localStorage.getItem("ccr.stashOpen");
+  if (saved === "0") box.classList.remove("expanded");
+  else box.classList.add("expanded");
+  header.addEventListener("click", () => {
+    const open = box.classList.toggle("expanded");
+    localStorage.setItem("ccr.stashOpen", open ? "1" : "0");
   });
 })();
 
@@ -713,9 +811,29 @@ function updateTitleBadge() {
   document.title = (pending > 0 ? `[${pending}] ` : "") + "ClaudeCodeRemote";
 }
 
+const VALID_SPAWN_PERM_MODES = ["manual", "accept_edits", "plan", "allow_all"];
+
+function _getSpawnPermMode() {
+  const active = document.querySelector("#spawn-perm .spawn-perm-btn.active");
+  const m = active && active.dataset.mode;
+  return VALID_SPAWN_PERM_MODES.includes(m) ? m : "manual";
+}
+
+function _setSpawnPermMode(mode) {
+  if (!VALID_SPAWN_PERM_MODES.includes(mode)) mode = "manual";
+  document.querySelectorAll("#spawn-perm .spawn-perm-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.mode === mode);
+  });
+}
+
+document.querySelectorAll("#spawn-perm .spawn-perm-btn").forEach((b) => {
+  b.addEventListener("click", () => _setSpawnPermMode(b.dataset.mode));
+});
+
 $("spawn-go").addEventListener("click", async () => {
   const name = $("spawn-name").value.trim();
   const cwd = $("spawn-cwd").value.trim();
+  const permission_mode = _getSpawnPermMode();
   $("spawn-err").classList.remove("show");
   if (!cwd) {
     $("spawn-err").textContent = "Working directory required";
@@ -725,7 +843,10 @@ $("spawn-go").addEventListener("click", async () => {
   $("spawn-go").disabled = true;
   $("spawn-go").textContent = "Starting…";
   try {
-    const r = await api("/api/spawn", { method: "POST", body: JSON.stringify({ cwd, name }) });
+    const r = await api("/api/spawn", {
+      method: "POST",
+      body: JSON.stringify({ cwd, name, permission_mode }),
+    });
     state.cwd = cwd;
     localStorage.setItem("ccr.cwd", cwd);
     pushRecentCwd(cwd);
@@ -750,8 +871,14 @@ $("spawn-go").addEventListener("click", async () => {
 
   function open() {
     modal.removeAttribute("hidden");
-    if (!$("spawn-cwd").value) $("spawn-cwd").value = state.cwd || "";
+    if (!$("spawn-cwd").value) {
+      $("spawn-cwd").value =
+        localStorage.getItem("ccr.defaultCwd") || state.cwd || "";
+    }
     syncPresetChips();
+    _setSpawnPermMode(
+      localStorage.getItem("ccr.defaultPermMode") || "manual"
+    );
     setTimeout(() => $("spawn-name").focus(), 0);
   }
   function close() {
@@ -773,6 +900,57 @@ $("spawn-go").addEventListener("click", async () => {
   });
 })();
 
+// ---------- Settings view ----------
+(function setupSettings() {
+  const view = $("view-settings");
+  const openBtn = $("settings-btn");
+  const backBtn = $("settings-back");
+  const cwdInput = $("settings-default-cwd");
+  const permRow = $("settings-default-perm");
+  const browseBtn = $("settings-browse-btn");
+  if (!view || !openBtn) return;
+
+  function applyPermActive(mode) {
+    if (!VALID_SPAWN_PERM_MODES.includes(mode)) mode = "manual";
+    permRow.querySelectorAll(".spawn-perm-btn").forEach((b) => {
+      b.classList.toggle("active", b.dataset.mode === mode);
+    });
+  }
+  function loadFromStorage() {
+    cwdInput.value = localStorage.getItem("ccr.defaultCwd") || "";
+    applyPermActive(localStorage.getItem("ccr.defaultPermMode") || "manual");
+  }
+  function isOpen() { return view.classList.contains("active"); }
+  function open() {
+    if (isOpen()) return;
+    loadFromStorage();
+    view.classList.add("active");
+  }
+  function close() {
+    view.classList.remove("active");
+  }
+
+  openBtn.addEventListener("click", open);
+  backBtn.addEventListener("click", close);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && isOpen()) close();
+  });
+
+  cwdInput.addEventListener("input", () => {
+    const v = cwdInput.value.trim();
+    if (v) localStorage.setItem("ccr.defaultCwd", v);
+    else localStorage.removeItem("ccr.defaultCwd");
+  });
+  permRow.querySelectorAll(".spawn-perm-btn").forEach((b) => {
+    b.addEventListener("click", () => {
+      const mode = b.dataset.mode;
+      applyPermActive(mode);
+      localStorage.setItem("ccr.defaultPermMode", mode);
+    });
+  });
+  browseBtn.addEventListener("click", () => openBrowse("settings-default-cwd"));
+})();
+
 // ---------- Session list sort toggle ----------
 (function setupSortToggle() {
   const btn = $("sessions-sort");
@@ -792,7 +970,10 @@ $("spawn-go").addEventListener("click", async () => {
   const clear  = $("search-clear");
   const bar    = $("search-bar");
   const wrap   = document.querySelector(".home-top");
-  const newBtn = $("new-btn");
+  // Pin natural widths of every .icon-btn (settings + new) so the
+  // width transition has two concrete pixel endpoints — auto → 0 won't
+  // animate smoothly.
+  const iconBtns = wrap ? wrap.querySelectorAll(".icon-btn") : [];
 
   function applyFilter() {
     const q = (input.value || "").trim().toLowerCase();
@@ -806,12 +987,10 @@ $("spawn-go").addEventListener("click", async () => {
 
   function open() {
     if (!wrap || isOpen()) return;
-    // Pin new-btn's current natural width as inline px so the transition
-    // has two concrete endpoints (max-width / auto won't transition smoothly).
-    if (newBtn) {
-      newBtn.style.width = newBtn.getBoundingClientRect().width + "px";
-      void newBtn.offsetWidth;   // force reflow
-    }
+    iconBtns.forEach(b => {
+      b.style.width = b.getBoundingClientRect().width + "px";
+    });
+    if (iconBtns[0]) void iconBtns[0].offsetWidth;   // single reflow
     wrap.classList.add("search-open");
     // Focus synchronously in the click handler so iOS keeps the user
     // gesture and shows the keyboard. setTimeout would lose that context.
@@ -822,9 +1001,9 @@ $("spawn-go").addEventListener("click", async () => {
     input.value = "";
     if (wrap) wrap.classList.remove("search-open");
     applyFilter();
-    if (newBtn) {
-      setTimeout(() => { newBtn.style.width = ""; }, 500);
-    }
+    setTimeout(() => {
+      iconBtns.forEach(b => { b.style.width = ""; });
+    }, 500);
   }
 
   btn.addEventListener("click", open);
@@ -1146,9 +1325,14 @@ $("chat-back").addEventListener("click", () => {
 });
 
 // 左边缘右滑返回：跟手实时拖 chat 视图，松手按位移判定。仿 iOS 原生手势，窄屏单栏才启用
-(function setupSwipeBack() {
-  const view = $("view-chat");
+function installSwipeBack(viewId, opts) {
+  const view = $(viewId);
   if (!view) return;
+  // opts.commit() 在滑动完成后被调用，作用是触发 view 的退出 (chat: 点
+  // ←返回; settings: 移除 .active)。opts.narrowOnly = true 时仅窄屏启用,
+  // 跟原 chat 行为一致 — 桌面端有鼠标, 不需要边缘手势。
+  const narrowOnly = !!opts.narrowOnly;
+  const onCommit = opts.commit;
   const EDGE = 24;            // 起手必须在距左边 24px 以内
   const SLOP = 8;              // 决定方向前的容差
   const COMMIT_FRAC = 0.35;    // 松手时位移超过这个比例 → 继续滑出返回
@@ -1174,7 +1358,7 @@ $("chat-back").addEventListener("click", () => {
   }
 
   view.addEventListener("touchstart", e => {
-    if (window.innerWidth >= 900) return;
+    if (narrowOnly && window.innerWidth >= 900) return;
     if (e.touches.length !== 1) return;
     const t = e.touches[0];
     if (t.clientX > EDGE) return;
@@ -1196,7 +1380,7 @@ $("chat-back").addEventListener("click", () => {
       dragging = true;
       view.style.transition = "none";   // 跟手阶段禁用过渡
     }
-    // 一旦确认是右滑返回手势，吃掉所有 touchmove，避免手指上下动时 chat-log 同时滚动
+    // 一旦确认是右滑返回手势，吃掉所有 touchmove
     if (e.cancelable) e.preventDefault();
     const tx = Math.max(0, dx);
     view.style.transform = `translateX(${tx}px)`;
@@ -1215,11 +1399,8 @@ $("chat-back").addEventListener("click", () => {
     const v = (t.clientX - lastX) / dt;  // px/ms，最后一段速度
     const commit = dx > width * COMMIT_FRAC || v > COMMIT_VELOCITY;
     if (commit) {
-      // 继续滑到 100%，结束后 leaveChat 切回 home（chat 已经在外，无视觉跳跃）
       endTransition(`translateX(${width}px)`, () => {
-        // 顺序：先移除 .active（CSS 默认 transform:100%），再清 inline；
-        // 反过来会让 chat 瞬间跳回 0（有 .active）再滑出去，看起来像"卡在中间"
-        $("chat-back").click();
+        onCommit && onCommit();
         view.style.transform = "";
       });
     } else {
@@ -1228,11 +1409,20 @@ $("chat-back").addEventListener("click", () => {
   }
   view.addEventListener("touchend", release, { passive: true });
   view.addEventListener("touchcancel", () => {
-    // 取消视为回原位
     if (dragging) endTransition("translateX(0)", () => { view.style.transform = ""; });
     armed = false; dragging = false;
   }, { passive: true });
-})();
+}
+
+installSwipeBack("view-chat", {
+  narrowOnly: true,
+  commit: () => $("chat-back").click(),
+});
+installSwipeBack("view-settings", {
+  // 设置页在所有屏幕都是全屏 overlay, 桌面端也支持触屏右滑退出
+  narrowOnly: false,
+  commit: () => $("view-settings").classList.remove("active"),
+});
 
 function setConnDot(kind, title) {
   const el = $("conn-dot");
@@ -1347,18 +1537,29 @@ setInterval(refreshConvStatus, 1000);
 // §2: keep "active N ago" labels ticking even when no new session_state
 // arrives. Updates only the .ts text node — no card-DOM rebuild — so we
 // don't lose focus/scroll/animation state.
+// Same ticker also adds/removes the .stalled class on state-busy cards
+// when no new visible activity has arrived for STALLED_BUSY_THRESHOLD_S
+// seconds — flips the green dot to yellow to surface "in flight but
+// silent" sessions.
+const STALLED_BUSY_THRESHOLD_S = 300;
 setInterval(() => {
+  const now = Date.now() / 1000;
   document.querySelectorAll(".session-card").forEach((card) => {
     const sid = card.dataset.id;
     if (!sid) return;
     const sess = state.sessionsById.get(sid);
     if (!sess) return;
     const tsEl = card.querySelector(".ts");
-    if (!tsEl) return;
-    const txt = relTime(sess.last_activity_at) + " ago";
-    if (tsEl.textContent !== txt) tsEl.textContent = txt;
+    if (tsEl) {
+      const txt = relTime(sess.last_activity_at) + " ago";
+      if (tsEl.textContent !== txt) tsEl.textContent = txt;
+    }
+    // .stalled toggle: busy AND silence > threshold
+    const stalled = sess.state === "busy"
+      && (now - (sess.last_activity_at || 0)) > STALLED_BUSY_THRESHOLD_S;
+    card.classList.toggle("stalled", stalled);
   });
-}, 1000);
+}, 250);
 
 // iOS 键盘弹出时把整个 visual viewport 下移让焦点可见；fixed body 跟随上移 = 屏幕顶。
 // chat-head 钉在 visual viewport 顶端（用户可见区顶），需要正向 translate offsetTop。

@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     hibernated_at       REAL,
     finished_at         REAL,
     deleted_at          REAL,
-    deactivated_at      REAL
+    deactivated_at      REAL,
+    stashed_at          REAL
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -65,6 +66,8 @@ def _open() -> sqlite3.Connection:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()}
     if "deactivated_at" not in cols:
         conn.execute("ALTER TABLE sessions ADD COLUMN deactivated_at REAL")
+    if "stashed_at" not in cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN stashed_at REAL")
     return conn
 
 
@@ -157,22 +160,39 @@ async def update_name(sess_id: str, name: str) -> None:
 
 
 async def mark_deactivated(sess_id: str) -> None:
+    """Move to Inactive bucket; also clears any stash flag (mutually
+    exclusive)."""
     def _w() -> None:
-        _conn.execute("UPDATE sessions SET deactivated_at=? WHERE id=?",
-                       (time.time(), sess_id))
+        _conn.execute(
+            "UPDATE sessions SET deactivated_at=?, stashed_at=NULL WHERE id=?",
+            (time.time(), sess_id))
     await _run(_w)
 
 
 async def mark_activated(sess_id: str) -> None:
+    """Clear both inactive and stash flags — "activate" returns the
+    session to the top Active bucket regardless of which bucket it was
+    in."""
     def _w() -> None:
-        _conn.execute("UPDATE sessions SET deactivated_at=NULL WHERE id=?",
-                       (sess_id,))
+        _conn.execute(
+            "UPDATE sessions SET deactivated_at=NULL, stashed_at=NULL WHERE id=?",
+            (sess_id,))
+    await _run(_w)
+
+
+async def mark_stashed(sess_id: str) -> None:
+    """Move a session into Stash. Stash and Inactive are mutually
+    exclusive, so this clears deactivated_at."""
+    def _w() -> None:
+        _conn.execute(
+            "UPDATE sessions SET stashed_at=?, deactivated_at=NULL WHERE id=?",
+            (time.time(), sess_id))
     await _run(_w)
 
 
 _SESS_COLS = ("id", "claude_session_id", "name", "cwd", "created_at",
               "last_activity_at", "hibernated_at", "finished_at", "deleted_at",
-              "deactivated_at")
+              "deactivated_at", "stashed_at")
 
 
 async def get_session(sess_id: str) -> dict[str, Any] | None:

@@ -109,11 +109,29 @@ def test_resume_with_replay_does_not_bump_la(base_url, test_token, tmp_path, mon
     )
 
 
+def test_la_bump_triggers_session_state_broadcast():
+    """Regression for: during a sustained busy turn (state stays "busy"),
+    every assistant/result/user envelope MUST broadcast session_state to
+    push the new last_activity_at to clients. Without this, the home-card
+    "Xs ago" freezes during active work and the stalled-busy ticker
+    spuriously turns the dot yellow."""
+    import inspect
+    from claude_code_remote.server import session_manager as sm
+    src = inspect.getsource(sm._SessionManager._deliver
+                            if hasattr(sm, "_SessionManager") else sm)
+    # The pump's broadcast condition must be ANY bump, not only state changes.
+    assert "state_dirty or bump_la" in src, (
+        "_pump (or _deliver) must broadcast_status when bump_la is true, "
+        "not only when state_dirty is true — otherwise sustained busy "
+        "turns never re-push LA to clients."
+    )
+
+
 def test_la_bump_kinds_contract():
-    """Regression guard: the activity-bump kind set must contain real
-    user / assistant message types AND user-resolution events, but must
-    NOT contain CLI-initiated events. Future edits to this set should be
-    explicit decisions."""
+    """Activity-bump kind contract: any kind that surfaces NEW info to the
+    user must bump LA — including permission/askuser REQUESTS, because a
+    fresh card appearing IS new user-visible info. The only filtered kind
+    is `system_init`, the CLI's silent bookkeeping on spawn/resume."""
     from claude_code_remote.server.session_manager import _LA_BUMP_KINDS
 
     # Real conversation activity MUST bump.
@@ -126,8 +144,16 @@ def test_la_bump_kinds_contract():
         assert kind in _LA_BUMP_KINDS, (
             f"{kind} must be in _LA_BUMP_KINDS — user clicked to resolve"
         )
-    # CLI-initiated events MUST NOT bump (the whole point of the filter).
-    for kind in ("system_init", "perm_req", "askuser_req"):
-        assert kind not in _LA_BUMP_KINDS, (
-            f"{kind} must NOT be in _LA_BUMP_KINDS — CLI initiated, not user"
+    # CLI-initiated user-visible REQUESTS MUST bump — a brand-new
+    # approval / askuser card popping up IS new info worth surfacing.
+    for kind in ("perm_req", "askuser_req"):
+        assert kind in _LA_BUMP_KINDS, (
+            f"{kind} must be in _LA_BUMP_KINDS — new card visible to user"
         )
+    # system_init is the ONLY kind explicitly filtered out — without
+    # this guard, opening an idle 6h-old session would jump LA to "1s ago"
+    # purely from the CLI's resume init envelope.
+    assert "system_init" not in _LA_BUMP_KINDS, (
+        "system_init must NOT be in _LA_BUMP_KINDS — CLI internal "
+        "bookkeeping on spawn/resume, not user-visible content"
+    )

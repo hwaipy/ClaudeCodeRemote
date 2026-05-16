@@ -64,9 +64,9 @@ def test_inactive_card_menu_can_reactivate(logged_in_page, spawned_session):
     expect(inactive).to_be_visible(timeout=5000)
     items = inactive.locator(".card-menu-item")
     inactive.locator(".card-menu-btn").click()
-    expect(items).to_have_count(2)
+    expect(items).to_have_count(4)
     actions = items.evaluate_all("els => els.map(e => e.dataset.action)")
-    assert actions == ["activate", "delete"]
+    assert actions == ["rename", "activate", "stash", "delete"]
     inactive.locator('.card-menu-item[data-action="activate"]').click()
 
     # Card is back in Active section, removed from Inactive
@@ -75,18 +75,18 @@ def test_inactive_card_menu_can_reactivate(logged_in_page, spawned_session):
            ).to_have_count(1, timeout=5000)
 
 
-def test_active_card_menu_has_three_items(logged_in_page, spawned_session):
-    """Spec: active card menu = Rename / Move to Inactive / Delete."""
-    sid = spawned_session(name="three-item-menu")
+def test_active_card_menu_has_four_items(logged_in_page, spawned_session):
+    """Spec: active card menu = Rename / Stash / Deactivate / Delete."""
+    sid = spawned_session(name="four-item-menu")
     hp = HomePage(logged_in_page)
     hp.expect_visible()
     card = logged_in_page.locator(f"#sessions-active [data-id='{sid}']")
     expect(card).to_be_visible(timeout=5000)
     card.locator(".card-menu-btn").click()
     items = card.locator(".card-menu-item")
-    expect(items).to_have_count(3)
+    expect(items).to_have_count(4)
     actions = items.evaluate_all("els => els.map(e => e.dataset.action)")
-    assert actions == ["rename", "deactivate", "delete"]
+    assert actions == ["rename", "stash", "deactivate", "delete"]
 
 
 def test_active_card_menu_moves_to_inactive(logged_in_page, spawned_session):
@@ -504,11 +504,12 @@ def test_search_close_restores_new_btn(logged_in_page):
     expect(logged_in_page.locator(".home-top")).not_to_have_class(
         __import__("re").compile(r"\bsearch-open\b"), timeout=2000
     )
-    # After 400ms close animation, new-btn back to full width
+    # After 400ms close animation, new-btn back to its natural icon width.
+    # new-btn is now a round icon button (34×30), not a wide text button.
     logged_in_page.wait_for_timeout(450)
     expect(logged_in_page.locator("#new-btn")).to_have_css("opacity", "1")
     new_box = logged_in_page.locator("#new-btn").bounding_box()
-    assert new_box and new_box["width"] >= 100, f"new-btn should restore: {new_box}"
+    assert new_box and new_box["width"] >= 30, f"new-btn should restore: {new_box}"
 
 
 def test_inactive_chevron_is_left_of_label(logged_in_page):

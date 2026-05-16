@@ -27,13 +27,17 @@ HIBERNATE_TICK_S = float(os.environ.get("CCR_HIBERNATE_TICK_S", "60"))
 # 哪些事件落 DB（其它视为流式噪音，可从落了 DB 的事件重建 UI）
 _PERSIST_TOP = {"assistant", "user", "result", "user_input"}
 
-# Only these "kind" values bump last_activity_at. CLI-initiated events
-# (system_init from resume/spawn, perm_req / askuser_req while the user
-# hasn't responded yet) must NOT bump it — opening an old session would
-# otherwise reset its "N ago" label to "1s ago" purely from the resume's
-# init envelope.
+# Activity-bump kinds: anything that surfaces NEW info to the user
+# must bump last_activity_at — including permission/askuser REQUESTS,
+# because a fresh card popping up IS new visible info worth showing as
+# "1s ago" on the home card.
+#
+# The ONLY explicitly filtered kind is `system_init` — the CLI's silent
+# bookkeeping on spawn/resume. Without that filter, opening an idle 6h
+# session would jump LA to "1s ago" purely from the resume init envelope.
 _LA_BUMP_KINDS = {
     "user", "user_input", "assistant", "result",
+    "perm_req", "askuser_req",
     "perm_resolved", "askuser_resolved",
 }
 
@@ -76,6 +80,9 @@ class Session:
     # sends a fresh message. Cards in this state render in the Inactive
     # section on home.
     deactivated_at: float | None = None
+    # Stash bucket: visible above Inactive on home, default expanded.
+    # Mutually exclusive with deactivated_at.
+    stashed_at: float | None = None
     pending_permissions: int = 0          # 当前等待用户决定的权限请求数
     needs_action_detail: str | None = None  # post_turn_summary 报告的待办（None=无）
     # 一轮对话激活中：用户发出 → result 之间（含工具调用），用作"工作中"判定
@@ -123,6 +130,7 @@ class Session:
             "pending_permissions": self.pending_permissions,
             "needs_action_detail": self.needs_action_detail,
             "is_inactive": self.deactivated_at is not None,
+            "is_stash": self.stashed_at is not None,
         }
 
 
@@ -175,6 +183,7 @@ class SessionManager:
                 hibernated=True,
                 finished=r["finished_at"] is not None,
                 deactivated_at=r.get("deactivated_at"),
+                stashed_at=r.get("stashed_at"),
             )
             sess.seq = await db.max_seq(r["id"])
             async with self._lock:
@@ -288,24 +297,45 @@ class SessionManager:
         return True
 
     async def deactivate(self, sess_id: str) -> bool:
-        """Mark a session inactive. Frontend renders it under "Inactive"."""
+        """Mark a session inactive. Frontend renders it under "Inactive".
+        Stash is mutually exclusive with Inactive — if the session was
+        stashed, clear that flag too so it lands in only one bucket."""
         async with self._lock:
             sess = self.sessions.get(sess_id)
         if not sess:
             return False
         sess.deactivated_at = time.time()
+        sess.stashed_at = None
         await db.mark_deactivated(sess_id)
         self._broadcast_status(sess)
         return True
 
     async def activate(self, sess_id: str) -> bool:
-        """Clear the inactive flag (called when user sends a new message)."""
+        """Return the session to the Active bucket. Clears BOTH inactive
+        and stash flags — Activate is the universal "bring it back" action,
+        regardless of which side bucket it was in."""
         async with self._lock:
             sess = self.sessions.get(sess_id)
-        if not sess or sess.deactivated_at is None:
+        if not sess:
+            return False
+        if sess.deactivated_at is None and sess.stashed_at is None:
             return False
         sess.deactivated_at = None
+        sess.stashed_at = None
         await db.mark_activated(sess_id)
+        self._broadcast_status(sess)
+        return True
+
+    async def stash(self, sess_id: str) -> bool:
+        """Move a session into the Stash bucket. Mutually exclusive with
+        deactivated: this clears deactivated_at if set."""
+        async with self._lock:
+            sess = self.sessions.get(sess_id)
+        if not sess:
+            return False
+        sess.stashed_at = time.time()
+        sess.deactivated_at = None
+        await db.mark_stashed(sess_id)
         self._broadcast_status(sess)
         return True
 
@@ -448,7 +478,12 @@ class SessionManager:
                     q.put_nowait(broadcast_env)
                 except asyncio.QueueFull:
                     log.warning("subscriber queue full, dropping event for %s", sess.id)
-        if state_dirty:
+        # Broadcast on EITHER a state change OR an activity bump: without
+        # the bump-driven broadcast, a sustained "busy" turn never re-pushes
+        # session_state, so the home-card's "Xs ago" stays frozen and the
+        # stalled-busy ticker mistakenly turns it yellow after 5 s even
+        # though the server has been bumping LA all along.
+        if state_dirty or bump_la:
             self._broadcast_status(sess)
 
     def _broadcast_turn_state(self, sess: Session, *, include_tokens: bool = True) -> None:
