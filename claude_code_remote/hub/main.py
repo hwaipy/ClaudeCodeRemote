@@ -19,7 +19,6 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .. import server as app_server_pkg
-from ..server import config as app_config
 from . import db as hub_db
 from .api import me_handler, router as api_router
 from .forwarder import ForwardMiddleware
@@ -29,11 +28,22 @@ from .ws_forwarder import router as ws_forwarder_router
 STATIC_DIR = Path(app_server_pkg.__file__).parent / "static"
 
 
+def _build_id() -> str:
+    """跟 server/config._build_id 同款 — 用 app.js + style.css + index.html
+    最大 mtime 当版本号. 不 import server/config 因为它启动时强校验 CCR_TOKEN."""
+    files = ["app.js", "style.css", "index.html"]
+    try:
+        m = max(int((STATIC_DIR / f).stat().st_mtime) for f in files)
+        return str(m)
+    except Exception:
+        return "0"
+
+
 def _render_html(text: str) -> str:
     """跟 server/main.py 同款占位符替换 — __BUILD_ID__ 走文件 mtime,
     __ROOT__ 留空 (Hub 不走子路径, 始终 root)."""
     return (text
-            .replace("__BUILD_ID__", app_config._build_id())
+            .replace("__BUILD_ID__", _build_id())
             .replace("__ROOT__", ""))
 
 logging.basicConfig(
