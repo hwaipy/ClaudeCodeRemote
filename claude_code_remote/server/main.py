@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config, db
 from .api import router as api_router
+from .hub_client import maybe_start as maybe_start_hub
 from .session_manager import manager
 from .ws import router as ws_router
 
@@ -28,9 +29,13 @@ logging.basicConfig(
 async def lifespan(app: FastAPI):
     await db.init()
     await manager.startup()
+    # 可选反向连 Hub. CCR_HUB_URL 空 → 不启动, 纯本地零开销.
+    hub = maybe_start_hub(app)
     try:
         yield
     finally:
+        if hub:
+            await hub.stop()
         await manager.shutdown()
         await db.close()
 

@@ -25,9 +25,14 @@ router = APIRouter()
 
 
 class _OnlineApp:
-    """一个 connected app 的运行时状态."""
+    """一个 connected app 的运行时状态.
+
+    pending_http: stream_id -> Future[HttpRes].
+      hub HTTP forwarder 发请求时创建 Future, 收到响应帧时 set_result.
+    """
     __slots__ = ("app_id", "user_id", "name", "ws", "connected_at",
-                 "version", "capabilities")
+                 "version", "capabilities",
+                 "pending_http", "_send_lock")
 
     def __init__(self, app_id: str, user_id: str, name: str,
                  ws: WebSocket, version: str = "",
@@ -39,6 +44,38 @@ class _OnlineApp:
         self.connected_at = time.time()
         self.version = version
         self.capabilities = capabilities or []
+        self.pending_http: dict[str, asyncio.Future[tp.HttpRes]] = {}
+        # FastAPI WebSocket.send_text 不是协程安全, 多并发 forward 要 lock 串行化
+        self._send_lock = asyncio.Lock()
+
+    async def send_frame(self, frame: tp.AnyFrame) -> None:
+        async with self._send_lock:
+            await self.ws.send_text(tp.encode(frame))
+
+    async def send_http_req(self, req: tp.HttpReq, timeout: float = 30.0,
+                            ) -> tp.HttpRes:
+        """发请求, 等响应 (按 req.stream_id 配对). 超时抛 asyncio.TimeoutError."""
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[tp.HttpRes] = loop.create_future()
+        self.pending_http[req.stream_id] = fut
+        try:
+            await self.send_frame(req)
+            return await asyncio.wait_for(fut, timeout=timeout)
+        finally:
+            self.pending_http.pop(req.stream_id, None)
+
+    def resolve_http_res(self, res: tp.HttpRes) -> bool:
+        fut = self.pending_http.get(res.stream_id)
+        if fut and not fut.done():
+            fut.set_result(res)
+            return True
+        return False
+
+    def fail_all_pending(self, exc: Exception) -> None:
+        for fut in list(self.pending_http.values()):
+            if not fut.done():
+                fut.set_exception(exc)
+        self.pending_http.clear()
 
 
 class _Registry:
@@ -164,18 +201,25 @@ async def app_tunnel(
                 continue
 
             if isinstance(frame, tp.Ping):
-                await ws.send_text(tp.encode(tp.Pong(stream_id=frame.stream_id)))
+                await online.send_frame(tp.Pong(stream_id=frame.stream_id))
+            elif isinstance(frame, tp.HttpRes):
+                if not online.resolve_http_res(frame):
+                    log.warning("orphan http_res stream_id=%s from %s",
+                                frame.stream_id, online.app_id)
             elif isinstance(frame, tp.Control):
-                # M-Hub-0 不处理具体 control op; M-Hub-2 (metadata sync) 来填.
-                log.debug("control op=%s ignored (M-Hub-0)", frame.op)
+                # M-Hub-2 metadata sync 来填; M-Hub-1 还没用到.
+                log.debug("control op=%s ignored", frame.op)
             else:
-                # http_res / ws_msg etc — M-Hub-1 才需要分发
-                log.debug("frame type=%s ignored (M-Hub-0)",
+                # ws_msg etc — M-Hub-1+WS 才需要分发
+                log.debug("frame type=%s unhandled",
                           getattr(frame, "type", "?"))
     except WebSocketDisconnect:
         pass
     except Exception:
         log.exception("tunnel loop error for app %s", online.app_id)
     finally:
+        online.fail_all_pending(
+            RuntimeError(f"app {online.app_id} disconnected"),
+        )
         await registry.remove(online.app_id, ws)
         log.info("app offline: %s", online.app_id)
