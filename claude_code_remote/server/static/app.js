@@ -809,10 +809,13 @@ function enterHome() {
   if (!$("spawn-cwd").value) $("spawn-cwd").value = abbreviateHome(state.cwd || "");
   syncPresetChips();
   if (state.hubMode) {
-    // hub mode 用 HTTP 拉聚合 list; ws-global 后续做实时 delta (M-Hub-5).
-    hubFetchSessions();
+    // hub mode: 必须等 HTTP /api/sessions 填满 sessionsById 后再连 ws-global.
+    // 否则 ws delta 先到 (没 app_name/app_id 字段) 渲一次, HTTP 完成又 clear+set
+    // 重渲一次 — 用户视觉表现就是 "绿色 badge 一闪而过".
+    hubFetchSessions().finally(connectGlobalWS);
+  } else {
+    connectGlobalWS();
   }
-  connectGlobalWS();
   // 拉一次 ~/.claude/settings.json 的 model/effort 默认 (用于 chat-menu
   // Default 选项加注). 只 fetch 一次, 缓存到 state.cliDefaults.
   if (!state.cliDefaults) {
