@@ -211,3 +211,122 @@ def hub_and_app():
             p.wait(timeout=3)
         except subprocess.TimeoutExpired:
             p.kill()
+
+
+def _spawn_app(hub_base_url: str, device_token: str, app_name: str,
+               app_db_path: str, default_cwd: str, app_port: int,
+               ) -> subprocess.Popen:
+    base_env = {k: v for k, v in os.environ.items() if not k.startswith("CCR_")}
+    app_env = {
+        **base_env,
+        "CCR_DB_PATH": app_db_path,
+        "CCR_DEFAULT_CWD": default_cwd,
+        "CCR_TOKEN": f"local-{secrets.token_hex(4)}",
+        "CCR_HOST": "127.0.0.1",
+        "CCR_PORT": str(app_port),
+        "CCR_ROOT_PATH": "",
+        "CCR_CLAUDE_BIN": str(FAKE_CLAUDE),
+        "CCR_HUB_URL": hub_base_url.replace("http://", "ws://"),
+        "CCR_HUB_DEVICE_TOKEN": device_token,
+        "CCR_HUB_APP_NAME": app_name,
+        "PYTHONUNBUFFERED": "1",
+    }
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn",
+         "claude_code_remote.server.main:app",
+         "--host", "127.0.0.1", "--port", str(app_port),
+         "--log-level", "warning"],
+        env=app_env, cwd=str(PROJECT_ROOT),
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    )
+    _wait_url(f"http://127.0.0.1:{app_port}/healthz", timeout=15)
+    return proc
+
+
+@pytest.fixture
+def multi_app_hub(tmp_path):
+    """M-Hub-5: hub + 2 个 apps. function scope (每个测试拿全新环境)."""
+    hub_db = tmp_path / "hub.db"
+    hub_port = _free_port()
+    admin_email = "test@example.com"
+    admin_pw = "test-password"
+
+    hub_env_vars = os.environ.copy()
+    hub_env_vars.update({
+        "CCR_HUB_DB": str(hub_db),
+        "CCR_HUB_ADMIN_EMAIL": admin_email,
+        "CCR_HUB_ADMIN_PW": admin_pw,
+    })
+    hub_proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn",
+         "claude_code_remote.hub.main:app",
+         "--host", "127.0.0.1", "--port", str(hub_port),
+         "--log-level", "warning"],
+        env=hub_env_vars, cwd=str(PROJECT_ROOT),
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    )
+    hub_url = f"http://127.0.0.1:{hub_port}"
+    try:
+        _wait_url(f"{hub_url}/healthz", timeout=15)
+    except Exception:
+        hub_proc.terminate()
+        out = hub_proc.stdout.read().decode(errors="replace") if hub_proc.stdout else ""
+        raise RuntimeError(f"hub failed: {out}")
+
+    # Login + redeem 2 apps
+    with httpx.Client(base_url=hub_url, timeout=5) as c:
+        c.post("/api/hub/login", json={
+            "email": admin_email, "password": admin_pw,
+        }).raise_for_status()
+        pair1 = c.post("/api/hub/pair").json()
+        red1 = c.post("/api/hub/pair/redeem", json={
+            "code": pair1["code"], "app_name": "app-A",
+        }).json()
+        pair2 = c.post("/api/hub/pair").json()
+        red2 = c.post("/api/hub/pair/redeem", json={
+            "code": pair2["code"], "app_name": "app-B",
+        }).json()
+
+    cwd_a = tmp_path / "cwd-a"; cwd_a.mkdir()
+    cwd_b = tmp_path / "cwd-b"; cwd_b.mkdir()
+    port_a = _free_port()
+    port_b = _free_port()
+    a_proc = _spawn_app(hub_url, red1["device_token"], "app-A",
+                        str(tmp_path / "app-a.sqlite"), str(cwd_a), port_a)
+    b_proc = _spawn_app(hub_url, red2["device_token"], "app-B",
+                        str(tmp_path / "app-b.sqlite"), str(cwd_b), port_b)
+
+    # 等两个都 online
+    _wait_app_online(hub_url, admin_email, admin_pw, timeout=15)
+    # 再等第二个
+    with httpx.Client(base_url=hub_url, timeout=5) as c:
+        c.post("/api/hub/login", json={
+            "email": admin_email, "password": admin_pw,
+        }).raise_for_status()
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            apps = c.get("/api/hub/apps").json()
+            online = [a for a in apps if a["online"]]
+            if len(online) >= 2:
+                break
+            time.sleep(0.1)
+        else:
+            raise RuntimeError(f"both apps not online: {apps}")
+
+    yield {
+        "hub_url": hub_url,
+        "ws_hub_url": hub_url.replace("http://", "ws://"),
+        "admin_email": admin_email,
+        "admin_pw": admin_pw,
+        "app_a": {"id": red1["app_id"], "cwd": str(cwd_a),
+                   "port": port_a, "proc": a_proc},
+        "app_b": {"id": red2["app_id"], "cwd": str(cwd_b),
+                   "port": port_b, "proc": b_proc},
+    }
+
+    for p in (a_proc, b_proc, hub_proc):
+        p.terminate()
+        try:
+            p.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            p.kill()

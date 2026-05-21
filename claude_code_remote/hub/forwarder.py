@@ -87,6 +87,8 @@ async def _resolve_target(request, user_id: str):
                     j.pop("app_id", None)
                     body = _json.dumps(j).encode("utf-8")
                     return o, body
+            # 用户明确指定的 app 不 online → 不能 fallback (会 spawn 到错 app)
+            return None, body
         return await _pick_app_for_user(user_id), body
 
     # /api/sessions/<sid>/... or DELETE /api/sessions/<sid>
