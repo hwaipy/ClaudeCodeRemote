@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .. import server as app_server_pkg
+from ..server import config as app_config
 from . import db as hub_db
 from .api import me_handler, router as api_router
 from .forwarder import ForwardMiddleware
@@ -26,6 +27,14 @@ from .tunnel import router as tunnel_router, registry
 from .ws_forwarder import router as ws_forwarder_router
 
 STATIC_DIR = Path(app_server_pkg.__file__).parent / "static"
+
+
+def _render_html(text: str) -> str:
+    """跟 server/main.py 同款占位符替换 — __BUILD_ID__ 走文件 mtime,
+    __ROOT__ 留空 (Hub 不走子路径, 始终 root)."""
+    return (text
+            .replace("__BUILD_ID__", app_config._build_id())
+            .replace("__ROOT__", ""))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -75,7 +84,10 @@ async def get_me(ccr_sess: str | None = Cookie(None)):
 
 @app.get("/")
 async def index() -> HTMLResponse:
-    return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
+    return HTMLResponse(
+        _render_html((STATIC_DIR / "index.html").read_text(encoding="utf-8")),
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
 
 
 @app.get("/icon.svg")
@@ -86,7 +98,7 @@ async def icon() -> FileResponse:
 @app.get("/sw.js")
 async def sw() -> Response:
     return Response(
-        (STATIC_DIR / "sw.js").read_text(encoding="utf-8"),
+        _render_html((STATIC_DIR / "sw.js").read_text(encoding="utf-8")),
         media_type="application/javascript",
         headers={"Service-Worker-Allowed": "/",
                  "Cache-Control": "no-cache, must-revalidate"},
@@ -96,8 +108,9 @@ async def sw() -> Response:
 @app.get("/manifest.webmanifest")
 async def manifest() -> Response:
     return Response(
-        (STATIC_DIR / "manifest.webmanifest").read_text(encoding="utf-8"),
+        _render_html((STATIC_DIR / "manifest.webmanifest").read_text(encoding="utf-8")),
         media_type="application/manifest+json",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
     )
 
 
