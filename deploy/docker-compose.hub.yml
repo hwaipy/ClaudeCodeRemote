@@ -1,0 +1,15 @@
+services:
+  ccr-hub:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.hub
+    container_name: ccr-hub
+    restart: unless-stopped
+    ports:
+      - "1885:1885"
+    environment:
+      CCR_HUB_DB: /data/hub.db
+      CCR_HUB_ADMIN_EMAIL: "${CCR_HUB_ADMIN_EMAIL:?must set}"
+      CCR_HUB_ADMIN_PW: "${CCR_HUB_ADMIN_PW:?must set}"
+    volumes:
+      - ./data:/data
