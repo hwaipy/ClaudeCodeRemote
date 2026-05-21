@@ -28,7 +28,7 @@ class LoginReq(BaseModel):
 
 
 async def _require_user(session_id: str | None) -> str:
-    user_id = auth.get_user_id(session_id)
+    user_id = await auth.get_user_id(session_id)
     if not user_id:
         raise HTTPException(status_code=401, detail="unauthorized")
     return user_id
@@ -39,10 +39,10 @@ async def login(body: LoginReq, response: Response):
     uid = await hub_db.verify_login(body.email, body.password)
     if not uid:
         raise HTTPException(status_code=401, detail="bad_credentials")
-    sid = auth.create_session(uid)
+    sid = await auth.create_session(uid)
     response.set_cookie(
         _COOKIE_NAME, sid,
-        httponly=True, samesite="lax", path="/", max_age=30 * 24 * 3600,
+        httponly=True, samesite="lax", path="/", max_age=auth.SESSION_TTL_SECONDS,
     )
     return {"ok": True, "user_id": uid}
 
@@ -50,7 +50,7 @@ async def login(body: LoginReq, response: Response):
 @router.post("/logout")
 async def logout(response: Response, ccr_sess: str | None = Cookie(None)):
     if ccr_sess:
-        auth.destroy_session(ccr_sess)
+        await auth.destroy_session(ccr_sess)
     response.delete_cookie(_COOKIE_NAME, path="/")
     return {"ok": True}
 
@@ -58,7 +58,7 @@ async def logout(response: Response, ccr_sess: str | None = Cookie(None)):
 async def me_handler(ccr_sess: str | None) -> dict:
     """SPA probe — 让前端知道当前是 hub 模式 + 登录身份 + apps list.
     路径 /api/me (不在 /api/hub/ 下), 让 hub + local 用同一 endpoint."""
-    user_id = auth.get_user_id(ccr_sess)
+    user_id = await auth.get_user_id(ccr_sess)
     if not user_id:
         return {"mode": "hub", "user_id": None, "apps": []}
     apps_rows = await hub_db.list_apps_for_user(user_id)

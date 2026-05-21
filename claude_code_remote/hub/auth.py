@@ -1,29 +1,25 @@
-"""Hub user auth — 简陋的 session cookie (v0 单 admin, 没必要 JWT).
+"""Hub user auth — session 持久化到 db (重启 hub 后 cookie 不失效).
 
-session_id 随机, 内存 dict 映射到 user_id. 进程重启 cookie 失效, 重新登录即可.
-后续多 user / 持久化用 sqlite session store.
+session id (cookie value) = token_urlsafe(24), 入 db auth_sessions 表 +
+TTL. 老的内存 dict 已废弃.
 """
 from __future__ import annotations
 
-import secrets
-import time
+from . import db as hub_db
 
-# session_id -> {user_id, created_at}
-_sessions: dict[str, dict] = {}
+SESSION_TTL_SECONDS = 30 * 24 * 3600
 
 
-def create_session(user_id: str) -> str:
-    sid = secrets.token_urlsafe(24)
-    _sessions[sid] = {"user_id": user_id, "created_at": time.time()}
-    return sid
+async def create_session(user_id: str) -> str:
+    return await hub_db.create_auth_session(user_id, SESSION_TTL_SECONDS)
 
 
-def get_user_id(session_id: str | None) -> str | None:
+async def get_user_id(session_id: str | None) -> str | None:
     if not session_id:
         return None
-    row = _sessions.get(session_id)
-    return row["user_id"] if row else None
+    return await hub_db.get_auth_session_user(session_id)
 
 
-def destroy_session(session_id: str) -> None:
-    _sessions.pop(session_id, None)
+async def destroy_session(session_id: str) -> None:
+    if session_id:
+        await hub_db.destroy_auth_session(session_id)

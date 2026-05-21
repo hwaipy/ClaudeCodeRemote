@@ -39,11 +39,11 @@ async def _safe_close(ws: WebSocket, code: int, reason: str = "") -> None:
 async def _forward_ws(user_ws: WebSocket, path: str) -> None:
     """通用 ws forward: hub accept user_ws → 找 app → 双向 multiplex."""
     # auth: 走 cookie 优先, ?token= 备选 (跟 spec 一致, SPA 大部分用 cookie)
-    user_id = hub_auth.get_user_id(user_ws.cookies.get("ccr_sess"))
+    user_id = await hub_auth.get_user_id(user_ws.cookies.get("ccr_sess"))
     qs_token = user_ws.query_params.get("token")
     if not user_id and qs_token:
         # 备选: ?token=<session-cookie-value> (SW / 跨 origin 场景)
-        user_id = hub_auth.get_user_id(qs_token)
+        user_id = await hub_auth.get_user_id(qs_token)
     if not user_id:
         await user_ws.close(code=1008, reason="unauthorized")
         return

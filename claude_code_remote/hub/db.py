@@ -1,17 +1,23 @@
 """Hub-side SQLite (ccr-hub-spec.html §9). 风格跟 server/db.py 一致 — 内置
 sqlite3 + asyncio.to_thread, 零外部依赖.
 
-4 张表: users / apps / pairing_tokens / sessions_cache.
-M-Hub-0 只用 users + apps; 后续逐步加 pairing + cache.
+5 张表: users / apps / pairing_tokens / sessions_cache / sessions (auth).
+
+密码 hash: PBKDF2-HMAC-SHA256 + 16-byte salt + 600k iterations
+(OWASP 2023). 旧 sha256 hash 在 verify 通过后自动升级.
 """
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import secrets
 import sqlite3
 import time
 from pathlib import Path
+
+_PBKDF2_ITERS = 600_000
+_PBKDF2_SALT_BYTES = 16
 
 _DB_PATH: Path | None = None
 _lock = asyncio.Lock()
@@ -61,11 +67,55 @@ CREATE TABLE IF NOT EXISTS sessions_cache (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_cache_user
   ON sessions_cache(user_id, last_active DESC);
+
+-- 用户登录 session (持久化, hub 重启不失效)
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  created_at  REAL NOT NULL,
+  expires_at  REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_exp ON auth_sessions(expires_at);
 """
 
 
 def hash_password(pw: str) -> str:
-    return hashlib.sha256(pw.encode()).hexdigest()
+    """PBKDF2-HMAC-SHA256, 600k iterations, 16-byte random salt. 格式:
+        pbkdf2_sha256$<iters>$<salt_hex>$<hash_hex>
+    """
+    salt = secrets.token_bytes(_PBKDF2_SALT_BYTES)
+    h = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"), salt, _PBKDF2_ITERS)
+    return f"pbkdf2_sha256${_PBKDF2_ITERS}${salt.hex()}${h.hex()}"
+
+
+def verify_password(pw: str, stored: str) -> bool:
+    """常数时间比较. 支持 pbkdf2 + 老 sha256 (返 True 让上层触发 rehash)."""
+    if stored.startswith("pbkdf2_sha256$"):
+        try:
+            _, iters_s, salt_hex, hash_hex = stored.split("$", 3)
+            iters = int(iters_s)
+            salt = bytes.fromhex(salt_hex)
+            expected = bytes.fromhex(hash_hex)
+            got = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"),
+                                       salt, iters)
+            return hmac.compare_digest(expected, got)
+        except Exception:
+            return False
+    # 老 sha256(plaintext) 兼容路径
+    legacy = hashlib.sha256(pw.encode("utf-8")).hexdigest()
+    return hmac.compare_digest(stored, legacy)
+
+
+def needs_rehash(stored: str) -> bool:
+    """老 sha256 / 低 iters → 需要重 hash 升级."""
+    if not stored.startswith("pbkdf2_sha256$"):
+        return True
+    try:
+        iters = int(stored.split("$")[1])
+        return iters < _PBKDF2_ITERS
+    except Exception:
+        return True
 
 
 def hash_token(tok: str) -> str:
@@ -113,6 +163,8 @@ def _ensure_admin_sync(email: str, pw_hash: str) -> str:
     c = _get_conn()
     row = c.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
     if row:
+        # 老库存在; 不覆盖密码 (用户已经改过), 但若仍是老 sha256 等下次 login
+        # 触发自动 rehash. 这里只补 schema 缺失数据.
         return row["id"]
     uid = "user-" + secrets.token_hex(8)
     c.execute(
@@ -124,23 +176,76 @@ def _ensure_admin_sync(email: str, pw_hash: str) -> str:
 
 
 async def ensure_admin(email: str, password: str) -> str:
+    # 注: hash_password 走 PBKDF2 随机 salt, 每次结果不同 — 不能用作 dedup key.
     return await asyncio.to_thread(
         _ensure_admin_sync, email, hash_password(password),
     )
 
 
-def _verify_login_sync(email: str, pw_hash: str) -> str | None:
-    row = _get_conn().execute(
-        "SELECT id FROM users WHERE email=? AND password_hash=?",
-        (email, pw_hash),
+def _verify_login_sync(email: str, password: str) -> str | None:
+    c = _get_conn()
+    row = c.execute(
+        "SELECT id, password_hash FROM users WHERE email=?", (email,),
     ).fetchone()
-    return row["id"] if row else None
+    if not row:
+        return None
+    if not verify_password(password, row["password_hash"]):
+        return None
+    # 自动升级老格式 / 低 iters
+    if needs_rehash(row["password_hash"]):
+        c.execute(
+            "UPDATE users SET password_hash=? WHERE id=?",
+            (hash_password(password), row["id"]),
+        )
+    return row["id"]
 
 
 async def verify_login(email: str, password: str) -> str | None:
-    return await asyncio.to_thread(
-        _verify_login_sync, email, hash_password(password),
-    )
+    return await asyncio.to_thread(_verify_login_sync, email, password)
+
+
+# ---- auth_sessions (持久化登录 session) ----
+
+async def create_auth_session(user_id: str, ttl_seconds: int) -> str:
+    sid = secrets.token_urlsafe(24)
+    now = time.time()
+
+    def _q():
+        _get_conn().execute(
+            "INSERT INTO auth_sessions(id, user_id, created_at, expires_at) "
+            "VALUES(?,?,?,?)",
+            (sid, user_id, now, now + ttl_seconds),
+        )
+    await asyncio.to_thread(_q)
+    return sid
+
+
+async def get_auth_session_user(sid: str) -> str | None:
+    def _q():
+        row = _get_conn().execute(
+            "SELECT user_id, expires_at FROM auth_sessions WHERE id=?", (sid,),
+        ).fetchone()
+        if not row:
+            return None
+        if row["expires_at"] < time.time():
+            return None
+        return row["user_id"]
+    return await asyncio.to_thread(_q)
+
+
+async def destroy_auth_session(sid: str) -> None:
+    def _q():
+        _get_conn().execute("DELETE FROM auth_sessions WHERE id=?", (sid,))
+    await asyncio.to_thread(_q)
+
+
+async def purge_expired_auth_sessions() -> int:
+    def _q():
+        c = _get_conn().execute(
+            "DELETE FROM auth_sessions WHERE expires_at < ?", (time.time(),),
+        )
+        return c.rowcount
+    return await asyncio.to_thread(_q)
 
 
 async def get_user_by_id(user_id: str) -> dict | None:

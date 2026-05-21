@@ -109,7 +109,7 @@ class ForwardMiddleware(BaseHTTPMiddleware):
 
         # 需要 user identity. 复用 hub cookie auth (api.py 里的 cookie 名).
         cookie = request.cookies.get("ccr_sess")
-        user_id = auth.get_user_id(cookie)
+        user_id = await auth.get_user_id(cookie)
         if not user_id:
             return JSONResponse(
                 {"error": "unauthorized"}, status_code=401,
