@@ -117,6 +117,8 @@ class HubClient:
 
     async def _loop(self, ws) -> None:
         send_lock = asyncio.Lock()
+        # ws streams: stream_id -> asyncio.Queue[dict ASGI-events for receive]
+        ws_streams: dict[str, asyncio.Queue] = {}
 
         async def send(frame: tp.AnyFrame) -> None:
             async with send_lock:
@@ -135,6 +137,24 @@ class HubClient:
                 )
             await send(res)
 
+        async def handle_ws_open(open_frame: tp.WsOpen) -> None:
+            q: asyncio.Queue = asyncio.Queue()
+            ws_streams[open_frame.stream_id] = q
+            # 进 ASGI dispatch — 出错也要发 WsClose 给 hub
+            try:
+                await self._dispatch_ws(open_frame, q, send)
+            except Exception as e:  # noqa: BLE001
+                log.exception("dispatch ws_open failed: %s", e)
+                try:
+                    await send(tp.WsClose(
+                        stream_id=open_frame.stream_id,
+                        code=1011, reason=f"app_error:{e!s}"[:120],
+                    ))
+                except Exception:
+                    pass
+            finally:
+                ws_streams.pop(open_frame.stream_id, None)
+
         async for raw in ws:
             try:
                 frame = tp.decode(raw)
@@ -145,6 +165,28 @@ class HubClient:
                 await send(tp.Pong(stream_id=frame.stream_id))
             elif isinstance(frame, tp.HttpReq):
                 asyncio.create_task(handle_http_req(frame))
+            elif isinstance(frame, tp.WsOpen):
+                asyncio.create_task(handle_ws_open(frame))
+            elif isinstance(frame, (tp.WsMsg, tp.WsClose)):
+                q = ws_streams.get(frame.stream_id)
+                if q is None:
+                    log.debug("orphan ws frame stream=%s", frame.stream_id)
+                    continue
+                if isinstance(frame, tp.WsMsg):
+                    payload = base64.b64decode(frame.payload_b64) if frame.payload_b64 else b""
+                    if frame.is_binary:
+                        q.put_nowait({
+                            "type": "websocket.receive", "bytes": payload,
+                        })
+                    else:
+                        q.put_nowait({
+                            "type": "websocket.receive",
+                            "text": payload.decode("utf-8", errors="replace"),
+                        })
+                else:
+                    q.put_nowait({
+                        "type": "websocket.disconnect", "code": frame.code,
+                    })
             elif isinstance(frame, tp.Control):
                 log.debug("control op=%s (server -> app) ignored", frame.op)
             else:
@@ -224,6 +266,85 @@ class HubClient:
             headers=out_headers,
             body_b64=base64.b64encode(merged).decode("ascii"),
         )
+
+
+    # ---------- ASGI in-process WS dispatch ----------
+
+    async def _dispatch_ws(
+        self, open_frame: tp.WsOpen, in_queue: asyncio.Queue,
+        send_frame,
+    ) -> None:
+        """构造 ASGI websocket scope, 跑本进程 ws handler.
+
+        - receive 从 in_queue 拿事件 (websocket.connect 由本函数 push 第一条;
+          后续 websocket.receive / websocket.disconnect 由外层 _loop 推).
+        - send 把 ASGI send 事件转成 tp.WsMsg / tp.WsClose 帧发回 hub.
+        """
+        scope_path = open_frame.path
+        # 提取 sid 给 path_params (ASGI 不强制要, 但 FastAPI 路由会从 raw_path 自己 match)
+        scope = {
+            "type": "websocket",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "scheme": "ws",
+            "path": scope_path,
+            "raw_path": scope_path.encode("utf-8"),
+            "query_string": open_frame.query.encode("utf-8"),
+            "root_path": "",
+            "headers": [
+                (k.lower().encode("latin-1"), v.encode("latin-1"))
+                for k, v in open_frame.headers.items()
+            ],
+            "subprotocols": [],
+            "client": ("hub", 0),
+            "server": ("app", 0),
+            "state": {
+                "via_hub": True,
+                "hub_user_id": open_frame.user_id or "",
+            },
+        }
+
+        # 初始 websocket.connect
+        await in_queue.put({"type": "websocket.connect"})
+
+        async def receive() -> dict:
+            return await in_queue.get()
+
+        async def send(message: dict) -> None:
+            t = message.get("type")
+            if t == "websocket.accept":
+                # nothing — hub 已对 user 端 accept, app 端不需要回传
+                return
+            if t == "websocket.send":
+                if message.get("bytes") is not None:
+                    payload = message["bytes"]
+                    is_binary = True
+                else:
+                    payload = (message.get("text") or "").encode("utf-8")
+                    is_binary = False
+                await send_frame(tp.WsMsg(
+                    stream_id=open_frame.stream_id,
+                    payload_b64=base64.b64encode(payload).decode("ascii"),
+                    is_binary=is_binary,
+                ))
+            elif t == "websocket.close":
+                code = int(message.get("code") or 1000)
+                reason = str(message.get("reason") or "")
+                await send_frame(tp.WsClose(
+                    stream_id=open_frame.stream_id,
+                    code=code, reason=reason,
+                ))
+
+        try:
+            await self.asgi_app(scope, receive, send)
+        finally:
+            # ASGI 端如果没主动 close, 我们也补一个让 hub 关 user_ws
+            try:
+                await send_frame(tp.WsClose(
+                    stream_id=open_frame.stream_id, code=1000,
+                ))
+            except Exception:
+                pass
 
 
 def maybe_start(asgi_app) -> HubClient | None:

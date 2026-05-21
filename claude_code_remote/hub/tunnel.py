@@ -24,15 +24,32 @@ log = logging.getLogger("ccr.hub.tunnel")
 router = APIRouter()
 
 
+class _WsStream:
+    """一个 forwarded user WebSocket 的 hub 侧端点.
+
+    - inbound: 从 app (经反向 WS) 收到的 WsMsg 帧 → push 给 user_ws.send
+    - outbound: user_ws.receive → 转 WsMsg 帧给 app
+    - close: 任一方关闭 → 发 WsClose 给对端 + 关 user_ws
+    """
+    __slots__ = ("stream_id", "user_ws", "inbound", "closed")
+
+    def __init__(self, stream_id: str, user_ws: WebSocket) -> None:
+        self.stream_id = stream_id
+        self.user_ws = user_ws
+        # inbound queue 元素: WsMsg | WsClose
+        self.inbound: asyncio.Queue[tp.AnyFrame] = asyncio.Queue()
+        self.closed = False
+
+
 class _OnlineApp:
     """一个 connected app 的运行时状态.
 
     pending_http: stream_id -> Future[HttpRes].
-      hub HTTP forwarder 发请求时创建 Future, 收到响应帧时 set_result.
+    ws_streams:   stream_id -> _WsStream  (active forwarded ws)
     """
     __slots__ = ("app_id", "user_id", "name", "ws", "connected_at",
                  "version", "capabilities",
-                 "pending_http", "_send_lock")
+                 "pending_http", "ws_streams", "_send_lock")
 
     def __init__(self, app_id: str, user_id: str, name: str,
                  ws: WebSocket, version: str = "",
@@ -45,6 +62,7 @@ class _OnlineApp:
         self.version = version
         self.capabilities = capabilities or []
         self.pending_http: dict[str, asyncio.Future[tp.HttpRes]] = {}
+        self.ws_streams: dict[str, _WsStream] = {}
         # FastAPI WebSocket.send_text 不是协程安全, 多并发 forward 要 lock 串行化
         self._send_lock = asyncio.Lock()
 
@@ -71,11 +89,33 @@ class _OnlineApp:
             return True
         return False
 
+    def register_ws_stream(self, stream: _WsStream) -> None:
+        self.ws_streams[stream.stream_id] = stream
+
+    def get_ws_stream(self, stream_id: str) -> _WsStream | None:
+        return self.ws_streams.get(stream_id)
+
+    def remove_ws_stream(self, stream_id: str) -> None:
+        s = self.ws_streams.pop(stream_id, None)
+        if s:
+            s.closed = True
+
     def fail_all_pending(self, exc: Exception) -> None:
         for fut in list(self.pending_http.values()):
             if not fut.done():
                 fut.set_exception(exc)
         self.pending_http.clear()
+        # ws streams: 给每个 inbound queue 推个 disconnect 让 forward task 结束
+        for s in list(self.ws_streams.values()):
+            try:
+                s.inbound.put_nowait(
+                    tp.WsClose(stream_id=s.stream_id, code=1011,
+                                reason="app_offline"),
+                )
+            except Exception:
+                pass
+            s.closed = True
+        self.ws_streams.clear()
 
 
 class _Registry:
@@ -206,11 +246,20 @@ async def app_tunnel(
                 if not online.resolve_http_res(frame):
                     log.warning("orphan http_res stream_id=%s from %s",
                                 frame.stream_id, online.app_id)
+            elif isinstance(frame, (tp.WsMsg, tp.WsClose)):
+                stream = online.get_ws_stream(frame.stream_id)
+                if stream is None:
+                    log.debug("orphan ws frame stream_id=%s type=%s",
+                              frame.stream_id, frame.type)
+                else:
+                    try:
+                        stream.inbound.put_nowait(frame)
+                    except Exception:
+                        log.exception("ws inbound enqueue failed")
             elif isinstance(frame, tp.Control):
                 # M-Hub-2 metadata sync 来填; M-Hub-1 还没用到.
                 log.debug("control op=%s ignored", frame.op)
             else:
-                # ws_msg etc — M-Hub-1+WS 才需要分发
                 log.debug("frame type=%s unhandled",
                           getattr(frame, "type", "?"))
     except WebSocketDisconnect:

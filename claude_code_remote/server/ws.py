@@ -54,13 +54,18 @@ async def _handle_permission_decision(sess_id: str, msg: dict) -> None:
                     req_id, sess_id)
 
 
+def _via_hub(ws: WebSocket) -> bool:
+    return bool(ws.scope.get("state", {}).get("via_hub"))
+
+
 @router.websocket("/ws-global")
 async def ws_global(ws: WebSocket) -> None:
     """全局活动流：前端主页订阅，server 推送所有 sess 的状态变化。"""
-    token = ws.query_params.get("token")
-    if not check_ws_token(token):
-        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="invalid token")
-        return
+    if not _via_hub(ws):
+        token = ws.query_params.get("token")
+        if not check_ws_token(token):
+            await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="invalid token")
+            return
     await ws.accept()
     try:
         async for msg in manager.global_subscribe():
@@ -82,10 +87,11 @@ async def ws_session(ws: WebSocket, session_id: str) -> None:
     _t0 = _time.perf_counter()
     def _ms(): return int((_time.perf_counter() - _t0) * 1000)
     log.info("DBG ws-handler-enter %s sess=%s", _ms(), session_id)
-    token = ws.query_params.get("token")
-    if not check_ws_token(token):
-        await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="invalid token")
-        return
+    if not _via_hub(ws):
+        token = ws.query_params.get("token")
+        if not check_ws_token(token):
+            await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="invalid token")
+            return
     sess = await manager.get(session_id)
     if not sess:
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="session not found")
