@@ -134,6 +134,10 @@ class ForwardMiddleware(BaseHTTPMiddleware):
                     "model": s.get("model") or "",
                     "effort": s.get("effort") or "",
                     "permission_mode": s.get("permission_mode"),
+                    "is_stash": bool(s.get("is_stash")),
+                    "is_inactive": bool(s.get("is_inactive")),
+                    "pending_permissions": int(s.get("pending_permissions") or 0),
+                    "needs_action_detail": s.get("needs_action_detail"),
                     "app_id": s["app_id"],
                     "app_name": s.get("app_name")
                                  or app_name_by_id.get(s["app_id"], ""),

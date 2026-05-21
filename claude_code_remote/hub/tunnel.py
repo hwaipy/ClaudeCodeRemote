@@ -222,6 +222,16 @@ def _norm_session(payload: dict) -> dict:
         out["last_active"] = payload.get("last_active")
     if "created_at" in payload:
         out["created_at"] = payload.get("created_at")
+    # M-Hub-2+: stash / inactive / pending_perm 也透传 — SPA home view 按这些
+    # 分区到 Active / Stash / Inactive section, 显示 ▲badge 数等.
+    if "is_stash" in payload:
+        out["is_stash"] = bool(payload.get("is_stash"))
+    if "is_inactive" in payload:
+        out["is_inactive"] = bool(payload.get("is_inactive"))
+    if "pending_permissions" in payload:
+        out["pending_permissions"] = int(payload.get("pending_permissions") or 0)
+    if "needs_action_detail" in payload:
+        out["needs_action_detail"] = payload.get("needs_action_detail")
     return out
 
 

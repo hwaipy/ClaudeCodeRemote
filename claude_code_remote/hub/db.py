@@ -51,18 +51,22 @@ CREATE TABLE IF NOT EXISTS pairing_tokens (
 );
 
 CREATE TABLE IF NOT EXISTS sessions_cache (
-  app_id          TEXT NOT NULL,
-  sid             TEXT NOT NULL,
-  user_id         TEXT NOT NULL,
-  name            TEXT,
-  cwd             TEXT,
-  state           TEXT,
-  last_active     REAL,
-  model           TEXT,
-  effort          TEXT,
-  permission_mode TEXT,
-  created_at      REAL,
-  updated_at      REAL,
+  app_id              TEXT NOT NULL,
+  sid                 TEXT NOT NULL,
+  user_id             TEXT NOT NULL,
+  name                TEXT,
+  cwd                 TEXT,
+  state               TEXT,
+  last_active         REAL,
+  model               TEXT,
+  effort              TEXT,
+  permission_mode     TEXT,
+  is_stash            INTEGER NOT NULL DEFAULT 0,
+  is_inactive         INTEGER NOT NULL DEFAULT 0,
+  pending_permissions INTEGER NOT NULL DEFAULT 0,
+  needs_action_detail TEXT,
+  created_at          REAL,
+  updated_at          REAL,
   PRIMARY KEY (app_id, sid)
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_cache_user
@@ -148,6 +152,22 @@ async def init(path: str | Path) -> None:
     _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     _conn = await asyncio.to_thread(_connect, _DB_PATH)
     await asyncio.to_thread(_conn.executescript, _SCHEMA)
+    # Schema migration: 加新字段时老 db 不存在 — ALTER TABLE 兜底.
+    # 加新 column 必须每条独立 try/except IGNORE (sqlite 不支持 IF NOT EXISTS
+    # for ADD COLUMN).
+    def _migrate():
+        c = _conn
+        for ddl in (
+            "ALTER TABLE sessions_cache ADD COLUMN is_stash INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE sessions_cache ADD COLUMN is_inactive INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE sessions_cache ADD COLUMN pending_permissions INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE sessions_cache ADD COLUMN needs_action_detail TEXT",
+        ):
+            try:
+                c.execute(ddl)
+            except sqlite3.OperationalError:
+                pass   # column 已存在, 忽略
+    await asyncio.to_thread(_migrate)
 
 
 async def close() -> None:
@@ -405,7 +425,8 @@ async def consume_pairing(code: str) -> str | None:
 
 _CACHE_COLS = (
     "name", "cwd", "state", "last_active", "model", "effort",
-    "permission_mode", "created_at",
+    "permission_mode", "is_stash", "is_inactive", "pending_permissions",
+    "needs_action_detail", "created_at",
 )
 
 
@@ -440,7 +461,9 @@ def _upsert_session_sync(app_id: str, user_id: str, sid: str,
         c.execute(
             "INSERT INTO sessions_cache(app_id, sid, user_id, name, cwd, "
             "state, last_active, model, effort, permission_mode, "
-            "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            "is_stash, is_inactive, pending_permissions, needs_action_detail, "
+            "created_at, updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 app_id, sid, user_id,
                 fields.get("name", ""),
@@ -450,6 +473,10 @@ def _upsert_session_sync(app_id: str, user_id: str, sid: str,
                 fields.get("model", ""),
                 fields.get("effort", ""),
                 fields.get("permission_mode"),
+                int(bool(fields.get("is_stash"))),
+                int(bool(fields.get("is_inactive"))),
+                int(fields.get("pending_permissions") or 0),
+                fields.get("needs_action_detail"),
                 fields.get("created_at", now),
                 now,
             ),
