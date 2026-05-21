@@ -17,8 +17,21 @@ const state = {
   // 每个 session 的 DOM + 流式状态快照：切走时缓存，切回来直接复用，免 spinner 免重渲
   sessionCache: new Map(),     // session_id -> snapshot
   maxSeq: 0,                   // 当前 session 已处理事件的最高 seq；WS 重连 dedupe 用
+  // chat-log 是否在底部 (距底 < 40 px). 由 scroll 监听器维护. 决定新消息
+  // 到达时 chatScrollBottom() 要不要跟进 — 用户滚走时不能抢阅读位置.
+  atBottom: true,
 };
 const SESSION_CACHE_MAX = 10;
+
+// 把 /home/<user>/... 或 /Users/<user>/... 缩成 ~/... 显示形式.
+// 服务器收到 ~ 会用 os.path.expanduser 还原, 所以始终用缩写形式存 +
+// 在 UI 里显示, 既好看, 也省一遍前端展开. 留作弊门: 用户手输 / 之类
+// 的绝对路径原样保留.
+function abbreviateHome(path) {
+  const p = (path || "").trim();
+  if (!p) return p;
+  return p.replace(/^\/home\/[^/]+/, "~").replace(/^\/Users\/[^/]+/, "~");
+}
 
 // Most-recent-used cwds for the chip strip. Stored as a JSON array in
 // localStorage.ccr.recentCwds, left = newest, max 10 entries. Updated on
@@ -28,11 +41,14 @@ const RECENT_CWDS_MAX = 10;
 function loadRecentCwds() {
   try {
     const v = JSON.parse(localStorage.getItem(RECENT_CWDS_KEY) || "[]");
-    return Array.isArray(v) ? v.filter(x => typeof x === "string" && x) : [];
+    // 老数据可能是绝对路径; 读出来时统一缩写, 保持显示一致.
+    return Array.isArray(v)
+      ? v.filter(x => typeof x === "string" && x).map(abbreviateHome)
+      : [];
   } catch (e) { return []; }
 }
 function pushRecentCwd(path) {
-  const p = (path || "").trim();
+  const p = abbreviateHome((path || "").trim());
   if (!p) return;
   const list = loadRecentCwds().filter(x => x !== p);
   list.unshift(p);
@@ -58,6 +74,13 @@ function toggleTheme() {
   try { t = localStorage.getItem("ccr.theme") || "light"; } catch (e) {}
   applyTheme(t);
 })();
+
+// ---------- PWA / Safari tab 检测 ----------
+// standalone display-mode: 标准 (Android Chrome + iOS Safari 16+);
+// navigator.standalone: iOS 专属兜底.
+const _IS_PWA = window.matchMedia("(display-mode: standalone)").matches
+             || window.navigator.standalone === true;
+if (_IS_PWA) document.body.classList.add("is-pwa");
 
 // ---------- 视图切换 ----------
 function showView(name) {
@@ -197,7 +220,7 @@ async function browseLoad(path) {
   try {
     const j = await api(`api/ls?path=${encodeURIComponent(path || "")}`);
     _browse.curPath = j.path;
-    $("modal-crumb").textContent = j.path;
+    $("modal-crumb").textContent = abbreviateHome(j.path);
     const rows = [];
     if (j.parent !== null) {
       rows.push(`<div class="modal-row parent" data-path="${escHTML(j.parent)}"><span class="icon">↰</span><span class="name">.. (parent)</span></div>`);
@@ -231,11 +254,13 @@ $("modal-close").addEventListener("click", closeBrowse);
 $("modal-cancel").addEventListener("click", closeBrowse);
 $("modal-confirm").addEventListener("click", () => {
   if (_browse.curPath) {
+    // 写到输入框前缩写成 ~/... 让 UI 显示干净 (服务端 expanduser 还原)
+    const display = abbreviateHome(_browse.curPath);
     const target = $(_browseTargetId);
-    if (target) target.value = _browse.curPath;
+    if (target) target.value = display;
     if (_browseTargetId === "spawn-cwd") syncPresetChips();
     if (_browseTargetId === "settings-default-cwd") {
-      localStorage.setItem("ccr.defaultCwd", _browse.curPath);
+      localStorage.setItem("ccr.defaultCwd", display);
     }
   }
   closeBrowse();
@@ -301,6 +326,7 @@ function renderSessionList() {
   const listActive   = $("session-list-active");
   const listStash    = $("session-list-stash");
   const listInactive = $("session-list-inactive");
+  const activeBox    = $("sessions-active");
   const stashBox     = $("sessions-stash");
   const inactiveBox  = $("sessions-inactive");
   const mode = getSortMode();
@@ -322,6 +348,7 @@ function renderSessionList() {
   const inactive = all.filter(s =>  s.is_inactive);
 
   // Section headers always visible; count is empty when 0.
+  activeBox.querySelector(".count").textContent = active.length ? `(${active.length})` : "";
   stashBox.querySelector(".count").textContent = stash.length ? `(${stash.length})` : "";
   inactiveBox.querySelector(".count").textContent = inactive.length ? `(${inactive.length})` : "";
 
@@ -675,14 +702,22 @@ if (!window.__cardMenuCloseBound) {
 // in-app toast：会话状态变到 waiting_permission / needs_input 且不在该会话的 chat 视图时提醒
 const _lastNotifiedState = new Map();
 function maybeNotify(s) {
-  // 当前在 home view 时不需要 toast（卡片本身已显眼）
-  if ($("view-home").classList.contains("active")) return;
-  // 当前正打开这个 session 时不打扰
-  if ($("view-chat").classList.contains("active") && state.sessionId === s.id) return;
   const prev = _lastNotifiedState.get(s.id);
-  const interesting = s.state === "waiting_permission" || s.state === "needs_input";
-  if (interesting && prev !== s.state) {
-    showToast(`${s.name} · ${STATE_BADGES[s.state].label}`, s.id);
+  // ① Toast (页内浮条) — 仅 chat 视图 & 当前未打开此 session 时弹
+  const inHomeView = $("view-home").classList.contains("active");
+  const isCurrentChat = $("view-chat").classList.contains("active")
+                        && state.sessionId === s.id;
+  if (!inHomeView && !isCurrentChat) {
+    const interesting = s.state === "waiting_permission"
+                        || s.state === "needs_input";
+    if (interesting && prev !== s.state) {
+      showToast(`${s.name} · ${STATE_BADGES[s.state].label}`, s.id);
+    }
+  }
+  // ② Web Notification — 任意 session 的 busy → 非 busy 转换 (turn end).
+  // 不看视图, 看 document.visibilityState (在 maybeNotifyTurnEnd 内部判).
+  if (prev === "busy" && s.state !== "busy") {
+    maybeNotifyTurnEnd(s);
   }
   _lastNotifiedState.set(s.id, s.state);
 }
@@ -708,9 +743,16 @@ function showToast(text, sessId) {
 
 function enterHome() {
   showView("home");
-  if (!$("spawn-cwd").value) $("spawn-cwd").value = state.cwd || "";
+  if (!$("spawn-cwd").value) $("spawn-cwd").value = abbreviateHome(state.cwd || "");
   syncPresetChips();
   connectGlobalWS();
+  // 拉一次 ~/.claude/settings.json 的 model/effort 默认 (用于 chat-menu
+  // Default 选项加注). 只 fetch 一次, 缓存到 state.cliDefaults.
+  if (!state.cliDefaults) {
+    api("/api/cli/defaults")
+      .then(d => { state.cliDefaults = d || {}; })
+      .catch(() => { state.cliDefaults = {}; });
+  }
 }
 
 let _globalBackoff = 1000;
@@ -830,10 +872,21 @@ document.querySelectorAll("#spawn-perm .spawn-perm-btn").forEach((b) => {
   b.addEventListener("click", () => _setSpawnPermMode(b.dataset.mode));
 });
 
+// Model 选择保持上次值. localStorage 持久化便于跨刷新. Effort 已从 UI 移除.
+const VALID_MODEL = ["", "opus", "sonnet", "haiku"];
+
+function _restoreSpawnModel() {
+  const m = localStorage.getItem("ccr.spawnModel") || "";
+  const ms = $("spawn-model");
+  if (ms && VALID_MODEL.includes(m)) ms.value = m;
+}
+_restoreSpawnModel();
+
 $("spawn-go").addEventListener("click", async () => {
   const name = $("spawn-name").value.trim();
   const cwd = $("spawn-cwd").value.trim();
   const permission_mode = _getSpawnPermMode();
+  const model = $("spawn-model") ? $("spawn-model").value : "";
   $("spawn-err").classList.remove("show");
   if (!cwd) {
     $("spawn-err").textContent = "Working directory required";
@@ -845,10 +898,11 @@ $("spawn-go").addEventListener("click", async () => {
   try {
     const r = await api("/api/spawn", {
       method: "POST",
-      body: JSON.stringify({ cwd, name, permission_mode }),
+      body: JSON.stringify({ cwd, name, permission_mode, model, effort: "" }),
     });
     state.cwd = cwd;
     localStorage.setItem("ccr.cwd", cwd);
+    localStorage.setItem("ccr.spawnModel", model);
     pushRecentCwd(cwd);
     $("spawn-name").value = "";
     if (window.__closeNewModal) window.__closeNewModal();
@@ -862,6 +916,44 @@ $("spawn-go").addEventListener("click", async () => {
   }
 });
 
+// ---------- Quick new (无感新建) ----------
+// 点 #new-btn-quick: 立即生成 tmp 前端 session, 进空白 chat, 不起 claude
+// CLI. 用户发首条消息时再真 spawn + rename; 不发就离开 → tmp 消失.
+$("new-btn-quick").addEventListener("click", () => {
+  const tmpId = "tmp-" + Math.random().toString(36).slice(2, 14);
+  const now = Date.now() / 1000;
+  state.sessionsById.set(tmpId, {
+    id: tmpId,
+    name: "",
+    cwd: "~",
+    state: "idle",
+    created_at: now,
+    last_activity_at: now,
+    pending_permissions: 0,
+    needs_action_detail: null,
+    model: "",
+    effort: "",
+    cur_model: "",
+    _pending: true,
+  });
+  renderSessionList();
+  enterChat(tmpId, "", "~");
+});
+
+// 离开 tmp chat (back / 切别的 session / 进 home) 时清理.
+// 调用点: chat-back click, enterHome, enterChat 起手 (切到别的 sid).
+function _cleanupTmpSessionIfLeaving(nextSid) {
+  const curSid = state.sessionId;
+  if (!curSid || !curSid.startsWith("tmp-")) return;
+  if (nextSid === curSid) return;   // 没切走
+  const sess = state.sessionsById.get(curSid);
+  if (sess && sess._pending) {
+    state.sessionsById.delete(curSid);
+    state.sessionCache.delete(curSid);
+    renderSessionList();
+  }
+}
+
 // ---------- New session modal ----------
 (function setupNewModal() {
   const btn       = $("new-btn");
@@ -872,8 +964,9 @@ $("spawn-go").addEventListener("click", async () => {
   function open() {
     modal.removeAttribute("hidden");
     if (!$("spawn-cwd").value) {
-      $("spawn-cwd").value =
-        localStorage.getItem("ccr.defaultCwd") || state.cwd || "";
+      $("spawn-cwd").value = abbreviateHome(
+        localStorage.getItem("ccr.defaultCwd") || state.cwd || ""
+      );
     }
     syncPresetChips();
     _setSpawnPermMode(
@@ -1031,7 +1124,11 @@ $("spawn-go").addEventListener("click", async () => {
 // ---------- Chat ----------
 function saveCurrentSessionCache() {
   if (!state.sessionId) return;
+  // tmp _pending session 不缓存 — 它跟着会被清掉, 没必要存
+  if (state.sessionId.startsWith("tmp-")) return;
   const log = $("chat-log");
+  // 抓 scrollTop 必须在 innerHTML 抽走之前 — 把子节点挪到 fragment 后 scrollTop 会重置
+  const scrollTop = log.scrollTop;
   // 把 chat-log 的子节点抽出来，DOM 引用（toolById / msgById 里的 .card / .bubble）依然有效
   const frag = document.createDocumentFragment();
   while (log.firstChild) frag.appendChild(log.firstChild);
@@ -1039,6 +1136,7 @@ function saveCurrentSessionCache() {
   if (state.sessionCache.has(state.sessionId)) state.sessionCache.delete(state.sessionId);
   state.sessionCache.set(state.sessionId, {
     dom: frag,
+    scrollTop,
     msgById:          state.msgById,
     toolById:         state.toolById,
     askuserById:      state.askuserById,
@@ -1068,6 +1166,25 @@ function restoreSessionCache(cached) {
   const log = $("chat-log");
   log.innerHTML = "";
   log.appendChild(cached.dom);   // fragment 内子节点转移回 chat-log，fragment 自身清空（下次保存再装）
+  // 恢复 scrollTop — 必须用 instant (避免 chat-log 的 scroll-behavior: smooth
+  // 走动画). 必须在 layout 完成后写, 不然 scrollHeight 还没算好.
+  // requestAnimationFrame 保证下一帧 layout 计算完, scrollTop 写入有效.
+  const _restoreTop = typeof cached.scrollTop === "number"
+    ? cached.scrollTop : log.scrollHeight;
+  const _prevBeh = log.style.scrollBehavior;
+  log.style.scrollBehavior = "auto";
+  log.scrollTop = _restoreTop;
+  log.style.scrollBehavior = _prevBeh;
+  // 兜底 (cache hit 后 first_paint 不会触发, 但有些异步 layout 后才稳定): 再写一次
+  requestAnimationFrame(() => {
+    log.style.scrollBehavior = "auto";
+    log.scrollTop = _restoreTop;
+    log.style.scrollBehavior = _prevBeh;
+    // 同步 state.atBottom — 否则恢复到非底部时, 下一条新消息会被
+    // chatScrollBottom 拉到底, 破坏 §4 的"不抢阅读位置"契约.
+    const dist = log.scrollHeight - log.scrollTop - log.clientHeight;
+    state.atBottom = dist < 40;
+  });
   state.msgById         = cached.msgById;
   state.toolById        = cached.toolById;
   state.askuserById     = cached.askuserById || new Map();
@@ -1093,6 +1210,20 @@ function restoreSessionCache(cached) {
 }
 
 async function enterChat(id, name, cwd, sessionState) {
+  // [telemetry] 跟踪冷启动各阶段耗时. state._enterChatT0 是基准
+  state._enterChatT0 = performance.now();
+  try { dbgLog("enterChat-start", { id, cacheHit: state.sessionCache.has(id) }); } catch (_) {}
+  // 进新 session 前, 若离开的是 tmp _pending session 且没真 spawn 过, 清掉
+  _cleanupTmpSessionIfLeaving(id);
+  // 切 session 前必须断 turn-card observer + 清 reference. 否则旧 session
+  // 的 active card 会被 MutationObserver 推到**新 session** 的 chat-log 末尾
+  // (chat-log DOM element 复用, innerHTML="" 后 observer 还指着旧 card 试图
+  // appendChild → 串 session).
+  if (state._turnCardObserver) {
+    state._turnCardObserver.disconnect();
+    state._turnCardObserver = null;
+  }
+  state._turnCard = null;
   // 切 session 前先把当前 session 的 DOM/state 缓存起来
   if (state.sessionId && state.sessionId !== id) {
     saveCurrentSessionCache();
@@ -1108,14 +1239,40 @@ async function enterChat(id, name, cwd, sessionState) {
   state.loadingHistory = false;
   state.suppressScrollLoad = true;
   setTimeout(() => { state.suppressScrollLoad = false; }, 500);
-  // 清掉上一次可能残留的 inline transform/transition，避免影响这次滑入动画
+  // 清掉上一次可能残留的 inline transform/transition，避免影响这次滑入动画.
+  // chat-head 是 view-chat 的兄弟, swipe-back 时被同步驱动了 inline, 也要清.
   const _chatView = $("view-chat");
   _chatView.style.transform = "";
   _chatView.style.transition = "";
+  const _chatHead = document.getElementById("chat-head");
+  if (_chatHead) {
+    _chatHead.style.transform = "";
+    _chatHead.style.transition = "";
+  }
   $("chat-name").textContent = name || "untitled";
   // 立即按默认显示 perm 按钮（用 manual），等 GET 回来再修正
   applyPermissionMode("manual");
-  $("chat-perm").hidden = false;
+  // tmp session 不存在于后端 → 不调 loadPermissionMode (会 404). 也不
+  // connectWS, 不显示 chat-loading. 直接揭幕空白 chat, 等用户首条 send.
+  if (id.startsWith("tmp-")) {
+    state.cacheHit = false;
+    state.msgById.clear();
+    state.toolById.clear();
+    state.askuserById.clear();
+    state.firstSeq = null;
+    state.hasMoreHistory = false;
+    state.maxSeq = 0;
+    state.cwdShort = "~";
+    $("chat-log").innerHTML = "";
+    $("chat-loading").hidden = true;
+    setConnDot("", "");
+    state.revealChat = () => showView("chat");
+    state.revealChat();
+    refreshChatMeta();
+    refreshConvStatus();
+    setTimeout(() => $("chat-input").focus(), 50);
+    return;
+  }
   loadPermissionMode(id);
   // 先用 home 列表里的已知 session 状态；网络状态走 conn-dot
   const _s = state.sessionsById.get(id);
@@ -1127,8 +1284,9 @@ async function enterChat(id, name, cwd, sessionState) {
   if (cached) {
     state.sessionCache.delete(id);   // LRU：拿出来用，离开时再放回
     restoreSessionCache(cached);
-    // cwd 显示用最新 home 数据（一般不变，但兜底）
-    state.cwdShort = (cwd || "").split("/").slice(-2).join("/") || cwd || "";
+    // cwd 显示用最新 home 数据（一般不变，但兜底）. 用 abbreviateHome 保留 ~,
+    // 由 CSS .meta-cwd dir=rtl 处理截断 — 不能预截 (会丢 ~).
+    state.cwdShort = abbreviateHome(cwd || "");
     refreshChatMeta();
     refreshConvStatus();
     state.cacheHit = true;
@@ -1158,7 +1316,7 @@ async function enterChat(id, name, cwd, sessionState) {
   state.firstSeq = null;
   state.hasMoreHistory = false;
   state.maxSeq = 0;
-  state.cwdShort = (cwd || "").split("/").slice(-2).join("/") || cwd || "";
+  state.cwdShort = abbreviateHome(cwd || "");
   state.totalCostUsd = 0;
   state.lastInputTokens = 0;
   state.lastInputTotal = 0;
@@ -1188,6 +1346,9 @@ async function enterChat(id, name, cwd, sessionState) {
   $("chat-log").innerHTML = "";
   state.currentToolGroup = null;
   state.earlierFragment = null;
+  // 进 chat 先显示 spinner 遮挡 chat-log. 后台 backlog + autoFill 渲到
+  // chat-log (用户看不见, overlay 盖着). autoFill 满 2 屏后 hide overlay,
+  // 用户一次看到完整 2 屏内容.
   const _ld = $("chat-loading");
   _ld.classList.remove("fade-out");
   _ld.hidden = false;
@@ -1229,21 +1390,30 @@ $("chat-interrupt").addEventListener("click", async () => {
 // ---------- 权限模式 ----------
 state.permissionMode = "manual";
 
+const VALID_PERM_MODES = ["manual", "accept_edits", "plan", "allow_all"];
+
+// 4 模式 → button title 显示给 hover. CSS .mode-<x> class 切对应 SVG.
+const PERM_MODE_LABELS = {
+  manual: "Ask each time",
+  accept_edits: "Auto edits",
+  plan: "Plan only",
+  allow_all: "Allow all",
+};
+
 function applyPermissionMode(mode) {
-  if (mode !== "manual" && mode !== "allow_all") return;
+  if (!VALID_PERM_MODES.includes(mode)) return;
   state.permissionMode = mode;
-  const btn = $("chat-perm");
+  // button class 切到对应 mode (CSS 显示对应那套 SVG); title 跟随刷新,
+  // 鼠标 hover 显示当前模式的人类可读名称.
+  const btn = document.getElementById("chat-menu-perm-btn");
   if (btn) {
-    btn.hidden = !state.sessionId;
-    btn.classList.toggle("allow-all", mode === "allow_all");
-    btn.title = mode === "allow_all" ? "Permission: Allow all" : "Permission: Ask each time";
+    VALID_PERM_MODES.forEach(m => btn.classList.toggle(`mode-${m}`, m === mode));
+    btn.title = `Permission: ${PERM_MODE_LABELS[mode] || mode}`;
   }
-  const menu = $("perm-menu");
-  if (menu) {
-    menu.querySelectorAll(".perm-menu-item").forEach(it => {
-      it.classList.toggle("active", it.dataset.mode === mode);
-    });
-  }
+  // perm-menu 内当前模式标 .active (打 ✓)
+  document.querySelectorAll("#perm-menu .perm-menu-item").forEach(b => {
+    b.classList.toggle("active", b.dataset.mode === mode);
+  });
 }
 
 async function loadPermissionMode(sid) {
@@ -1270,41 +1440,246 @@ async function setPermissionMode(mode) {
   }
 }
 
-function togglePermMenu(force) {
-  const menu = $("perm-menu");
+// chat 右上角统一菜单 — 4 分区 (perm / model / effort / ctx). 替代旧的
+// #chat-perm 按钮 + #perm-menu popover + #chat-ctx-ring + #ctx-tooltip.
+function toggleChatMenu(force) {
+  const menu = $("chat-menu");
   if (!menu) return;
   const show = (typeof force === "boolean") ? force : menu.hidden;
   menu.hidden = !show;
   if (show) {
-    // 对齐按钮右侧
-    const btn = $("chat-perm");
-    if (btn) {
-      const r = btn.getBoundingClientRect();
-      menu.style.top = (r.bottom + 6) + "px";
-      menu.style.right = Math.max(8, window.innerWidth - r.right) + "px";
-    }
+    refreshConvStatus();   // 打开时立即同步 ctx 数字
   }
 }
 
-$("chat-perm").addEventListener("click", (e) => {
-  e.stopPropagation();
-  togglePermMenu();
+const _chatMenuBtn = $("chat-menu-btn");
+if (_chatMenuBtn) {
+  _chatMenuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleChatMenu();
+  });
+}
+
+// 菜单内 perm button + #perm-menu popup: 点 button → toggle menu; 点
+// .perm-menu-item → setPermissionMode(mode) + 关 menu. 外部点击也关.
+const _chatPermBtn = $("chat-menu-perm-btn");
+const _permMenu = $("perm-menu");
+// chat-head 内 2 个弹层 (perm-menu / model-menu) 互斥: 打开一个自动关另一个.
+function _closeOtherHeadMenu(keep) {
+  const pm = document.getElementById("perm-menu");
+  const mm = document.getElementById("model-menu");
+  if (pm && keep !== "perm") pm.hidden = true;
+  if (mm && keep !== "model") mm.hidden = true;
+}
+
+if (_chatPermBtn && _permMenu) {
+  _chatPermBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const willOpen = _permMenu.hidden;
+    _closeOtherHeadMenu(willOpen ? "perm" : null);
+    _permMenu.hidden = !willOpen;
+  });
+  _permMenu.querySelectorAll(".perm-menu-item").forEach(item => {
+    item.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const mode = item.dataset.mode;
+      if (mode && state.sessionId) setPermissionMode(mode);
+      _permMenu.hidden = true;
+    });
+  });
+  document.addEventListener("click", (e) => {
+    if (_permMenu.hidden) return;
+    if (e.target.closest("#chat-menu-perm-btn")
+        || e.target.closest("#perm-menu")) return;
+    _permMenu.hidden = true;
+  });
+}
+
+// 任何弹出菜单 (perm-menu / model-menu) 在窗口失焦 / tab 隐藏时立即关闭.
+// 用户拖去别的窗口 / app 时再回来不要看到悬空的菜单.
+function _closeAllPopupMenus() {
+  const pm = $("perm-menu");
+  if (pm && !pm.hidden) pm.hidden = true;
+  const mm = $("model-menu");
+  if (mm && !mm.hidden) mm.hidden = true;
+}
+window.addEventListener("blur", _closeAllPopupMenus);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") _closeAllPopupMenus();
 });
-$("perm-menu").addEventListener("click", (e) => {
-  const item = e.target.closest(".perm-menu-item");
-  if (!item) return;
-  const mode = item.dataset.mode;
-  togglePermMenu(false);
-  setPermissionMode(mode);
-});
+
+// 菜单内 model select → PATCH /model_effort (effort 固定空, 不改 sess.effort)
+// 菜单内 model button + #model-menu popup (跟 perm 同款交互).
+const _chatModelBtn = $("chat-menu-model-btn");
+const _modelMenu = $("model-menu");
+if (_chatModelBtn && _modelMenu) {
+  _chatModelBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const willOpen = _modelMenu.hidden;
+    _closeOtherHeadMenu(willOpen ? "model" : null);
+    _modelMenu.hidden = !willOpen;
+  });
+  _modelMenu.querySelectorAll(".model-menu-item").forEach(item => {
+    item.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!state.sessionId) { _modelMenu.hidden = true; return; }
+      const m = item.dataset.model || "";
+      applyModelChoice(m);
+      _patchModelToServer(m);
+      _modelMenu.hidden = true;
+    });
+  });
+  document.addEventListener("click", (e) => {
+    if (_modelMenu.hidden) return;
+    if (e.target.closest("#chat-menu-model-btn")
+        || e.target.closest("#model-menu")) return;
+    _modelMenu.hidden = true;
+  });
+}
+
+const MODEL_LABELS = {
+  "": "Default", opus: "Opus", sonnet: "Sonnet", haiku: "Haiku",
+};
+
+// 启动时把 Default item 的初始 chip SVG 存下来, refreshConvStatus 切到 tier
+// icon 后, 若 cur_model 不识别 (空 / 非 claude 系) 退回此 chip.
+(function _stashDefaultModelChipIcon() {
+  const defIcon = document.querySelector(
+    '.model-menu-item[data-model=""] .model-menu-icon'
+  );
+  if (defIcon) defIcon.dataset.chipHtml = defIcon.innerHTML;
+})();
+function applyModelChoice(model) {
+  // 切 button title (hover 显示当前选定) + menu item active marker
+  const btn = $("chat-menu-model-btn");
+  if (btn) {
+    const lbl = MODEL_LABELS[model] !== undefined ? MODEL_LABELS[model] : model;
+    btn.title = `Model: ${lbl}`;
+  }
+  document.querySelectorAll("#model-menu .model-menu-item").forEach(b => {
+    b.classList.toggle("active", (b.dataset.model || "") === (model || ""));
+  });
+}
+
+async function _patchModelToServer(model) {
+  if (!state.sessionId) return;
+  try {
+    const r = await api(
+      `/api/sessions/${encodeURIComponent(state.sessionId)}/model_effort`,
+      { method: "PATCH", body: JSON.stringify({ model }) },
+    );
+    const sess = state.sessionsById.get(state.sessionId);
+    if (sess) {
+      sess.model = r.model || "";
+      sess.effort = r.effort || "";
+    }
+    refreshChatMeta();
+  } catch (e) {
+    console.warn("model update failed", e);
+  }
+}
+
+// ctx-ring tooltip — 桌面 hover 弹, 触屏一次 tap 弹.
+// 桌面: mouseenter show / mouseleave 100ms hideSoon. ring 不可点击, 不
+// 可聚焦, 没 focus 边框.
+// 触屏: touchstart 直接 show (不依赖 click, 避免 iOS first-tap 弹完又被
+// mouseleave hideSoon 立刻收掉). 外部 touch / click 关闭.
+(function setupCtxTooltip() {
+  const ring = document.getElementById("chat-ctx-ring");
+  const tip = document.getElementById("ctx-tooltip");
+  if (!ring || !tip) return;
+  let hideTimer = null;
+  function show() {
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    tip.hidden = false;
+  }
+  function hide() { tip.hidden = true; }
+  function hideSoon() {
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = setTimeout(hide, 100);
+  }
+  ring.addEventListener("mouseenter", show);
+  ring.addEventListener("mouseleave", hideSoon);
+  tip.addEventListener("mouseenter", show);
+  tip.addEventListener("mouseleave", hideSoon);
+  // 触屏: touchstart 即显示, e.stopPropagation 防被 document outside-touch
+  // close handler 立即关掉
+  ring.addEventListener("touchstart", (e) => {
+    e.stopPropagation();
+    show();
+  }, { passive: true });
+  // 外部 touch / click 关闭 tooltip (触屏没 mouseleave 自动收)
+  function onOutside(e) {
+    if (tip.hidden) return;
+    if (e.target.closest("#chat-ctx-ring") || e.target.closest("#ctx-tooltip")) return;
+    hide();
+  }
+  document.addEventListener("click", onOutside);
+  document.addEventListener("touchstart", onOutside, { passive: true });
+})();
+
+// Turn-end 通知开关. 从 localStorage 恢复初值. 用户首次勾选 → 触发
+// Notification.requestPermission() (浏览器要求用户手势, 不能自动). 拒绝
+// 后 checkbox 回弹 + 提示.
+state.notifyOnTurnEnd =
+  typeof localStorage !== "undefined"
+  && localStorage.getItem("ccr.notifyOnTurnEnd") === "1";
+const _notifyCb = $("chat-menu-notify");
+const _notifyBtn = $("chat-menu-notify-btn");
+function _syncNotifyBtnVisual() {
+  if (_notifyBtn) _notifyBtn.classList.toggle("off", !state.notifyOnTurnEnd);
+  if (_notifyCb) _notifyCb.checked = !!state.notifyOnTurnEnd;
+}
+_syncNotifyBtnVisual();
+if (_notifyBtn) {
+  _notifyBtn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    if (state.notifyOnTurnEnd) {
+      // 关
+      state.notifyOnTurnEnd = false;
+      localStorage.removeItem("ccr.notifyOnTurnEnd");
+      _syncNotifyBtnVisual();
+      return;
+    }
+    // 开 — 申请权限
+    if (typeof Notification === "undefined") {
+      alert("This browser does not support notifications.\n"
+            + "On iOS, install the app to the home screen first.");
+      return;
+    }
+    let perm = Notification.permission;
+    if (perm === "default") {
+      try { perm = await Notification.requestPermission(); }
+      catch (_) { perm = "denied"; }
+    }
+    if (perm !== "granted") {
+      alert("Notifications denied. Enable them in browser settings.");
+      _syncNotifyBtnVisual();
+      return;
+    }
+    state.notifyOnTurnEnd = true;
+    localStorage.setItem("ccr.notifyOnTurnEnd", "1");
+    _syncNotifyBtnVisual();
+  });
+}
+
+// 点菜单外关菜单 (菜单内 / btn 自身的 click 不算外部)
 document.addEventListener("click", (e) => {
-  const menu = $("perm-menu");
+  const menu = $("chat-menu");
   if (!menu || menu.hidden) return;
-  if (e.target.closest("#perm-menu") || e.target.closest("#chat-perm")) return;
-  togglePermMenu(false);
+  if (e.target.closest("#chat-menu") || e.target.closest("#chat-menu-btn")) return;
+  toggleChatMenu(false);
 });
 
 $("chat-back").addEventListener("click", () => {
+  // tmp 未发送 session → 清掉 (不写 cache, 不写 db)
+  _cleanupTmpSessionIfLeaving(null);
+  // 离开 chat 时断 turn-card observer (会被新 session 的 DOM 替换)
+  if (state._turnCardObserver) {
+    state._turnCardObserver.disconnect();
+    state._turnCardObserver = null;
+  }
+  state._turnCard = null;
   // 退到 home：把当前 session 的 DOM + state 缓存起来，下次进来直接复用
   saveCurrentSessionCache();
   if (state.ws) {
@@ -1313,8 +1688,7 @@ $("chat-back").addEventListener("click", () => {
   }
   state.sessionId = null;
   document.body.classList.remove("has-session");
-  $("chat-perm").hidden = true;
-  togglePermMenu(false);
+  toggleChatMenu(false);
   $("chat-loading").hidden = true;
   renderSessionList();   // 取消"当前"高亮
   // 退出时让 textarea 等失焦，否则 iOS PWA 软键盘会留在屏幕上
@@ -1331,9 +1705,31 @@ function installSwipeBack(viewId, opts) {
   // opts.commit() 在滑动完成后被调用，作用是触发 view 的退出 (chat: 点
   // ←返回; settings: 移除 .active)。opts.narrowOnly = true 时仅窄屏启用,
   // 跟原 chat 行为一致 — 桌面端有鼠标, 不需要边缘手势。
+  // opts.followIds: 额外要跟着 view 一起 transform 的元素 id 列表
+  // (例如 chat-head 是 view-chat 的兄弟, fixed 元素, 视觉上要跟着
+  // 一起滑动)。
   const narrowOnly = !!opts.narrowOnly;
   const onCommit = opts.commit;
-  const EDGE = 24;            // 起手必须在距左边 24px 以内
+  const followIds = opts.followIds || [];
+  const followEls = followIds.map(id => document.getElementById(id))
+                              .filter(el => el != null);
+  function applyTransform(value) {
+    view.style.transform = value;
+    for (const el of followEls) el.style.transform = value;
+  }
+  function applyTransition(value) {
+    view.style.transition = value;
+    for (const el of followEls) el.style.transition = value;
+  }
+  function clearInline() {
+    view.style.transform = "";
+    for (const el of followEls) el.style.transform = "";
+  }
+  // 起手区扩展到左 60px 以内 — iOS Safari tab 把最左 15-20px 留给自己
+  // 的"返回上一页"系统手势, 我们的可触发区往中间挪一些 (15-60px), 既
+  // 给系统让位又让用户能在这个 40px 缓冲区里轻松触发我们的 swipe-back.
+  // PWA standalone 模式下整个 0-60px 都给我们.
+  const EDGE = 60;
   const SLOP = 8;              // 决定方向前的容差
   const COMMIT_FRAC = 0.35;    // 松手时位移超过这个比例 → 继续滑出返回
   const COMMIT_VELOCITY = 0.5; // px/ms，速度足够也直接返回
@@ -1343,18 +1739,18 @@ function installSwipeBack(viewId, opts) {
 
   function endTransition(target, onEnd) {
     // 跟手松手后的回弹/滑完用一个偏短的 transition，保持利落
-    view.style.transition = "transform 260ms cubic-bezier(0.25, 1, 0.5, 1)";
+    applyTransition("transform 260ms cubic-bezier(0.25, 1, 0.5, 1)");
     let done = false;
     const fire = () => {
       if (done) return;
       done = true;
       view.removeEventListener("transitionend", fire);
-      view.style.transition = "";   // 恢复 CSS 默认（用于下次自动滑入/出）
+      applyTransition("");
       onEnd && onEnd();
     };
     view.addEventListener("transitionend", fire);
     setTimeout(fire, 320);          // 兜底：transitionend 偶尔不触发
-    view.style.transform = target;
+    applyTransform(target);
   }
 
   view.addEventListener("touchstart", e => {
@@ -1378,12 +1774,12 @@ function installSwipeBack(viewId, opts) {
       if (Math.abs(dy) > SLOP && Math.abs(dy) > Math.abs(dx)) { armed = false; return; }
       if (Math.abs(dx) <= SLOP) return;
       dragging = true;
-      view.style.transition = "none";   // 跟手阶段禁用过渡
+      applyTransition("none");
     }
     // 一旦确认是右滑返回手势，吃掉所有 touchmove
     if (e.cancelable) e.preventDefault();
     const tx = Math.max(0, dx);
-    view.style.transform = `translateX(${tx}px)`;
+    applyTransform(`translateX(${tx}px)`);
     lastX = t.clientX;
     lastT = e.timeStamp;
   }, { passive: false });
@@ -1401,15 +1797,15 @@ function installSwipeBack(viewId, opts) {
     if (commit) {
       endTransition(`translateX(${width}px)`, () => {
         onCommit && onCommit();
-        view.style.transform = "";
+        clearInline();
       });
     } else {
-      endTransition("translateX(0)", () => { view.style.transform = ""; });
+      endTransition("translateX(0)", () => { clearInline(); });
     }
   }
   view.addEventListener("touchend", release, { passive: true });
   view.addEventListener("touchcancel", () => {
-    if (dragging) endTransition("translateX(0)", () => { view.style.transform = ""; });
+    if (dragging) endTransition("translateX(0)", () => { clearInline(); });
     armed = false; dragging = false;
   }, { passive: true });
 }
@@ -1417,6 +1813,9 @@ function installSwipeBack(viewId, opts) {
 installSwipeBack("view-chat", {
   narrowOnly: true,
   commit: () => $("chat-back").click(),
+  // chat-head 是 view-chat 的兄弟 (fixed), 但视觉上要跟着一起滑动 ——
+  // 否则手指拖 view 时 head 静止, 看起来跟头"脱节".
+  followIds: ["chat-head"],
 });
 installSwipeBack("view-settings", {
   // 设置页在所有屏幕都是全屏 overlay, 桌面端也支持触屏右滑退出
@@ -1475,6 +1874,210 @@ function stopSparkAnim() {
   if (_ccSparkTimer) { clearInterval(_ccSparkTimer); _ccSparkTimer = null; }
 }
 
+// Turn card — 跟随当前 turn 流的特殊卡, 显示闪烁 model icon + ↓token +
+// duration. turn 开始时创建, 进行中 refreshConvStatus 同步刷新, turn 结束
+// (state.turnEndAt 从 null 变非空) 时 finalize: 移除 .turn-active class
+// (icon 停闪), 断 MutationObserver (不再粘 chat-log 末尾).
+//
+// state._turnCard: 当前 active 或 finalized 的 card DOM (跨 turn 保留引用,
+//   下次 turn 开始时检查 .turn-active 决定是否复用).
+// state._turnCardObserver: 推 card 回末尾的 MutationObserver, 仅 active 期间存在.
+
+// 架构: turn-card 用 data-turn-start (turnStartAt 毫秒) 作幂等键. 实时
+// lifecycle (_ensureTurnCard / _finalizeTurnCard) 和持久化回放 (_renderTurnSummary)
+// 写入前**先扫 chat-log 删除 / 复用同键 card**, 跟事件到达顺序无关. 即使
+// turn_state + turn_summary 时序错乱 / 重复也只剩 1 张.
+function _turnStartKey() {
+  return state.turnStartAt ? String(state.turnStartAt) : "";
+}
+function _findTurnCardsByKey(root, key) {
+  if (!root || !key) return [];
+  return Array.from(
+    root.querySelectorAll(`:scope > .turn-card[data-turn-start="${key}"]`)
+  );
+}
+
+function _ensureTurnCard() {
+  const key = _turnStartKey();
+  if (state._turnCard
+      && state._turnCard.isConnected
+      && state._turnCard.classList.contains("turn-active")
+      && (!key || state._turnCard.dataset.turnStart === key)) {
+    return state._turnCard;
+  }
+  const log = $("chat-log");
+  if (!log) return null;
+  // 同 turn 已有 card (实时 active 或 turn_summary 早到先渲了 finalized) — 接管.
+  // 多余的同 key card 直接删, 保留一张.
+  let card = null;
+  if (key) {
+    const sameKey = _findTurnCardsByKey(log, key);
+    if (sameKey.length) {
+      // 优先选 active 的, 其次 finalized; 多余删掉.
+      card = sameKey.find(c => c.classList.contains("turn-active")) || sameKey[0];
+      sameKey.forEach(c => { if (c !== card) c.remove(); });
+      card.classList.add("turn-active");
+    }
+  }
+  if (!card) {
+    // 退路: 无 key 时接管 DOM 末尾任何 active card (e.g. cache restore).
+    card = log.querySelector(":scope > .turn-card.turn-active");
+  }
+  if (!card) {
+    card = document.createElement("div");
+    card.className = "turn-card turn-active";
+    card.innerHTML = `<span class="turn-card-icon"></span>`
+      + `<span class="turn-card-tokens">↓0t</span>`
+      + `<span class="turn-card-time">0s</span>`;
+    log.appendChild(card);
+  }
+  if (key) card.dataset.turnStart = key;
+  state._turnCard = card;
+  if (state._turnCardObserver) state._turnCardObserver.disconnect();
+  state._turnCardObserver = new MutationObserver(() => {
+    const c = state._turnCard;
+    if (!c || !c.classList.contains("turn-active")) return;
+    const lg = $("chat-log");
+    if (lg && lg.lastElementChild !== c) lg.appendChild(c);
+  });
+  state._turnCardObserver.observe(log, { childList: true });
+  return card;
+}
+
+function _refreshTurnCard() {
+  // 自动兜底:
+  //   turnStartAt 有 + turnEndAt 无 (进行中) → ensure active card
+  //   turnStartAt 有 + turnEndAt 有 (已结束) + 没 card → ensure 一张然后立即
+  //     finalize, 表达上一轮 final 值. 强刷进 chat 时用户能立即看到.
+  if (state.turnStartAt) {
+    const shouldBeActive = !state.turnEndAt;
+    const cardOk = state._turnCard && state._turnCard.isConnected;
+    if (shouldBeActive) {
+      if (!cardOk || !state._turnCard.classList.contains("turn-active")) {
+        _ensureTurnCard();
+      }
+    } else if (!cardOk) {
+      // turn 已结束 + state._turnCard 没 (e.g. 强刷). 先看 chat-log 内是否
+      // 已有 turn_summary event 渲的 finalized card. 有就接管, 不重复创建.
+      const log = $("chat-log");
+      const existing = log
+        && log.querySelectorAll(":scope > .turn-card:not(.turn-active)");
+      if (existing && existing.length) {
+        state._turnCard = existing[existing.length - 1];
+      } else {
+        _ensureTurnCard();
+        _finalizeTurnCard();
+      }
+    }
+  }
+  const card = state._turnCard;
+  if (!card || !card.isConnected) return;
+  const tokensEl = card.querySelector(".turn-card-tokens");
+  const timeEl = card.querySelector(".turn-card-time");
+  const iconEl = card.querySelector(".turn-card-icon");
+  if (tokensEl) {
+    const tok = state.curOutputTokens || 0;
+    tokensEl.textContent = `↓${_fmtTok(tok)}`;
+  }
+  if (timeEl && state.turnStartAt) {
+    const end = state.turnEndAt || Date.now();
+    const elapsed = Math.max(0, Math.round((end - state.turnStartAt) / 1000));
+    timeEl.textContent = formatDuration(elapsed);
+  }
+  if (iconEl) {
+    const curM = state.currentMsgModel || "";
+    const lower = curM.toLowerCase();
+    let tier = "";
+    if (lower.includes("opus")) tier = "opus";
+    else if (lower.includes("sonnet")) tier = "sonnet";
+    else if (lower.includes("haiku")) tier = "haiku";
+    if (iconEl.dataset.tier !== tier) {
+      iconEl.dataset.tier = tier;
+      const src = tier
+        ? document.querySelector(
+            `.model-menu-item[data-model="${tier}"] .model-menu-icon`)
+        : null;
+      iconEl.innerHTML = src ? src.innerHTML : "";
+    }
+  }
+}
+
+function _finalizeTurnCard() {
+  const card = state._turnCard;
+  if (!card) return;
+  card.classList.remove("turn-active");
+  if (state._turnCardObserver) {
+    state._turnCardObserver.disconnect();
+    state._turnCardObserver = null;
+  }
+}
+
+// 渲染 server 推过来的 turn_summary event (已结束 turn 的存档). 不创建活
+// card, 直接 append 一张 finalized .turn-card 到 chatRoot() (回放期间 chatRoot
+// 是 earlierFragment, 实时是 chat-log). 这样强刷 / backlog 回放也能恢复
+// 历史轮次的 token + duration + model icon, 跟时间线其它消息按 seq 顺序排.
+function _renderTurnSummary(evt) {
+  const root = chatRoot();
+  if (!root) return;
+  const tok = evt.output_tokens || 0;
+  const startMs = evt.turn_started_at ? Math.round(evt.turn_started_at * 1000) : null;
+  const endMs = evt.turn_ended_at ? evt.turn_ended_at * 1000 : null;
+  const duration = (startMs && endMs)
+    ? Math.max(0, Math.round((endMs - startMs) / 1000))
+    : 0;
+  const key = startMs ? String(startMs) : "";
+  // 幂等: 同 turn 已有 card (无论实时建的 active 还是别处先渲的 finalized) —
+  // 接管最末一张, 多余的删, 然后 finalize + 刷新数据. 跟事件到达顺序无关.
+  let card = null;
+  if (key) {
+    const sameKey = _findTurnCardsByKey(root, key);
+    if (sameKey.length) {
+      card = sameKey[sameKey.length - 1];
+      sameKey.forEach(c => { if (c !== card) c.remove(); });
+    }
+  }
+  const curM = evt.model || "";
+  let tier = "";
+  const lower = curM.toLowerCase();
+  if (lower.includes("opus")) tier = "opus";
+  else if (lower.includes("sonnet")) tier = "sonnet";
+  else if (lower.includes("haiku")) tier = "haiku";
+  const src = tier
+    ? document.querySelector(
+        `.model-menu-item[data-model="${tier}"] .model-menu-icon`)
+    : null;
+  const iconHTML = src ? src.innerHTML : "";
+  if (card) {
+    // 复用现有 card: 移除 active class, 刷新 token / duration / icon.
+    card.classList.remove("turn-active");
+    const iconEl = card.querySelector(".turn-card-icon");
+    if (iconEl) { iconEl.dataset.tier = tier; iconEl.innerHTML = iconHTML; }
+    const tokEl = card.querySelector(".turn-card-tokens");
+    if (tokEl) tokEl.textContent = `↓${_fmtTok(tok)}`;
+    const timeEl = card.querySelector(".turn-card-time");
+    if (timeEl) timeEl.textContent = formatDuration(duration);
+  } else {
+    card = document.createElement("div");
+    card.className = "turn-card";   // 已 finalize, 无 .turn-active
+    card.innerHTML =
+      `<span class="turn-card-icon">${iconHTML}</span>`
+      + `<span class="turn-card-tokens">↓${_fmtTok(tok)}</span>`
+      + `<span class="turn-card-time">${formatDuration(duration)}</span>`;
+    root.appendChild(card);
+  }
+  if (key) card.dataset.turnStart = key;
+  // 实时路径下 (state._turnCard 是本轮 active) 同步引用; observer 也断,
+  // 这张已 finalized 不再粘末尾.
+  if (state._turnCard === card || !state._turnCard
+      || !state._turnCard.isConnected) {
+    state._turnCard = card;
+    if (state._turnCardObserver) {
+      state._turnCardObserver.disconnect();
+      state._turnCardObserver = null;
+    }
+  }
+}
+
 function refreshConvStatus() {
   const dot = $("cs-dot");
   if (dot) {
@@ -1496,7 +2099,7 @@ function refreshConvStatus() {
   const tokens = $("cs-tokens");
   if (tokens) {
     if (turnVisible) {
-      tokens.textContent = `${outT}${outT > 1 ? "tokens" : "token"}`;
+      tokens.textContent = `↓${_fmtTok(outT)}`;
       tokens.hidden = false;
     } else {
       tokens.textContent = "";
@@ -1521,18 +2124,148 @@ function refreshConvStatus() {
     }
   }
   const ctx = $("cs-ctx");
+  let _ctxPct = 0;
+  let _ctxHasData = false;
   if (ctx) {
     const total = state.lastInputTotal || state.lastInputTokens || 0;
     if (total) {
-      const pct = total / (state.contextLimit || 200000) * 100;
-      ctx.textContent = "ctx: " + pct.toFixed(1) + "%";
+      _ctxHasData = true;
+      _ctxPct = total / (state.contextLimit || 200000);
+      ctx.textContent = "ctx: " + (_ctxPct * 100).toFixed(1) + "%";
     } else {
       ctx.textContent = "";
     }
   }
+  // chat-head 右上角 #chat-menu 弹层 (窄屏) / inline (宽屏) 同步.
+  // ctx 用 SVG 圆环 #chat-ctx-ring 显示进度 (跟之前一模一样), hover/click
+  // 弹 #ctx-tooltip 显示 pct + detail. perm/model select + notify checkbox
+  // 都跟既有 state 同步.
+  const menu = document.getElementById("chat-menu");
+  if (menu) {
+    const pct = _ctxHasData ? Math.min(1, Math.max(0, _ctxPct)) : 0;
+    // ring stroke-dashoffset: C = 2πr = 2π·10 ≈ 62.83. fill 描出 pct 部分.
+    const ring = document.getElementById("chat-ctx-ring");
+    if (ring) {
+      const C = 2 * Math.PI * 10;
+      const fill = ring.querySelector(".fill");
+      if (fill) fill.style.strokeDashoffset = (C * (1 - pct)).toFixed(2);
+      ring.classList.toggle("hot",  pct >= 0.85);
+      ring.classList.toggle("warm", pct >= 0.6 && pct < 0.85);
+    }
+    // tooltip 内容 (hover/click ring 时显示)
+    const tipPct = document.getElementById("ctx-tooltip-pct");
+    const tipDetail = document.getElementById("ctx-tooltip-detail");
+    if (tipPct && tipDetail) {
+      if (_ctxHasData) {
+        const total = state.lastInputTotal || 0;
+        const limit = state.contextLimit || 200000;
+        tipPct.textContent = (pct * 100).toFixed(1) + "%";
+        tipDetail.textContent = `${_fmtCtx(total)} / ${_fmtCtx(limit)}`;
+      } else {
+        tipPct.textContent = "—";
+        tipDetail.textContent = "no data yet";
+      }
+    }
+    // model button + popup menu 同步 (effort UI 已移除).
+    const { model } = _currentSessionMeta();
+    applyModelChoice(model || "");
+    // Default item 的 sub 文本 + icon 跟随实跑 model. cur_model 含 opus/
+    // sonnet/haiku 字样 → 复用对应 tier 的 SVG (王冠 / 星 / 羽毛). 不识别
+    // 时退回原 chip icon.
+    const sid = state.sessionId;
+    const s = sid ? state.sessionsById.get(sid) : null;
+    const curM = (s && s.cur_model) || state.currentMsgModel || "";
+    const defSub = document.getElementById("model-menu-sub-default");
+    if (defSub) {
+      const newText = curM ? `CLI picks · ${curM}` : "CLI picks";
+      if (defSub.textContent !== newText) defSub.textContent = newText;
+    }
+    const defIcon = document.querySelector(
+      '.model-menu-item[data-model=""] .model-menu-icon'
+    );
+    if (defIcon) {
+      const lower = (curM || "").toLowerCase();
+      let tier = "";
+      if (lower.includes("opus")) tier = "opus";
+      else if (lower.includes("sonnet")) tier = "sonnet";
+      else if (lower.includes("haiku")) tier = "haiku";
+      const cur = defIcon.dataset.tier || "";
+      if (tier !== cur) {
+        defIcon.dataset.tier = tier;
+        if (tier) {
+          const src = document.querySelector(
+            `.model-menu-item[data-model="${tier}"] .model-menu-icon`
+          );
+          if (src) defIcon.innerHTML = src.innerHTML;
+        } else if (defIcon.dataset.chipHtml) {
+          defIcon.innerHTML = defIcon.dataset.chipHtml;
+        }
+      }
+    }
+    // chat-head model button icon 跟随当前选定 model: model 非空 → 用对应
+    // tier 的 SVG; 空 (Default) → 用 default item 的 icon (即 cur_model
+    // 推断出的 tier icon, 在 defIcon 同步后是最新). guard innerHTML 写入
+    // 防止每秒无差别重写造成桌面端微闪 / SVG 重绘.
+    const modelBtn = document.getElementById("chat-menu-model-btn");
+    if (modelBtn) {
+      const sel = model
+        ? `.model-menu-item[data-model="${model}"] .model-menu-icon`
+        : '.model-menu-item[data-model=""] .model-menu-icon';
+      const src = document.querySelector(sel);
+      if (src) {
+        const want = src.innerHTML;
+        if (modelBtn.dataset.iconCache !== want) {
+          modelBtn.innerHTML = want;
+          modelBtn.dataset.iconCache = want;
+        }
+      }
+    }
+  }
+  // turn-card 跟随刷新 (icon / token / duration)
+  _refreshTurnCard();
+}
+
+function _fmtTok(n) {
+  // 千分位分隔的具体数字 + "t" 后缀. 无空格. 例: 1234 → "1,234t",
+  // 1234567 → "1,234,567t". 用于单轮 output token 计数 (cs-tokens /
+  // msg-tokens) — 精确到个位.
+  return (n || 0).toLocaleString("en-US") + "t";
+}
+
+function _fmtCtx(n) {
+  // ctx tooltip 用的简写格式: 1234 → "1.2k", 1234567 → "1.2M".
+  // 数字和单位之间无空格. ctx total/limit 通常是十万 / 百万级, 简写更直观.
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + "k";
+  return String(n || 0);
 }
 // 每秒刷新一次（让 turn 计时器跑起来）
 setInterval(refreshConvStatus, 1000);
+
+// chat-menu 的 model / effort select 共用的 PATCH handler — 用户改任一
+// 改 model 立即 PATCH. effort UI 已移除, 不发 effort 字段 → 后端
+// ModelEffortRequest.effort=None → manager.update_model_effort 保留原值.
+// server 端 kill 当前 proc, 下次 send 用新 args resume.
+async function _patchSessionModelEffort() {
+  if (!state.sessionId) return;
+  const modelSel = document.getElementById("chat-menu-model");
+  if (!modelSel) return;
+  const body = JSON.stringify({ model: modelSel.value || "" });
+  try {
+    const r = await api(
+      `/api/sessions/${encodeURIComponent(state.sessionId)}/model_effort`,
+      { method: "PATCH", body },
+    );
+    const sess = state.sessionsById.get(state.sessionId);
+    if (sess) {
+      sess.model = r.model || "";
+      sess.effort = r.effort || "";
+    }
+    refreshChatMeta();
+  } catch (e) {
+    console.warn("update model/effort failed", e);
+  }
+}
 
 // §2: keep "active N ago" labels ticking even when no new session_state
 // arrives. Updates only the .ts text node — no card-DOM rebuild — so we
@@ -1561,52 +2294,69 @@ setInterval(() => {
   });
 }, 250);
 
-// iOS 键盘弹出时把整个 visual viewport 下移让焦点可见；fixed body 跟随上移 = 屏幕顶。
-// chat-head 钉在 visual viewport 顶端（用户可见区顶），需要正向 translate offsetTop。
-function pinChatHead() {
+// 键盘 / chat-foot 位置: 交给浏览器 (含 iOS Safari) 自己处理. 之前一堆
+// pinChatHead / syncKbInset / dvh / vp 写入策略都被实测证明会跟 iOS
+// 自身的 auto-scroll 撞车制造新问题, 直接撤干净, 只信 CSS.
+
+// chat-head 高度因设备 (Dynamic Island / notch / 桌面) 差异从 56 到
+// 111+ px 都有可能. chat-log 的 padding-top 写死 56 + safe-area-inset
+// 在 Dynamic Island 设备会盖不住 head, 部分消息藏在 head 后. 实测 head
+// 高度写到 --chat-head-h, CSS 用这个变量做 padding-top.
+function syncChatHeadHeight() {
   const head = document.getElementById("chat-head");
   if (!head) return;
-  const vp = window.visualViewport;
-  head.style.top = (vp ? vp.offsetTop : 0) + "px";
-  // 兜底：iOS PWA 第一次聚焦输入框时 interactive-widget=resizes-content 偶尔失灵
-  // （layout viewport 不缩 → chat-foot 被键盘盖住）。这里用 visualViewport 实测的
-  // 遮挡量，强行给 #view-chat 加底部 padding，把 chat-foot 推上去。
-  syncKbInset();
+  const r = head.getBoundingClientRect();
+  const h = r.height;
+  // head display:none 时 h=0 — 必须显式写 0px (而不是保留旧值), 否则
+  // 键盘弹起 head 隐藏后 .chat 仍预留一截空白.
+  document.documentElement.style.setProperty(
+    "--chat-head-h", (h > 0 ? h : 0) + "px"
+  );
+  // 把每次实测尺寸打到后端日志, 方便诊断 "消息藏在 head 后"
+  const log = document.getElementById("chat-log");
+  const logR = log ? log.getBoundingClientRect() : null;
+  const padTop = log ? parseFloat(getComputedStyle(log).paddingTop) : null;
+  const headHVar = getComputedStyle(document.documentElement)
+                     .getPropertyValue("--chat-head-h").trim();
+  // 取 chat-log 第一个子在 viewport 的位置 — 判断它是否被 head 遮住
+  const firstChild = log && log.firstElementChild;
+  const fcR = firstChild ? firstChild.getBoundingClientRect() : null;
+  try {
+    dbgLog("head-sync", {
+      ua: navigator.userAgent.slice(0, 80),
+      isPwa: document.body.classList.contains("is-pwa"),
+      hasSession: document.body.classList.contains("has-session"),
+      headDisplay: getComputedStyle(head).display,
+      head: { h: Math.round(h), y0: Math.round(r.top), y1: Math.round(r.bottom) },
+      log: logR && { h: Math.round(logR.height),
+                     y0: Math.round(logR.top), y1: Math.round(logR.bottom) },
+      padTop: padTop != null ? Math.round(padTop * 10) / 10 : null,
+      headHVar,
+      firstChild: fcR && {
+        tag: firstChild.tagName + "." + (firstChild.className || "").split(" ")[0],
+        y0: Math.round(fcR.top), y1: Math.round(fcR.bottom),
+        hiddenByHead: fcR.top < r.bottom - 1,
+      },
+      vp: window.visualViewport ? {
+        h: Math.round(window.visualViewport.height),
+        offTop: Math.round(window.visualViewport.offsetTop),
+      } : null,
+    });
+  } catch (_) {}
 }
-function syncKbInset() {
-  const vp = window.visualViewport;
-  if (!vp) return;
-  const overlap = Math.max(0, window.innerHeight - vp.height - vp.offsetTop);
-  document.documentElement.style.setProperty("--kb-inset", overlap + "px");
+if (typeof ResizeObserver !== "undefined") {
+  const head = document.getElementById("chat-head");
+  if (head) new ResizeObserver(syncChatHeadHeight).observe(head);
 }
-// iOS 上推 fixed 是几百 ms 的浏览器动画；visualViewport.scroll 事件触发慢，期间会晃。
-// 焦点变化时启动 RAF 持续追踪，覆盖整段动画。
-let _pinRaf = null;
-let _pinUntil = 0;
-function pinLoop() {
-  pinChatHead();
-  if (performance.now() < _pinUntil) {
-    _pinRaf = requestAnimationFrame(pinLoop);
-  } else {
-    _pinRaf = null;
-  }
+window.addEventListener("resize", syncChatHeadHeight);
+// 多次重测兜底: 字体加载 / iOS safe-area-inset 第一次计算 / chat-head
+// 从 translateX(100%) 滑入时, 不同时机的 bbox 可能不同, 多打几枪保险.
+syncChatHeadHeight();
+window.addEventListener("load", syncChatHeadHeight);
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(syncChatHeadHeight).catch(() => {});
 }
-function startPinTracking(ms) {
-  _pinUntil = Math.max(_pinUntil, performance.now() + ms);
-  if (!_pinRaf) _pinRaf = requestAnimationFrame(pinLoop);
-}
-document.addEventListener("focusin", () => startPinTracking(800), true);
-document.addEventListener("focusout", () => startPinTracking(800), true);
-if (window.visualViewport) {
-  window.visualViewport.addEventListener("scroll", pinChatHead);
-  window.visualViewport.addEventListener("resize", pinChatHead);
-}
-window.addEventListener("scroll", pinChatHead, { passive: true });
-window.addEventListener("resize", pinChatHead);
-// 输入框聚焦时 / 失焦时也检查
-document.addEventListener("focusin", () => setTimeout(pinChatHead, 100));
-document.addEventListener("focusout", () => setTimeout(pinChatHead, 100));
-pinChatHead();
+[100, 300, 800, 1500].forEach(t => setTimeout(syncChatHeadHeight, t));
 
 // 不在底端时显示的"回到最新"按钮：位置跟随 chat-log 右下角（避开 chat-foot）
 function syncScrollToBottomBtn() {
@@ -1625,6 +2375,29 @@ $("scroll-to-bottom").addEventListener("click", () => {
   const log = $("chat-log");
   log.scrollTo({ top: log.scrollHeight, behavior: "smooth" });
 });
+// chat-log 内容长大但 scrollTop 不变时, scroll 事件不会触发 sync, ↓ 按钮
+// 不会按时出现. 用 MutationObserver 监听 subtree 变更和 ResizeObserver
+// 监听容器尺寸变更 — 两个一起覆盖所有 "距底距离改变" 的场景:
+//   - 新消息流入: childList 改变 → MutationObserver
+//   - 图片 / markdown 渲染完毕高度突变: ResizeObserver
+//   - 容器自身 resize (键盘 / 横竖屏): 已有 window resize 监听
+(function setupScrollBtnAutoSync() {
+  const log = document.getElementById("chat-log");
+  if (!log) return;
+  // 在 idle 时合批 — 避免每个子节点变更各触发一次
+  let scheduled = false;
+  function schedule() {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => { scheduled = false; syncScrollToBottomBtn(); });
+  }
+  new MutationObserver(schedule).observe(log, {
+    childList: true, subtree: true, characterData: true,
+  });
+  if (typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(schedule).observe(log);
+  }
+})();
 
 function setHistoryLoader(text) {
   // loader 是 view-chat 内的 fixed 元素，跟 chat-log 完全无关，不影响其 layout/scroll
@@ -1665,65 +2438,237 @@ function waitForScrollIdle(el, idleMs = 200, maxWait = 2000) {
   });
 }
 
-async function loadEarlierHistory() {
+// 数 chat-log 里直接可见的"卡"数 — 这是用户视角的消息单位.
+// .bubble (user/assistant/system) / .tool-group (合并的连续工具调用) /
+// .perm-card / .askuser-card 各算 1 张. tool-card 在 tool-group 内不
+// 单独计 (group 是单一可见卡). 用 :scope > ... 只数顶级子节点.
+function countVisibleChatCards() {
+  const log = document.getElementById("chat-log");
+  if (!log) return 0;
+  return log.querySelectorAll(
+    ":scope > .bubble, :scope > .tool-group, " +
+    ":scope > .perm-card, :scope > .askuser-card"
+  ).length;
+}
+
+// 一次"加载更早"的可见卡目标 + 单批 raw event 数 + 硬上限.
+// 可见卡 = .bubble / .tool-group / .perm-card / .askuser-card.
+// PAGE_SIZE 是 server messages API 的 raw event 单位 — 一条 assistant
+// message 在 db 里可能由 N 个 stream_event 行组成, 渲染后才合并成 1 卡,
+// 所以 PAGE_SIZE 要明显 > TARGET 否则单批渲不出 TARGET 张卡.
+// HARD_CAP 是退出兜底: 即使顶端仍是 .tool-group (理论上要继续拉求完整),
+// visibleCards 一旦 ≥ HARD_CAP 也强制停 — 单次上拉不让飞到几十张.
+const HISTORY_VISIBLE_TARGET = 20;
+const HISTORY_VISIBLE_HARD_CAP = 30;
+const HISTORY_PAGE_SIZE = 50;
+const HISTORY_MAX_BATCHES = 5;
+// 进入 chat 后, 静默续拉到 chat-log 的 scrollHeight ≥ 2 × viewport 高度.
+// 不按"可见卡数"算 — 用户按实际内容铺满程度判: 2 屏内容看完, 用户主动
+// 上拉到顶再加载更多.
+
+function countVisibleInFragment(frag) {
+  // DocumentFragment 上 querySelectorAll(":scope > X") 会返回 0 — :scope
+  // 在 fragment 上不可用 (规范 / 浏览器实测都如此). 必须手动遍历 children.
+  // 之前用 :scope > 写法, visibleCards 永远是 0, HARD_CAP 退出条件失效,
+  // 单次上拉跑满 MAX_BATCHES 拉远超 target 的卡数 (实测 ~70 张).
+  let n = 0;
+  const kids = frag.children;
+  for (let i = 0; i < kids.length; i++) {
+    const cl = kids[i].classList;
+    if (cl && (cl.contains("bubble") || cl.contains("tool-group")
+               || cl.contains("perm-card") || cl.contains("askuser-card"))) {
+      n++;
+    }
+  }
+  return n;
+}
+
+// 静默续拉到 ≥ 20 张可见卡 (autoFillInitialCards) 共用同一份循环逻辑,
+// 区别只在: silent=true 时不显示 #history-loader 转圈卡 — 用户进 chat
+// 看到的就是渲完的内容, 不见"还在加载"提示.
+async function loadEarlierHistory(opts) {
+  opts = opts || {};
+  const silent = !!opts.silent;
   if (!state.sessionId || !state.hasMoreHistory || state.loadingHistory) return;
   if (state.firstSeq == null) return;
   const log = $("chat-log");
-  const beforeSeq = state.firstSeq;
   state.loadingHistory = true;
-  state.suppressScrollLoad = true;   // 整个加载期间屏蔽 scroll listener 触发；纠偏 set scrollTop 会触发 scroll
-  setHistoryLoader("Loading earlier messages…");
+  state.suppressScrollLoad = true;
+  if (!silent) setHistoryLoader("Loading earlier messages…");
   const savedBehavior = log.style.scrollBehavior;
   log.style.scrollBehavior = "auto";
-  void log.offsetHeight;
-  const firstExisting = log.firstChild;
+
+  // workFrag 累积多批渲染结果. 顶端 = 最老, 末端 = 较新但仍比 chat-log
+  // 现有内容更老. 渲染期间 chatRoot() 看 state.earlierFragment 重定向.
+  const workFrag = document.createDocumentFragment();
+  const savedToolGroup = state.currentToolGroup;
+  let beforeSeq = state.firstSeq;
+  let firstSeqAfter = state.firstSeq;
+  let hasMore = true;
+  let batches = 0;
+
   try {
-    const data = await api(`/api/sessions/${encodeURIComponent(state.sessionId)}/messages?before_seq=${beforeSeq}&limit=20`);
-    const earlier = data.messages || [];
-    if (earlier.length === 0) {
-      state.hasMoreHistory = false;
-      setHistoryLoader(null);
-      return;
-    }
-    // 等滑动惯性彻底停下再渲染：iOS momentum 期间 set scrollTop 会被覆盖
-    await waitForScrollIdle(log);
-    // idle 之后 anchor 用最新的视口位置（用户可能在等待期间滚到了别处）
-    const idleRect = firstExisting ? firstExisting.getBoundingClientRect() : null;
-    const existing = [];
-    while (log.firstChild) existing.push(log.removeChild(log.firstChild));
-    for (const env of earlier) {
-      try { handleEvent(env.event, env.ts); } catch (e) { console.warn("history render error", e); }
-    }
-    for (const node of existing) log.appendChild(node);
-    state.firstSeq = data.first_seq != null ? data.first_seq : earlier[0].seq;
-    state.hasMoreHistory = !!data.has_more;
-    void log.offsetHeight;
-    // 同步纠偏到 sub-pixel
-    if (firstExisting && idleRect) {
-      for (let i = 0; i < 6; i++) {
-        void log.offsetHeight;
-        const drift = firstExisting.getBoundingClientRect().top - idleRect.top;
-        if (Math.abs(drift) < 0.05) break;
-        log.scrollTop += drift;
+    while (batches++ < HISTORY_MAX_BATCHES) {
+      // 每批独立 fragment, 独立 currentToolGroup. 渲完跟 workFrag 合并
+      // (跨批 tool-group 拼接) 然后 prepend.
+      const batchFrag = document.createDocumentFragment();
+      state.earlierFragment = batchFrag;
+      state.currentToolGroup = null;
+
+      let data, earlier;
+      try {
+        data = await api(
+          `/api/sessions/${encodeURIComponent(state.sessionId)}/messages?` +
+          `before_seq=${beforeSeq}&limit=${HISTORY_PAGE_SIZE}`
+        );
+        earlier = data.messages || [];
+      } finally {
+        state.earlierFragment = null;
       }
+
+      if (earlier.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      // 渲染本批 (按 seq 升序) → batchFrag
+      state.earlierFragment = batchFrag;
+      try {
+        for (const env of earlier) {
+          try { handleEvent(env.event, env.ts); }
+          catch (e) { console.warn("history render error", e); }
+        }
+      } finally {
+        state.earlierFragment = null;
+      }
+
+      hasMore = !!data.has_more;
+      firstSeqAfter = data.first_seq != null ? data.first_seq : earlier[0].seq;
+      beforeSeq = firstSeqAfter;
+
+      // 跨批 tool-group 合并: batchFrag 最末卡 + workFrag 顶端卡 若都
+      // 是 .tool-group, 它们在时间上紧邻 (中间没有非 tool 消息切断),
+      // 视觉应该是一个 group. 把 workFrag 顶端 group 的 tool-cards
+      // 整段 append 到 batchFrag 末端 group 的 .tool-group-body, 然后
+      // 删掉空壳, 再 refreshToolGroup 重算 count/summary.
+      const batchLast = batchFrag.lastElementChild;
+      const workFirst = workFrag.firstElementChild;
+      if (batchLast && workFirst
+          && batchLast.classList.contains("tool-group")
+          && workFirst.classList.contains("tool-group")) {
+        const batchBody = batchLast.querySelector(".tool-group-body");
+        const workBody = workFirst.querySelector(".tool-group-body");
+        if (batchBody && workBody) {
+          while (workBody.firstChild) {
+            batchBody.appendChild(workBody.firstChild);
+          }
+          workFirst.remove();
+          try { refreshToolGroup(batchLast); } catch (_) {}
+        }
+      }
+
+      // batch 整体 prepend 到 workFrag (顶部 = 最老)
+      workFrag.insertBefore(batchFrag, workFrag.firstChild);
+
+      // 退出判据 (按优先级):
+      //   ① !hasMore — 拉到顶必停
+      //   ② visibleCards ≥ HARD_CAP — 硬上限, 即使顶端是 tool-group 也停
+      //      (避免追求完整边界时无限拉, 用户上拉一次别加载几十条)
+      //   ③ visibleCards ≥ TARGET 且顶端不是 tool-group — 正常退出
+      const visibleCards = countVisibleInFragment(workFrag);
+      const topIsToolGroup = !!(
+        workFrag.firstElementChild
+        && workFrag.firstElementChild.classList.contains("tool-group")
+      );
+      if (!hasMore) break;
+      if (visibleCards >= HISTORY_VISIBLE_HARD_CAP) break;
+      if (visibleCards >= HISTORY_VISIBLE_TARGET && !topIsToolGroup) break;
     }
-    setHistoryLoader(null);
+
+    // 一次性 prepend, scrollHeight 差值锚定 scrollTop. 视觉锚点不飞.
+    const heightBefore = log.scrollHeight;
+    const scrollBefore = log.scrollTop;
+    log.insertBefore(workFrag, log.firstChild);
+    void log.offsetHeight;
+    const heightAfter = log.scrollHeight;
+    log.scrollTop = scrollBefore + (heightAfter - heightBefore);
+
+    state.firstSeq = firstSeqAfter;
+    state.hasMoreHistory = hasMore;
   } catch (e) {
     console.warn("loadEarlierHistory failed", e);
-    setHistoryLoader("Load failed, pull to retry");
-  } finally {
+    if (!silent) {
+      setHistoryLoader("Load failed, pull to retry");
+      setTimeout(() => setHistoryLoader(null), 1500);
+    }
+    state.earlierFragment = null;
+    state.currentToolGroup = savedToolGroup;
     state.loadingHistory = false;
     log.style.scrollBehavior = savedBehavior;
-    // 延后再开放 scroll 触发：让 set scrollTop 排队的 scroll event 处理完不会被当成新的滑到顶
-    setTimeout(() => { state.suppressScrollLoad = false; }, 300);
+    setTimeout(() => { state.suppressScrollLoad = false; }, 200);
+    return;
+  }
+  state.currentToolGroup = savedToolGroup;
+  if (!silent) setHistoryLoader(null);
+  state.loadingHistory = false;
+  log.style.scrollBehavior = savedBehavior;
+  setTimeout(() => { state.suppressScrollLoad = false; }, 200);
+}
+
+// backlog 渲完后, 静默续拉到 chat-log scrollHeight ≥ 2 × viewport 高度或拉到顶.
+// silent=true 透传给 loadEarlierHistory, 不显示 #history-loader. 用户感觉
+// 一进 chat 就有完整内容, 不见"还在加载"提示.
+//
+// 退出条件 (任一满足): ① 已到 target; ② 拉到顶 (!hasMoreHistory);
+// ③ safety 兜底 (10 轮硬上限).
+//
+// 注: **不以"本轮没新增可见卡"作为 break 条件**. 原因: loadEarlier 一次
+// 内部循环可能拉 5 × PAGE_SIZE = 250 个 raw events, 这些 events 里全是
+// stream_event delta (修既有 bubble) 而无 content_block_start (产新卡)
+// 是可能的, 尤其是最近一轮 claude 长输出的 session. 此时 visibleCards 不
+// 增但 hasMore 仍 true, 应该继续拉更老的, 不能在此 break — 否则用户看到
+// 14 张卡停下, autoFill 提前 give up 是 bug.
+async function autoFillInitialCards() {
+  if (state.autoFilling) return;
+  state.autoFilling = true;
+  try {
+    const log = $("chat-log");
+    const targetH = window.innerHeight * 2;
+    let safety = 0;
+    while (log && log.scrollHeight < targetH
+           && state.hasMoreHistory
+           && safety < 10) {
+      const prevFirstSeq = state.firstSeq;
+      await loadEarlierHistory({ silent: true });
+      if (state.firstSeq === prevFirstSeq) break;
+      safety++;
+    }
+  } finally {
+    state.autoFilling = false;
+    // 加载满 2 屏 / 拉到顶 / safety 兜底退出 → fade-out chat-loading overlay,
+    // 用户一次看到完整内容. 200ms 等 layout 稳定 + 220ms transition.
+    const loadingEl = $("chat-loading");
+    if (loadingEl && !loadingEl.hidden) {
+      setTimeout(() => {
+        loadingEl.classList.add("fade-out");
+        setTimeout(() => {
+          loadingEl.hidden = true;
+          loadingEl.classList.remove("fade-out");
+        }, 220);
+      }, 200);
+    }
   }
 }
 
 // chat-log 滚到顶部附近时拉更早历史；wheel/touch 顶部继续上拉也触发（chat-log 不可滚时兜底）
 $("chat-log").addEventListener("scroll", () => {
+  // 维护 state.atBottom — 新消息到达时 chatScrollBottom 据此决定是否跟进
+  const log = $("chat-log");
+  const distFromBottom = log.scrollHeight - log.scrollTop - log.clientHeight;
+  state.atBottom = distFromBottom < 40;
   syncScrollToBottomBtn();
   if (state.suppressScrollLoad) return;
-  if ($("chat-log").scrollTop < 100) loadEarlierHistory();
+  if (log.scrollTop < 100) loadEarlierHistory();
 });
 window.addEventListener("resize", syncScrollToBottomBtn);
 window.addEventListener("orientationchange", syncScrollToBottomBtn);
@@ -1745,7 +2690,10 @@ function connectWS() {
   const ownSessionId = state.sessionId;     // 闭包捕获：用户切到别的 session 时旧实例自动失效
   const url = wsURL("ws/" + encodeURIComponent(ownSessionId)
                     + "?token=" + encodeURIComponent(state.token));
-  let backoff = 1000;
+  // 首次失败用很短的 backoff (100ms), 通常进 chat 时第一次 ws 连接 race
+  // (旧 ws 没完全关 / hibernated session wake-up) 一次就好, 不该让用户等 1s.
+  // 后续失败按指数翻倍, 30s 封顶 — 真断网时不让客户端疯狂重试.
+  let backoff = 100;
   let timer = null;
   const isOwn = () => state.sessionId === ownSessionId;
 
@@ -1754,13 +2702,19 @@ function connectWS() {
     if (state.ws
         && (state.ws.readyState === WebSocket.OPEN
             || state.ws.readyState === WebSocket.CONNECTING)) return;
+    try { dbgLog("ws-connecting", {
+      tEnter: Math.round(performance.now() - (state._enterChatT0 || 0)),
+    }); } catch (_) {}
     const ws = new WebSocket(url);
     state.ws = ws;
     const isCurrent = () => state.ws === ws && isOwn();
     ws.addEventListener("open", () => {
       if (!isCurrent()) return;
+      try { dbgLog("ws-open", {
+        tEnter: Math.round(performance.now() - (state._enterChatT0 || 0)),
+      }); } catch (_) {}
       setConnDot("connected", "Connected");
-      backoff = 1000;
+      backoff = 100;   // 重连一次成功 → 重置 backoff, 下次 race 又是 100ms 起
       // 这次连接前已经处理过的最大 seq 作为 dedupe 边界：重连/缓存命中时只跳 server 重发的旧 backlog
       // 冷启动 maxSeq=0 → 边界=0 → 不会误伤 earlier 批（earlier 的 seq 比 recent 小，但都 > 0）
       state.dedupeBoundary = state.maxSeq || 0;
@@ -1769,8 +2723,13 @@ function connectWS() {
     });
     ws.addEventListener("close", () => {
       if (!isCurrent()) return;
-      const secs = Math.round(backoff / 1000);
-      setConnDot("error", `Disconnected, reconnecting in ${secs}s`);
+      // backoff < 1s 时不闪 error UI — 这是首次 race 的快速重连, 用户感知不到
+      if (backoff >= 1000) {
+        const secs = Math.round(backoff / 1000);
+        setConnDot("error", `Disconnected, reconnecting in ${secs}s`);
+      } else {
+        setConnDot("connecting", "Connecting");
+      }
       if (timer) clearTimeout(timer);
       timer = setTimeout(start, backoff);
       backoff = Math.min(30000, backoff * 2);
@@ -1810,6 +2769,8 @@ function chatRoot() {
 }
 function chatScrollBottom() {
   if (state.earlierFragment) return;
+  // 仅在用户已经在底部时才跟进, 否则不抢阅读位置 — 这是 §4 的契约.
+  if (!state.atBottom) return;
   const log = $("chat-log");
   log.scrollTop = log.scrollHeight;
 }
@@ -1851,7 +2812,7 @@ function updateAssistantMeta(bubble, info) {
   }
   if (info.tokens != null) {
     const e = bubble.querySelector(".msg-tokens");
-    if (e) e.textContent = info.tokens ? "↓ " + info.tokens + " tok" : "";
+    if (e) e.textContent = info.tokens ? "↓" + _fmtTok(info.tokens) : "";
   }
   if (info.status) {
     const e = bubble.querySelector(".msg-status");
@@ -1947,10 +2908,63 @@ function renderMDIntoBubble(bubble, text) {
     // 非 assistant 或老格式 bubble：直接渲染整个 bubble
     bubble.innerHTML = renderMarkdown(text);
     renderMathIn(bubble);
+    addCopyButtonsTo(bubble);
     return;
   }
   body.innerHTML = renderMarkdown(text);
   renderMathIn(body);
+  addCopyButtonsTo(body);
+}
+
+// Copy / Check icon (常显 icon-only 按钮). 两个重叠方块表示复制, 对勾表示已复制.
+const COPY_ICON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+const CHECK_ICON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 12 10 17 19 8"/></svg>';
+
+// 扫描容器内所有 <pre>, 包到 .code-block-wrap 加右上角 .copy-code-btn.
+// 幂等: 已包过的跳过. 流式渲染场景 (renderMD 被多次调用) 每次重新扫即可.
+function addCopyButtonsTo(root) {
+  const pres = root.querySelectorAll("pre");
+  for (const pre of pres) {
+    if (pre.closest(".code-block-wrap")) continue;
+    const wrap = document.createElement("div");
+    wrap.className = "code-block-wrap";
+    pre.parentNode.insertBefore(wrap, pre);
+    wrap.appendChild(pre);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "copy-code-btn";
+    btn.title = "Copy code";
+    btn.setAttribute("aria-label", "Copy code");
+    // 两个 SVG: 默认 copy 图标 (两个重叠方块), 复制后 check 图标
+    btn.innerHTML = COPY_ICON_SVG;
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const codeEl = pre.querySelector("code") || pre;
+      const text = codeEl.textContent || "";
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (_) {
+        try {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+        } catch (_) {}
+      }
+      btn.innerHTML = CHECK_ICON_SVG;
+      btn.classList.add("copied");
+      setTimeout(() => {
+        btn.innerHTML = COPY_ICON_SVG;
+        btn.classList.remove("copied");
+      }, 1500);
+    });
+    wrap.appendChild(btn);
+  }
 }
 
 // ---------- Tool 卡片 ----------
@@ -1969,8 +2983,32 @@ const TOOL_ICONS = {
 
 function getOrCreateToolGroup() {
   const root = chatRoot();
+  // 优先看 DOM 真实末尾 — 如果末尾就是一个 tool-group, 直接复用.
+  // 这样即使 state.currentToolGroup 因 loadEarlierHistory / restoreSessionCache
+  // 的 DOM 重排错位指向中部某个 group, 新到的 tool_use 也能正确并入
+  // 视觉上的"最后一组"而不是另起一个.
+  //
+  // turn 进行时, active .turn-card 被 MutationObserver 粘在 chat-log 末尾,
+  // 所以判断"末尾 tool-group"时要跳过它. 否则连续 tool_use 各起新 group —
+  // 用户在后台 / 前台跑任务都能看到工具卡不合并的 bug.
+  let last = root.lastElementChild;
+  while (last && last.classList && last.classList.contains("turn-card")) {
+    last = last.previousElementSibling;
+  }
+  if (last && last.classList && last.classList.contains("tool-group")) {
+    state.currentToolGroup = last;
+    return last;
+  }
   let group = state.currentToolGroup;
-  if (group && group.parentNode === root && group === root.lastElementChild) return group;
+  // 兜底: group 仍属 root, 且后面只剩 turn-card (视觉上仍是末尾 group) — 复用.
+  if (group && group.parentNode === root) {
+    let n = group.nextElementSibling, ok = true;
+    while (n) {
+      if (!n.classList || !n.classList.contains("turn-card")) { ok = false; break; }
+      n = n.nextElementSibling;
+    }
+    if (ok) return group;
+  }
   group = document.createElement("div");
   group.className = "tool-group collapsed";
   group.innerHTML = `
@@ -2102,10 +3140,14 @@ async function maybeFetchToolLazy(toolUseId) {
   // 卡已经折回去了 → 停止轮询
   if (entry.card && entry.card.classList.contains("collapsed")) return;
   entry.fetching = true;
-  if (!entry.poller && entry.argsEl) {
-    // 第一次拉：放 spinner 占位（后续轮询不重置，避免闪烁）
+  // 第一次拉：放 spinner 占位; 之后轮询里 fetch 时 argsEl 已经有正在生
+  // 长的 partial_input 内容, 不能再覆盖回 spinner — 否则每 500ms 一次
+  // 内容→spinner→内容 切换就是肉眼可见的闪烁. 用 entry._initialFetched
+  // 一次性 flag 锁定首次状态.
+  if (!entry._initialFetched && entry.argsEl) {
     entry.argsEl.innerHTML = '<span class="tool-spinner"></span><span class="tool-lazy-hint">loading…</span>';
     if (entry.resultEl) { entry.resultEl.hidden = true; entry.resultEl.innerHTML = ""; }
+    entry._initialFetched = true;
   }
   try {
     const sid = state.sessionId;
@@ -2594,6 +3636,9 @@ function handleEvent(evt, ts) {
   if (t === "result")       return handleResult(evt, ts);
   if (t === "_ccr") {
     if (evt.subtype === "first_paint") {
+      try { dbgLog("first-paint", {
+        tEnter: Math.round(performance.now() - (state._enterChatT0 || 0)),
+      }); } catch (_) {}
       // recent 已经渲完；马上揭幕让用户看到最新消息，后续 earlier 渲到屏外 fragment
       const tst = evt.turn_state;
       if (tst && tst.turn_started_at) {
@@ -2629,6 +3674,19 @@ function handleEvent(evt, ts) {
       state.firstSeq = evt.first_seq;
       state.hasMoreHistory = !!evt.has_more;
       state.isHistoryReplay = false;   // 之后的 user_input / result 才是实时
+      try { dbgLog("backlog-done", {
+        tEnter: Math.round(performance.now() - (state._enterChatT0 || 0)),
+        first_seq: evt.first_seq, has_more: evt.has_more,
+        history_count: evt.history_count, cacheHit: state.cacheHit,
+        visibleNow: (function(){
+          const log = document.getElementById("chat-log");
+          if (!log) return -1;
+          return log.querySelectorAll(
+            ":scope > .bubble, :scope > .tool-group, "
+            + ":scope > .perm-card, :scope > .askuser-card"
+          ).length;
+        })(),
+      }); } catch (_) {}
       // 缓存命中：DOM 已经显示，server 这一波 backlog 已被 maxSeq dedupe 掉，啥都不用做
       if (state.cacheHit) {
         state.cacheHit = false;
@@ -2642,15 +3700,8 @@ function handleEvent(evt, ts) {
         state.earlierFragment = null;
       }
       state.currentToolGroup = null;
-      // 200 条全部到位，等 200ms 再淡出 overlay（防止用户看到 prepend 抖一下）
-      const loadingEl = $("chat-loading");
-      setTimeout(() => {
-        loadingEl.classList.add("fade-out");
-        setTimeout(() => {
-          loadingEl.hidden = true;
-          loadingEl.classList.remove("fade-out");
-        }, 220);
-      }, 200);
+      // chat-loading overlay 由 autoFillInitialCards 在加载满 2 屏后 fade-out,
+      // 这里不再独立 fade — 用户要等到 2 屏内容渲完才看到, 一次性揭幕.
       hideThinkingPlaceholder();
       // 用户的视觉锚点已经在底部（recent），多次 RAF 持续贴底应对 layout 抖动
       const stickBottom = () => setScrollTopInstant(log, log.scrollHeight);
@@ -2662,6 +3713,9 @@ function handleEvent(evt, ts) {
         if (++n < 30) requestAnimationFrame(settle);
       };
       requestAnimationFrame(settle);
+      // 立即 autoFill — overlay 遮挡, 不需要等 settle. autoFill finally 块
+      // 负责 fade-out overlay 揭幕.
+      autoFillInitialCards();
       state.pendingScrollToBottomOnBacklog = false;
       return;
     }
@@ -2669,6 +3723,7 @@ function handleEvent(evt, ts) {
     if (evt.subtype === "permission_resolved") return markPermissionResolved(evt);
     if (evt.subtype === "permission_mode") return applyPermissionMode(evt.mode);
     if (evt.subtype === "turn_state") return applyTurnState(evt);
+    if (evt.subtype === "turn_summary") return _renderTurnSummary(evt);
     if (evt.subtype === "askuser_request") {
       // hook-hold 流程：服务端在 PreToolUse hook 阶段就把这个事件推过来；
       // 它带完整 input（questions/options），我们立刻渲染卡片，等用户提交
@@ -2822,9 +3877,18 @@ function handleStreamEvent(ev) {
     return;
   }
   if (sub === "content_block_stop") {
-    // tool_use 兜底（极少数情况下没有任何 input_json_delta，直接 stop）
     const block = state.blocksByIdx.get(ev.index);
     if (block && block.type === "tool_use") hideThinkingPlaceholder();
+    // text 块 stop 时若 bubble 文本仍是空, 移除这张空白卡 — content_block_start
+    // 会乐观创建 bubble 等 delta, 实测有时一段 text 块 0 内容 (e.g. 紧跟在
+    // tool_use 后的结尾换行), 不删会留个空 bubble 在 tool-group 下方.
+    if (block && block.type === "text") {
+      const cur = block.msgId && state.msgById.get(block.msgId);
+      if (cur && cur.bubble && (!cur.text || !cur.text.trim())) {
+        try { cur.bubble.remove(); } catch (_) {}
+        state.msgById.delete(block.msgId);
+      }
+    }
     return;
   }
 }
@@ -2891,15 +3955,28 @@ function applyTurnState(evt) {
   if (evt.model) state.currentMsgModel = evt.model;
   if (typeof evt.input_tokens === "number") state.lastInputTokens = evt.input_tokens;
   if (typeof evt.input_total === "number") state.lastInputTotal = evt.input_total;
+  // Turn card 生命周期: 进行中 (started_at 有, ended_at 无) → ensure;
+  // 结束边沿 (prev no end → now has end) → finalize.
+  if (state.turnStartAt && !state.turnEndAt) {
+    _ensureTurnCard();
+  }
+  if (!prevEndAt && state.turnEndAt) {
+    _finalizeTurnCard();
+  }
   refreshChatMeta();
   refreshConvStatus();
 }
 
 function handleUserInput(evt, envTs) {
-  if (!state.isHistoryReplay) {
-    // 重置跨 message 累加器；curOutputTokens 保留上一轮终值显示，等下次 message_start 才刷新
+  if (!state.isHistoryReplay && !state.earlierFragment) {
+    // token / timer 真源在后端: _update_turn_state 判过 "前一轮是否真的
+    // 结束", 已经把该清的清了, turn_state 广播会让 applyTurnState 镜像
+    // 过来. 这里只重置纯前端累加器 + 标记 turnFresh.
+    // earlierFragment guard: loadEarlierHistory 期间历史 user_input 渲到
+    // 屏外 fragment, 不是实时新轮, 别误建 active turn-card.
     state.priorTurnOutput = 0;
-    state.turnFresh = true;   // 本次进 session 后真的有用户发新轮次了：解锁 token/time 显示
+    state.turnFresh = true;
+    _ensureTurnCard();
   }
   refreshChatMeta();
   refreshConvStatus();
@@ -2943,19 +4020,175 @@ function handleResult(evt, envTs) {
   // turn 结束时间走后端 turn_state 事件，这里不动 turnEndAt
   refreshChatMeta();
   refreshConvStatus();
+  // 不在这里发通知 — 退回 home 后这段 WS 关了, 收不到 result. turn-end 通知
+  // 通过 globalWS 的 session_state 边沿 (busy → !busy) 触发, 见 maybeNotify().
+}
+
+// Turn-end Web Notification — 用户在 chat-menu 开了 toggle, 浏览器授权,
+// 页面不可见 (用户切走 / 锁屏) → 任意 session 的 busy → !busy 状态变化时
+// 弹通知. tag = sid 让同 session 多次替换旧通知. 点通知 → focus 窗口 + 跳进
+// 那个 session.
+function maybeNotifyTurnEnd(sess) {
+  try {
+    if (typeof Notification === "undefined") return;
+    if (Notification.permission !== "granted") return;
+    if (!state.notifyOnTurnEnd) return;
+    if (!sess || !sess.id) return;
+    // 抑制规则: 仅当"标签页可见 且 窗口有焦点"时才不打扰 (用户真的在看).
+    // 切到别的 tab / 浏览器失焦 / 切到别的 app / 锁屏 → 都弹.
+    const visible = document.visibilityState === "visible";
+    const focused = (typeof document.hasFocus === "function")
+                      ? document.hasFocus() : true;
+    if (visible && focused) return;
+    const name = sess.name || "session";
+    const sid = sess.id;
+    const n = new Notification(`Turn finished — ${name}`, {
+      body: "Click to return to ClaudeCodeRemote",
+      tag: sid,
+      icon: new URL("icon.svg", document.baseURI).pathname,
+    });
+    n.onclick = () => {
+      try { window.focus(); } catch (_) {}
+      const s = state.sessionsById.get(sid);
+      if (s) {
+        try { enterChat(s.id, s.name, s.cwd, s.state); } catch (_) {}
+      }
+      n.close();
+    };
+  } catch (e) {
+    console.warn("notify failed:", e);
+  }
+}
+
+function _currentSessionMeta() {
+  // 当前 chat 的 session 元信息 (model/effort) — 从 home 列表的 sessionsById
+  // 拿. 用户在 spawn modal 选定的值, server 端 normalize 后回传.
+  const sid = state.sessionId;
+  if (!sid) return { model: "", effort: "" };
+  const s = state.sessionsById.get(sid);
+  return {
+    model: (s && s.model) || "",
+    effort: (s && s.effort) || "",
+  };
 }
 
 function refreshChatMeta() {
   const meta = $("chat-meta");
   if (!meta) return;
-  // chat-head 只显示 cwd；token / ctx / cost 一律走底部 conv-status
-  meta.textContent = state.cwdShort || "";
+  // chat-head 的副标题: cwd · model · effort (后两段空就不显示). 视觉上紧凑一行
+  // 让用户在 chat 顶部直接看到当前会话用的模型 / effort 等级.
+  //
+  // cwd 段独立 .meta-cwd 元素 (dir=rtl + 内嵌 <bdo dir=ltr>) — 空间不足时
+  // 从左截断, 保留右侧 basename (优先显示最右名). model/effort 段不截.
+  const cwd = state.cwdShort || "";
+  const { model, effort } = _currentSessionMeta();
+  meta.replaceChildren();
+  if (cwd) {
+    const cwdEl = document.createElement("span");
+    cwdEl.className = "meta-cwd";
+    cwdEl.setAttribute("dir", "rtl");
+    const bdo = document.createElement("bdo");
+    bdo.setAttribute("dir", "ltr");
+    bdo.textContent = cwd;
+    cwdEl.appendChild(bdo);
+    cwdEl.title = cwd;
+    meta.appendChild(cwdEl);
+  }
+  const tailParts = [];
+  if (model) tailParts.push(model);
+  if (effort) tailParts.push(effort);
+  if (tailParts.length) {
+    const tailEl = document.createElement("span");
+    tailEl.className = "meta-tail";
+    tailEl.textContent = (cwd ? " · " : "") + tailParts.join(" · ");
+    meta.appendChild(tailEl);
+  }
   refreshConvStatus();   // 任意时刻 chat-meta 刷新都同步底部状态栏，下行 token 跟着 text_delta 实时
+}
+
+async function _waitWsOpen(timeoutMs) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    if (state.ws && state.ws.readyState === WebSocket.OPEN) return true;
+    await new Promise(r => setTimeout(r, 40));
+  }
+  return false;
+}
+
+async function _spawnFromTmpAndSend(content, textForName) {
+  const tmpSid = state.sessionId;
+  // 真 spawn — cwd = ~, name="" (后端 normalize 成 "untitled"), 默认 perm
+  let r;
+  try {
+    // 默认权限读 settings 里 ccr.defaultPermMode, 没设过用 manual.
+    // 跟正式 new-session modal 的 _setSpawnPermMode 行为一致.
+    const defaultPerm =
+      localStorage.getItem("ccr.defaultPermMode") || "manual";
+    r = await api("/api/spawn", {
+      method: "POST",
+      body: JSON.stringify({
+        cwd: "~", name: "", permission_mode: defaultPerm,
+        model: "", effort: "",
+      }),
+    });
+  } catch (e) {
+    alert("Failed to start session: " + (e.message || e));
+    return;
+  }
+  // tmp session 不再需要 — 真 session 会通过 globalWS snapshot 推过来
+  state.sessionsById.delete(tmpSid);
+  // 临时把当前 sessionId 清掉, 避免 enterChat 内 saveCurrentSessionCache 误存 tmp
+  state.sessionId = null;
+  await enterChat(r.id, r.name, r.cwd);
+  // 等 ws open (cache-miss 路径下 connectWS 已被调用)
+  const ok = await _waitWsOpen(8000);
+  if (!ok) {
+    alert("Connection timeout while starting session");
+    return;
+  }
+  state.ws.send(JSON.stringify({ type: "user_message", content }));
+  // 自动命名: 消息文本前 30 字符, 去掉多余空格. 空就保留后端 "untitled".
+  const cleanName = (textForName || "")
+    .replace(/\s+/g, " ").trim().slice(0, 30);
+  if (cleanName) {
+    api(`/api/sessions/${encodeURIComponent(r.id)}/rename`, {
+      method: "PUT",
+      body: JSON.stringify({ name: cleanName }),
+    }).catch(() => {});
+  }
 }
 
 function sendUserMessage() {
   const ta = $("chat-input");
   const text = ta.value.trim();
+  // tmp session 走特殊路径: 先 spawn + rename + send. 离 fn 立即返回.
+  if (state.sessionId && state.sessionId.startsWith("tmp-")) {
+    if (!text && state.attachments.length === 0) return;
+    const images = state.attachments.filter(a => a.kind === "image");
+    const files = state.attachments.filter(a => a.kind === "file" && a.path);
+    let combinedText = text;
+    if (files.length) {
+      const lines = files.map(f => `📎 ${f.name}\n${f.path}`).join("\n\n");
+      combinedText = text ? `${text}\n\n${lines}` : lines;
+    }
+    let content;
+    if (images.length) {
+      content = images.map(a => ({
+        type: "image",
+        source: { type: "base64", media_type: a.media_type, data: a.base64 },
+      }));
+      if (combinedText) content.push({ type: "text", text: combinedText });
+    } else {
+      content = combinedText;
+    }
+    ta.value = "";
+    ta.style.height = "auto";
+    const attCopy = state.attachments;
+    state.attachments = [];
+    renderAttachmentBar();
+    _spawnFromTmpAndSend(content, text);
+    return;
+  }
   if ((!text && state.attachments.length === 0)
       || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
   if (state.attachments.some(a => a.uploading)) {
@@ -3188,7 +4421,12 @@ if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     const swURL = new URL("sw.js", document.baseURI).pathname;
     const swScope = new URL("./", document.baseURI).pathname;
-    navigator.serviceWorker.register(swURL, { scope: swScope })
+    // updateViaCache: 'none' — sw.js 永远不进 HTTP cache, 每次注册都从网络
+    // 重新拉, 这样 bump CACHE 后用户下次访问就能装上新 SW (而不是默认
+    // 24h 才主动检查更新). 注册后立即 update() 再保险一次.
+    navigator.serviceWorker
+      .register(swURL, { scope: swScope, updateViaCache: "none" })
+      .then(reg => reg.update().catch(() => {}))
       .catch(err => console.warn("SW register failed (expected on http):", err.message));
   });
 }
@@ -3201,3 +4439,4 @@ if (state.token) {
 } else {
   showView("login");
 }
+

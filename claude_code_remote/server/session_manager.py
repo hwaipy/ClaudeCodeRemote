@@ -24,6 +24,34 @@ log = logging.getLogger(__name__)
 HIBERNATE_IDLE_S = float(os.environ.get("CCR_HIBERNATE_IDLE_S", "1800"))  # 30 min
 HIBERNATE_TICK_S = float(os.environ.get("CCR_HIBERNATE_TICK_S", "60"))
 
+# Claude CLI --effort 取值. 不在白名单 → 视为空 (即不传 --effort, 用 CLI 默认).
+_ALLOWED_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
+
+# model alias / 完整 id 允许的字符: 字母数字 . _ - 即可. 长度 64 内.
+# 防 shell injection / 控制字符塞进 CLI args. 不通过 → 视为空.
+import re as _re
+_MODEL_RE = _re.compile(r"^[A-Za-z0-9._\-]{1,64}$")
+
+
+def _norm_model(m: str) -> str:
+    m = (m or "").strip()
+    return m if m and _MODEL_RE.match(m) else ""
+
+
+def _norm_effort(e: str) -> str:
+    e = (e or "").strip().lower()
+    return e if e in _ALLOWED_EFFORTS else ""
+
+
+def _build_cli_extra_args(model: str, effort: str) -> list[str]:
+    """把 session 上的 model/effort 翻译成 claude CLI flag 列表."""
+    args: list[str] = []
+    if model:
+        args += ["--model", model]
+    if effort:
+        args += ["--effort", effort]
+    return args
+
 # 哪些事件落 DB（其它视为流式噪音，可从落了 DB 的事件重建 UI）
 _PERSIST_TOP = {"assistant", "user", "result", "user_input"}
 
@@ -59,6 +87,8 @@ def _classify(evt: dict[str, Any]) -> str | None:
             return "askuser_req"
         if sub == "askuser_resolved":
             return "askuser_resolved"
+        if sub == "turn_summary":
+            return "turn_summary"
     return None
 
 
@@ -100,6 +130,10 @@ class Session:
     cur_model:        str = ""
     cur_input_tokens: int = 0               # 最近 message 的 fresh input_tokens
     cur_input_total:  int = 0               # input_tokens + cache_read + cache_creation（用于 ctx%）
+    # 用户在 spawn 时选的模型 alias / effort 等级 (空 = 用 CLI 默认).
+    # 这两个值绑死到 session, resume 时同样透传, 保证整段会话风格一致.
+    model:  str = ""    # e.g. "sonnet" / "opus" / "haiku" / 完整 id / ""
+    effort: str = ""    # one of low/medium/high/xhigh/max / ""
 
     def envelope(self, evt: dict[str, Any]) -> dict[str, Any]:
         self.seq += 1
@@ -131,6 +165,13 @@ class Session:
             "needs_action_detail": self.needs_action_detail,
             "is_inactive": self.deactivated_at is not None,
             "is_stash": self.stashed_at is not None,
+            "model": self.model,
+            "effort": self.effort,
+            # cur_model: claude CLI 在 stream event 里报回的实际 model id
+            # (e.g. "claude-opus-4-7-…"). 跟 self.model (用户选的 alias /
+            # 空=Default) 不同 — 当 self.model="" 时, 这是"实际跑了什么".
+            # 前端 chat-menu 的 Default 选项文本加注用这个值.
+            "cur_model": self.cur_model,
         }
 
 
@@ -184,6 +225,8 @@ class SessionManager:
                 finished=r["finished_at"] is not None,
                 deactivated_at=r.get("deactivated_at"),
                 stashed_at=r.get("stashed_at"),
+                model=r.get("model") or "",
+                effort=r.get("effort") or "",
             )
             sess.seq = await db.max_seq(r["id"])
             async with self._lock:
@@ -222,15 +265,23 @@ class SessionManager:
 
     # ---------- spawn / resume / delete ----------
 
-    async def spawn(self, cwd: str, name: str = "") -> Session:
+    async def spawn(self, cwd: str, name: str = "",
+                    model: str = "", effort: str = "") -> Session:
         local_id = "ccr-" + uuid.uuid4().hex[:12]
-        proc = ClaudeProcess(cwd=cwd, ccr_session_id=local_id)
+        model = _norm_model(model)
+        effort = _norm_effort(effort)
+        proc = ClaudeProcess(
+            cwd=cwd, ccr_session_id=local_id,
+            extra_args=_build_cli_extra_args(model, effort),
+        )
         await proc.start()
         sess = Session(
             id=local_id, cwd=cwd, name=name or "untitled",
             created_at=time.time(), proc=proc,
+            model=model, effort=effort,
         )
-        await db.insert_session(local_id, sess.name, cwd, sess.created_at)
+        await db.insert_session(local_id, sess.name, cwd, sess.created_at,
+                                model=model, effort=effort)
         async with self._lock:
             self.sessions[local_id] = sess
         sess.pump_task = asyncio.create_task(self._pump(sess), name=f"pump-{local_id}")
@@ -247,8 +298,11 @@ class SessionManager:
             return sess
         if not sess.claude_session_id:
             log.warning("resume %s: no claude_session_id; spawning fresh in same cwd", sess_id)
-        proc = ClaudeProcess(cwd=sess.cwd, ccr_session_id=sess.id,
-                             resume_session_id=sess.claude_session_id)
+        proc = ClaudeProcess(
+            cwd=sess.cwd, ccr_session_id=sess.id,
+            resume_session_id=sess.claude_session_id,
+            extra_args=_build_cli_extra_args(sess.model, sess.effort),
+        )
         await proc.start()
         sess.proc = proc
         sess.hibernated = False
@@ -283,6 +337,32 @@ class SessionManager:
             await sess.proc.terminate()
         except Exception:
             log.exception("terminate during interrupt failed for %s", sess_id)
+        return True
+
+    async def update_model_effort(
+        self, sess_id: str, model: str | None, effort: str | None,
+    ) -> bool:
+        """改 session 的 model / effort. None 字段保持原值不改, 字符串字段
+        normalize 后写入 (含空字符串 = 显式清掉). 至少一个字段变化才 kill
+        proc, 否则 no-op."""
+        async with self._lock:
+            sess = self.sessions.get(sess_id)
+        if not sess:
+            return False
+        new_model = sess.model if model is None else _norm_model(model)
+        new_effort = sess.effort if effort is None else _norm_effort(effort)
+        if sess.model == new_model and sess.effort == new_effort:
+            return True
+        sess.model = new_model
+        sess.effort = new_effort
+        await db.update_model_effort(sess_id, new_model, new_effort)
+        # 杀掉当前 proc (如有), 让下次 user 发消息时 resume 用新 model/effort
+        if sess.proc is not None and sess.proc.proc and sess.proc.proc.returncode is None:
+            try:
+                await sess.proc.terminate()
+            except Exception:
+                log.exception("terminate during model_effort change for %s", sess_id)
+        self._broadcast_status(sess)
         return True
 
     async def rename(self, sess_id: str, name: str) -> bool:
@@ -465,10 +545,33 @@ class SessionManager:
         # 起止时刻立刻推一份给所有 WS 客户端，前端不再自己算 turnStartAt/turnEndAt
         _t = evt.get("type")
         if _t == "user_input":
-            # 新一轮开始：只更新 turnStartAt（不发 token，避免可见的"骤降为 0"）
-            self._broadcast_turn_state(sess, include_tokens=False)
+            # token + timer 是同一时机. _update_turn_state 已经判过 "前一轮
+            # 是否真的结束", 该清的清完了 — 这里直接把当前值广播给前端,
+            # 前端只镜像不自己算.
+            self._broadcast_turn_state(sess, include_tokens=True)
         elif _t == "result":
             self._broadcast_turn_state(sess, include_tokens=True)
+            # 落 turn_summary 入 db, 强刷 / backlog 回放后历史轮次的 turn-card
+            # 也能恢复. 每轮只发一次 — 按 turn_started_at 去重, 避免 claude
+            # CLI 同一轮 emit 多次 result (interrupt / retry) 产生多张相同
+            # 值的 summary card.
+            ts_key = sess.turn_started_at
+            if ts_key is not None and getattr(
+                sess, "_last_summary_turn_start", None,
+            ) != ts_key:
+                sess._last_summary_turn_start = ts_key
+                summary = {
+                    "type": "_ccr",
+                    "subtype": "turn_summary",
+                    "turn_started_at": sess.turn_started_at,
+                    "turn_ended_at": sess.turn_ended_at,
+                    "output_tokens": sess.turn_output_tokens,
+                    "model": sess.cur_model,
+                }
+                try:
+                    await self._deliver(sess, summary)
+                except Exception:
+                    log.exception("turn_summary deliver failed for %s", sess.id)
         # 广播前瘦身：工具调用的 input / result 用占位代替，input_json_delta 整段丢
         stripped = strip_live_event(evt, sess)
         if stripped is not None:
@@ -512,10 +615,17 @@ class SessionManager:
         逻辑对齐前端 handleUserInput / handleResult / handleStreamEvent。"""
         t = evt.get("type")
         if t == "user_input":
-            sess.turn_started_at = env_ts
-            sess.turn_ended_at = None
-            sess.turn_output_tokens = 0
-            sess.turn_prior_output = 0
+            # 仅在前一轮已结束 (turn_ended_at 有值) 时才重置 timer + tokens.
+            # 用户在 busy 期间又发新消息 → 这是当前轮的追加输入, 不是开新
+            # 轮, 保留 timer 和累计 tokens 不变.
+            prev_ended = sess.turn_ended_at is not None
+            if prev_ended or sess.turn_started_at is None:
+                sess.turn_started_at = env_ts
+                sess.turn_ended_at = None
+                sess.turn_output_tokens = 0
+                sess.turn_prior_output = 0
+                sess.cur_input_tokens = 0
+                sess.cur_input_total = 0
             return
         if t == "result":
             sess.turn_ended_at = env_ts
@@ -594,11 +704,22 @@ class SessionManager:
     async def subscribe(self, sess: Session) -> AsyncIterator[dict[str, Any]]:
         """初次推送：仅"最近一次问答 OR 最近 20 条"取多者；剩余历史走 HTTP 按需拉。
         然后发 backlog_done（带 first_seq + has_more），再走实时队列。"""
+        import time as _time
+        _t0 = _time.perf_counter()
+        def _ms(): return int((_time.perf_counter() - _t0) * 1000)
+        log.info("DBG subscribe-enter %s sess=%s proc_alive=%s",
+                 _ms(), sess.id,
+                 sess.proc is not None and sess.proc.proc
+                 and sess.proc.proc.returncode is None)
         from .permission_gateway import gateway
         q: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1024)
         sess.subscribers.add(q)
         try:
-            INITIAL_MIN = 200
+            # 首推总量缩到 40 — 用户只需要看 ~20 张"可见卡" (assistant
+             # bubble / user bubble / tool-group / perm-card / askuser),
+             # 连续工具调用合并成 1 张卡. 40 条原始消息一般足以渲出 20+
+             # 卡; 不够时前端 backlog_done 之后会自动续拉 /messages 补齐.
+            INITIAL_MIN = 40
             RECENT_TAIL = 30            # 没 user_input 兜底时的"最近"批大小
             last_user_seq = await db.find_last_user_seq(sess.id)
             # 第一批 = 最近一轮（user_input → ...）；没有则退化为 tail
@@ -606,12 +727,16 @@ class SessionManager:
                 recent = await db.load_messages_from(sess.id, last_user_seq)
             else:
                 recent = await db.load_messages_tail(sess.id, RECENT_TAIL)
+            log.info("DBG subscribe-db-recent-done %s recent_n=%s",
+                     _ms(), len(recent))
             # 第二批 = recent 之前的，总数控制在 INITIAL_MIN
             remaining = max(0, INITIAL_MIN - len(recent))
             if recent and remaining > 0:
                 earlier = await db.load_messages_before(sess.id, recent[0][0], remaining)
             else:
                 earlier = []
+            log.info("DBG subscribe-db-earlier-done %s earlier_n=%s",
+                     _ms(), len(earlier))
             history_count = len(earlier) + len(recent)
             first_seq = (earlier[0][0] if earlier
                          else (recent[0][0] if recent else None))
@@ -632,15 +757,18 @@ class SessionManager:
                     "input_tokens":    sess.cur_input_tokens,
                     "input_total":     sess.cur_input_total,
                 }
+            log.info("DBG subscribe-recent-yielded %s n=%s", _ms(), len(recent))
             # first_paint：前端收到这条就揭幕（recent 已渲染好），后续 earlier 渲到屏外 buffer
             yield {
                 "seq": -1, "ts": time.time(),
                 "event": {"type": "_ccr", "subtype": "first_paint",
                           "turn_state": turn_state},
             }
+            log.info("DBG subscribe-first-paint-yielded %s", _ms())
             # 第二批：更早的历史（按 seq 升序），前端会缓冲到 fragment 一次性 prepend
             for seq, ts, kind, payload in earlier:
                 yield {"seq": seq, "ts": ts, "event": strip_payload_for_backlog(payload)}
+            log.info("DBG subscribe-backlog-done %s total=%s", _ms(), history_count)
             yield {
                 "seq": -1, "ts": time.time(),
                 "event": {"type": "_ccr", "subtype": "backlog_done",

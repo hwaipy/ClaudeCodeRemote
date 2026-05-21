@@ -127,8 +127,12 @@
 html, body {
   margin: 0; height: 100%;
   overflow: hidden;
-  /* 阻止 iOS 橡皮筋 / 整页上下拉动 */
+  /* 阻止 iOS 橡皮筋 / 整页上下拉动. overscroll-behavior-x: contain
+     在部分浏览器里能拦住"左边缘右滑回上一页"的系统手势, 让 swipe-back
+     给我们自己的 JS 用. iOS Safari tab 不太尊重这条 — 仅 PWA standalone
+     有效. */
   overscroll-behavior: none;
+  overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: auto;
   /* 禁双指缩放 / 双击放大 */
   touch-action: pan-x pan-y;
@@ -162,13 +166,6 @@ a:hover { text-decoration: underline; }
 .view { flex: 1; display: none; flex-direction: column; min-height: 0; }
 .view.active { display: flex; }
 
-/* 软键盘弹出时让 view-chat 底部留键盘高度，chat-foot 跟着上移；chat-head 在顶部不动。
-   --kb-inset 由 JS 实测 visualViewport 计算（iOS PWA 第一次 focus 时 env(keyboard-inset-height)
-   会失灵，所以用 max 取两者较大值作兜底）。 */
-#view-chat {
-  padding-bottom: max(env(keyboard-inset-height, 0px), var(--kb-inset, 0px));
-  transition: padding-bottom 160ms ease;
-}
 
 
 
@@ -223,6 +220,9 @@ a:hover { text-decoration: underline; }
   border-bottom: 1px solid var(--border-soft);
   display: flex; align-items: center; gap: 12px;
   background: var(--bg-elev);
+  /* 跟 chat-head 等高: chat-head 的 .info 是两行 (name + meta cwd),
+     这里只有一行 name. min-height 把高度撑齐, 视觉一致. */
+  min-height: 60px;
 }
 .settings-head .back {
   background: transparent; border: 0; color: var(--accent);
@@ -505,6 +505,28 @@ input:focus, textarea:focus { border-color: var(--accent); }
   border-color: var(--accent);
 }
 
+/* Model + Effort 双下拉. 两列等宽紧贴, label 在 select 上方. */
+.spawn-model-effort {
+  display: flex; gap: 12px; margin-top: 12px;
+}
+.spawn-me-col {
+  flex: 1 1 0; min-width: 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.spawn-me-col label {
+  font-size: 12px; color: var(--text-muted);
+  margin: 0;
+}
+.spawn-me-col select {
+  width: 100%;
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text);
+}
+
 .hint { margin-top: 10px; font-size: 12px; color: var(--text-dim); }
 .err {
   margin-top: 12px; padding: 10px 12px;
@@ -530,10 +552,11 @@ input:focus, textarea:focus { border-color: var(--accent); }
   top: 0;
   z-index: 5;
   background: var(--bg-page);
-  /* Absorb the (former) .center-wrap top padding so the sticky bg
-     reaches the viewport's top edge. Same clamp scale as before so
-     the visual breathing room is preserved. */
-  padding: clamp(24px, 8vh, 80px) 0 12px;
+  /* 顶部 padding: 桌面 / Android 给 12px 喘息; iOS Safari 等有 notch
+     的设备给 safe-area-inset-top 恰好等于刘海高度. 之前用 clamp(24, 8vh,
+     80) 在 Safari 上 8vh ≈ 70 px, 加上 viewport 算法差异 head 被推太
+     下面 ("偏低"+上面一大块空白). */
+  padding: max(12px, env(safe-area-inset-top, 0px)) 0 12px;
   margin-bottom: 0;
   /* Transition gap so the bar can take the full container width when
      open (without the 8px gap overflowing) and snap back when closed. */
@@ -565,6 +588,9 @@ input:focus, textarea:focus { border-color: var(--accent); }
               background-color .15s ease;
 }
 .icon-btn:hover { background: var(--bg-elev); color: var(--text); }
+/* HTML [hidden] 默认 display: none, 但 .icon-btn 的 inline-flex 选择器
+   优先级更高会覆盖. 显式声明 — 让 <button hidden> 真的不显示. */
+.icon-btn[hidden] { display: none !important; }
 .home-top.search-open .icon-btn {
   width: 0 !important;
   padding-left: 0; padding-right: 0;
@@ -715,7 +741,7 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .session-card {
   position: relative;   /* anchor for the absolutely-positioned ✕ */
   background: var(--bg-card);
-  border: 1px solid var(--border-soft);   /* Apple: barely-there divider, no harsh border */
+  border: 1px solid var(--border);   /* 比 --border-soft 深一档, 不 hover 时也清晰可辨 */
   border-radius: 12px;
   /* Horizontal padding halved (was 14) so cards hug the sidebar tighter. */
   padding: 12px 7px;
@@ -910,39 +936,21 @@ body.theme-dark .state-badge.busy    { background: rgba(46, 160, 67, 0.22); colo
   box-shadow: 0 0 12px var(--accent-hover);
 }
 /* Busy: no border-color override; the green dot is the indicator. */
-/* Selected session card on wide layout: no blue border. Instead the
-   card "merges" into the chat panel — it matches the chat bg, drops
-   its right border + right border-radius, and extends past the
-   sidebar's right padding so its right edge meets the sidebar's
-   right border (and thus the chat area). */
+/* Selected session card on wide layout: 纯色克制高亮 — 比 --accent-bg
+   稍深一档的半透明蓝, 在浅 / 深主题下都明显是"选中". 不加左条不开口. */
 @media (min-width: 900px) {
   .session-card.is-current {
-    background: var(--bg-page);
-    /* Keep the subtle gray border on top/left/bottom; right edge dissolves. */
-    border-right-color: transparent;
-    border-top-right-radius: 0;
-    border-bottom-right-radius: 0;
-    /* Bleed past center-wrap's 16px right padding so the card meets the
-       sidebar's right edge — and paints over view-home::after (the
-       divider) at the card's height. */
-    margin-right: -16px;
-    /* Compensate padding-right by exactly the bleed amount (16px) so the
-       card's INNER content stays at the same screen x position as before
-       (base padding-right is now 7px → 7 + 16 = 23px). */
-    padding-right: 23px;
-    z-index: 2;   /* over view-home::after (z-index: 1) */
+    background: rgba(0, 113, 227, 0.14);
     cursor: default;
   }
-  /* Kebab is absolute right:4 — the padding-edge moved with the extra
-     right padding, so adjust to keep the kebab pinned to the same x. */
-  .session-card.is-current .card-menu-btn,
-  .session-card.is-current .card-menu { right: 20px; }
-  /* is-current hover overrides — only relevant when (hover: hover) since
-     the base .session-card:hover is now gated too. */
   @media (hover: hover) {
-    .session-card.is-current:hover { background: var(--bg-page); }
-    /* Re-assert transparent right border since base hover would override. */
-    .session-card.is-current:hover { border-right-color: transparent; }
+    .session-card.is-current:hover { background: rgba(0, 113, 227, 0.14); }
+  }
+}
+@media (min-width: 900px) and (prefers-color-scheme: dark) {
+  .session-card.is-current,
+  .session-card.is-current:hover {
+    background: rgba(41, 151, 255, 0.22);
   }
 }
 @keyframes ccr-pulse-yellow {
@@ -987,23 +995,62 @@ body.theme-dark .state-badge.busy    { background: rgba(46, 160, 67, 0.22); colo
 .chat {
   display: flex; flex-direction: column;
   flex: 1; min-height: 0;
+  /* chat-head 是 position:fixed 脱离流, 这里给 .chat 加 padding-top 让出
+     head 占据的空间. 写在 .chat 上 (而非 .chat-log 上) 是因为 padding 只
+     推 padding box 的内容; 滚动条沿 chat-log 右边缘从 chat-log 的 box
+     top 起跑, absolute/fixed 定位也参考 chat-log 的 box top — 这两者都
+     不被 chat-log 自己的 padding 影响. 把 clearance 挪到父容器, chat-log
+     的 box 整个就在 head 下方, 滚动条和 history-loader 都不会被 head 盖.
+
+     fallback 56px + safe-area-inset-top, 偏大兜底 (Dynamic Island 设备
+     head 可达 111+px). JS syncChatHeadHeight() 实测后写 --chat-head-h. */
+  padding-top: var(--chat-head-h, calc(56px + env(safe-area-inset-top, 0px)));
 }
 .chat-head {
-  /* fixed 钉在 layout viewport 顶；脱离 view-chat 的 transform 影响，键盘弹出不动 */
+  /* 顶部固定. 键盘相关的位置交给浏览器自身处理, 不主动写 top. */
   position: fixed;
   top: 0; left: 0; right: 0;
   z-index: 50;
   padding: max(12px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right))
            12px max(14px, env(safe-area-inset-left));
   border-bottom: 1px solid var(--border-soft);
-  display: none;   /* 默认隐藏，body.has-session 时才显示 */
   align-items: center; gap: 12px;
   background: var(--bg-elev);
 }
-body.has-session .chat-head { display: flex; }
-/* 宽屏双栏：chat-head 只占右栏，让出 sidebar 320px */
+
+/* 窄屏单栏：chat-head 始终 display:flex, 由 transform 控制可见性, 跟
+   view-chat 的滑入/滑出共用同一过渡 (420ms, 同一 bezier), 整体作为一片
+   滑动. 之前是 display:none ↔ flex 瞬时切, 跟 view-chat 的 420ms 动画
+   错位, 看起来 head 在动画期间"跑偏". */
+@media (max-width: 899px) {
+  .chat-head {
+    display: flex;
+    transform: translateX(100%);
+    will-change: transform;
+    pointer-events: none;
+    transition: transform 420ms cubic-bezier(0.25, 1, 0.5, 1);
+  }
+  body.has-session .chat-head {
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+  /* 输入框获焦 → 软键盘弹出, iOS 会把 layout viewport 向上推, 任何固定
+     在顶部的元素都跟着动. 我们直接把 head 藏掉, 跟 iMessage / 微信
+     一致 — 打字时上栏隐去, 收回键盘再出现. ← 返回还能用左边缘右滑.
+     失焦后头自然再出现 (display 切换不带过渡, 不会有滑动动画). */
+  body.has-session:has(#chat-input:focus) .chat-head {
+    display: none;
+  }
+}
+
+/* 宽屏双栏：chat-head 只占右栏 (左让 320px), 仍走 display 控制 — 双栏
+   静态布局没有滑入/滑出动画, transform 反而多余. */
 @media (min-width: 900px) {
-  .chat-head { left: 320px; }
+  .chat-head {
+    display: none;
+    left: 320px;
+  }
+  body.has-session .chat-head { display: flex; }
 }
 .chat-head .back {
   background: transparent; border: 0; color: var(--accent);
@@ -1014,7 +1061,20 @@ body.has-session .chat-head { display: flex; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-head .meta { font-size: 12px; color: var(--text-dim);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  white-space: nowrap; overflow: hidden;
+  display: flex; align-items: baseline; min-width: 0; }
+/* cwd 段独立 — flex shrink + RTL ellipsis 保留右侧 basename. 用户希望
+   空间不足时优先显示最右名字 (跟 home 卡片 .cwd-short 同款策略). */
+.chat-head .meta-cwd {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+.chat-head .meta-cwd bdo { display: inline; }
+/* model / effort 段不截, 跟在 cwd 后面. */
+.chat-head .meta-tail { flex: 0 0 auto; white-space: nowrap; }
 .chat-head .status {
   flex: 0 0 auto; font-size: 11px;
   padding: 3px 8px; border-radius: 999px;
@@ -1034,12 +1094,60 @@ body.has-session .chat-head { display: flex; }
 }
 .chat-head .conn-dot.error { background: #d70015; }   /* 红：断线/错误 */
 
+/* conv-status 行已被 .turn-card 替代 — 这里完全隐藏, 数据继续维护以供
+   turn-card 读. */
+#conv-status { display: none !important; }
+
+/* Turn card — 跟随当前 turn 流的特殊卡. icon pulse + ↓token + duration.
+   active 时 align-self: flex-start, 在 chat-log 末尾, MutationObserver 把它
+   推回末尾. finalize 后移除 .turn-active class, icon 停闪, observer 断开,
+   后续新消息自然 append 在它之后. */
+.turn-card {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 2px;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+/* finalize 后字色提到 --text, 跟普通时间线 entry 视觉对齐 */
+.turn-card:not(.turn-active) {
+  color: var(--text);
+}
+.turn-card:not(.turn-active) .turn-card-tokens,
+.turn-card:not(.turn-active) .turn-card-time {
+  color: var(--text);
+}
+.turn-card-icon {
+  flex: 0 0 auto;
+  width: 16px; height: 16px;
+  color: var(--accent);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.turn-card-icon svg { display: block; width: 16px; height: 16px; }
+.turn-card-tokens { color: var(--text); font-weight: 600; }
+.turn-card-time { color: var(--text-muted); }
+.turn-card.turn-active .turn-card-icon {
+  animation: turn-card-pulse 1.2s ease-in-out infinite;
+}
+@keyframes turn-card-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
 /* 输入框上方常驻状态栏：黑/蓝点 + 上下行 token + 持续时间 + ctx 占用 */
 .conv-status {
   flex: 0 0 auto;
   display: flex; align-items: center; gap: 10px;
   padding: 4px clamp(12px, 4vw, 16px);
-  background: var(--bg-page);   /* 跟聊天区域同色，无边框 */
+  /* 跟下方 chat-foot (输入框周围) 同色 — 视觉上 status + foot 是一个
+     连续的"输入区"组合, 跟上方 chat-log 区分开 */
+  background: var(--bg-elev);
+  border-top: 1px solid var(--border-soft);
   font-size: 11px;
   color: var(--text-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -1068,57 +1176,326 @@ body.has-session .chat-head { display: flex; }
 body.theme-dark .conv-status .cs-spark { color: #e8a690; }
 .conv-status .cs-tokens { flex: 0 0 auto; }
 .conv-status .cs-time   { flex: 0 0 auto; color: var(--text-dim); }
-.conv-status .cs-ctx    { flex: 1 1 auto; color: var(--text-dim); text-align: right; }
+/* ctx 文字隐藏 — 同样数据已通过 #chat-ctx-ring 在 head 右侧呈现 (圆环 +
+   click tooltip), conv-status 里不再重复显示 */
+.conv-status .cs-ctx { display: none; }
 
 /* chat-head 上的打断按钮：仅 busy 时显示（JS 控制 hidden 属性） */
-.chat-head .chat-interrupt {
-  flex: 0 0 auto;
-  width: 28px; height: 28px;
-  border-radius: 50%;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  font-size: 12px;
-  cursor: pointer;
-  padding: 0;
-  display: inline-flex; align-items: center; justify-content: center;
+/* 停止按钮放进 #chat-input-wrap 内部, 浮在 textarea 右下角 — 跟键盘
+   动画无关, 始终触手可及. 由 .chat-foot 的 padding-right 让 textarea
+   文本不挤到按钮下面. */
+.chat-input-wrap {
+  flex: 1; min-width: 0;
+  position: relative;
+  display: flex;   /* 让 textarea flex:1 撑满 wrap 宽度 */
 }
-.chat-head .chat-interrupt[hidden] { display: none; }
-.chat-head .chat-interrupt:hover { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-border); }
-
-/* chat-head 上的权限模式按钮：跟返回箭头同色 (var(--accent))，无边框 */
-.chat-head .chat-perm {
-  flex: 0 0 auto;
+/* 只在停止按钮可见时给 textarea 留右边距 — 不可见时文字用满宽度.
+   :has() 让规则条件化, 不再写死. 用 !important 压住后面 `.chat-foot
+   textarea { padding: ... }` 的 shorthand. */
+.chat-input-wrap:has(.chat-interrupt:not([hidden])) textarea {
+  padding-right: 40px !important;
+}
+.chat-input-wrap .chat-interrupt {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
   width: 28px; height: 28px;
+  background: transparent;
+  border: 0;
+  outline: none;          /* 删 focus outline (Chrome 默认会画 ring 外方框) */
+  padding: 0;
+  cursor: pointer;
+  color: var(--text);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: color 0.15s ease;
+}
+.chat-input-wrap .chat-interrupt:focus,
+.chat-input-wrap .chat-interrupt:focus-visible { outline: none; }
+.chat-input-wrap .chat-interrupt[hidden] { display: none; }
+.chat-input-wrap .chat-interrupt svg { display: block; overflow: visible; }
+.chat-input-wrap .chat-interrupt .ring {
+  transform-origin: 14px 14px;
+  animation: stop-ring-spin 1.4s linear infinite;
+  /* 删了 drop-shadow filter — 桌面端 Chrome 给 SVG 加方 backdrop 露出
+     方形阴影. 改用 opacity 直接表达, 干净没 artifact. */
+  opacity: 0.55;
+}
+.chat-input-wrap .chat-interrupt:hover .ring,
+.chat-input-wrap .chat-interrupt:active .ring {
+  opacity: 1;
+  stroke: var(--danger-fg);
+}
+.chat-input-wrap .chat-interrupt:hover {
+  color: var(--danger-fg);
+}
+@keyframes stop-ring-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* chat-head 右上角统一菜单 — 替代之前散落的 #chat-perm + #chat-ctx-ring
+   + #ctx-tooltip 三个入口. 单按钮 (⋯) 点开 panel, panel 含 4 分区:
+   Permission / Model / Effort / Ctx usage. */
+.chat-menu-wrap {
+  flex: 0 0 auto;
+  position: relative;   /* panel 用 absolute 锚到这里 */
+  display: inline-flex; align-items: center;
+}
+.chat-menu-btn {
+  width: 30px; height: 30px;
   background: transparent;
   border: 0;
   cursor: pointer;
   padding: 0;
+  font-size: 20px; line-height: 1;
+  color: var(--text-muted);
+  border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.chat-menu-btn:hover { background: var(--bg-hover); color: var(--text); }
+.chat-menu-btn:focus,
+.chat-menu-btn:focus-visible { outline: none; }
+
+.chat-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  min-width: 240px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .22);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.chat-menu[hidden] { display: none; }
+.chat-menu-section {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.chat-menu-section + .chat-menu-section {
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+.chat-menu-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.chat-menu select {
+  width: 100%;
+  font-size: 13px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-page);
+  color: var(--text);
+}
+.chat-menu-ctx-pct {
+  font-size: 18px; font-weight: 600;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.chat-menu-ctx-detail {
+  font-size: 12px; color: var(--text-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.chat-menu.ctx-warm .chat-menu-ctx-pct { color: #d29922; }
+.chat-menu.ctx-hot  .chat-menu-ctx-pct { color: #cf222e; }
+
+/* chat-menu 内每分区前置 icon (替代 "Permission" / "Model" 等文字 label).
+   icon 跟 select / 控件横向并排. */
+.chat-menu-icon {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+/* Perm button: 无外框 icon-only, 24×24, 跟 ctx-ring 风格一致 (accent 蓝色).
+   manual / accept_edits / plan → 锁 icon (16×16 内嵌);
+   allow_all → 闪电 icon. 点开 #perm-menu 选模式. */
+.chat-menu-perm-btn {
+  flex: 0 0 auto;
+  width: 24px; height: 24px;
+  padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+}
+.chat-menu-perm-btn:hover { color: var(--text); }
+.chat-menu-perm-btn:focus,
+.chat-menu-perm-btn:focus-visible { outline: none; }
+/* 4 模式各自一套 SVG, 默认全 hidden, 按 button 上的 mode-* class 显示对应那个.
+   manual = lock; accept_edits = pencil; plan = eye; allow_all = lightning. */
+.chat-menu-perm-btn .perm-svg { display: none; }
+.chat-menu-perm-btn.mode-manual       .perm-svg-manual       { display: inline-block; }
+.chat-menu-perm-btn.mode-accept_edits .perm-svg-accept_edits { display: inline-block; }
+.chat-menu-perm-btn.mode-plan         .perm-svg-plan         { display: inline-block; }
+.chat-menu-perm-btn.mode-allow_all    .perm-svg-allow_all    { display: inline-block; }
+.section-perm { position: relative; }   /* perm-menu absolute 锚到 section */
+
+/* Model button + popup menu — 跟 perm 完全同款风格. */
+.chat-menu-model-btn {
+  flex: 0 0 auto;
+  width: 24px; height: 24px;
+  padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+}
+.chat-menu-model-btn:hover { color: var(--text); }
+.chat-menu-model-btn:focus,
+.chat-menu-model-btn:focus-visible { outline: none; }
+.section-model { position: relative; }
+
+.model-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 70;
+  min-width: 220px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .15);
+  padding: 4px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.model-menu[hidden] { display: none; }
+.model-menu-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  background: transparent; border: 0; border-radius: 6px;
+  cursor: pointer; text-align: left;
+  color: var(--text);
+}
+.model-menu-item:hover { background: var(--bg-hover); }
+.model-menu-icon {
+  flex: 0 0 auto;
+  width: 20px; height: 20px;
   display: inline-flex; align-items: center; justify-content: center;
   color: var(--accent);
-  transition: opacity 160ms ease;
 }
-.chat-head .chat-perm[hidden] { display: none; }
-.chat-head .chat-perm:hover { opacity: .7; }
-.chat-head .chat-perm.allow-all {
-  animation: perm-bolt-pulse 1.8s ease-in-out infinite;
-}
-.chat-head .chat-perm.allow-all:hover { animation: none; opacity: .7; }
-@keyframes perm-bolt-pulse {
-  0%, 100% { opacity: .75; }
-  50%      { opacity: 1; }
-}
+.model-menu-label { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.model-menu-title { font-size: 13px; font-weight: 600; }
+.model-menu-sub { font-size: 11px; color: var(--text-dim); }
+.model-menu-check { flex: 0 0 auto; color: var(--accent); opacity: 0; font-weight: 700; }
+.model-menu-item.active .model-menu-check { opacity: 1; }
 
-/* 默认显示 manual 图标；切到 allow-all 时切换可见 svg */
-.chat-head .chat-perm .perm-svg-allowall { display: none; }
-.chat-head .chat-perm.allow-all .perm-svg-manual   { display: none; }
-.chat-head .chat-perm.allow-all .perm-svg-allowall { display: inline-block; }
+/* ctx-ring: 跟原先 chat-head 用的一模一样. 24×24 SVG, r=10 圆环, 进度
+   靠 stroke-dashoffset 表达, 颜色档 (默认 accent / .warm 橙 / .hot 红).
+   始终可见. hover/click 弹 #ctx-tooltip. */
+.ctx-ring-wrap {
+  position: relative;
+  display: inline-flex; align-items: center;
+}
+.chat-ctx-ring {
+  flex: 0 0 auto;
+  color: var(--accent);
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.chat-ctx-ring:focus,
+.chat-ctx-ring:focus-visible { outline: none; }
+.chat-ctx-ring .fill {
+  transition: stroke-dashoffset 240ms ease;
+}
+.chat-ctx-ring.warm { color: #d29922; }
+.chat-ctx-ring.hot  { color: #cf222e; }
 
-/* 权限模式选择 popover */
-.perm-menu {
-  position: fixed;
-  top: 56px; right: 12px;
+/* ctx tooltip — hover / click 时显示 pct + detail. position: absolute
+   悬浮在 ring 下方, 不抢横向空间. */
+.ctx-tooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
   z-index: 60;
+  min-width: 140px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
+  white-space: nowrap;
+}
+.ctx-tooltip[hidden] { display: none; }
+.ctx-tooltip-pct { font-size: 13px; font-weight: 600; color: var(--text); }
+.ctx-tooltip-detail {
+  font-size: 11px; color: var(--text-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Notify button: icon-only, 跟 perm-btn 同款 24×24 无外框, accent 色.
+   开启 → 普通铃铛 SVG; 关闭 → 灰色铃铛 + 禁止斜线. */
+.chat-menu-notify-btn {
+  flex: 0 0 auto;
+  width: 24px; height: 24px;
+  padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+}
+.chat-menu-notify-btn:hover { color: var(--text); }
+.chat-menu-notify-btn:focus,
+.chat-menu-notify-btn:focus-visible { outline: none; }
+.chat-menu-notify-btn .notify-svg { display: inline-block; }
+.chat-menu-notify-btn .notify-off { display: none; }
+.chat-menu-notify-btn.off {
+  color: var(--text-dim);
+}
+.chat-menu-notify-btn.off .notify-on { display: none; }
+.chat-menu-notify-btn.off .notify-off { display: inline-block; }
+
+/* chat-menu 永远 inline 直接显示在 chat-head 末尾 — 桌面 / 手机一致.
+   menu-btn (⋯) 隐藏, 4 个 icon (perm / model / notify / ctx) 横排. */
+.chat-head .chat-menu-btn { display: none; }
+#chat-menu.chat-menu[hidden],
+#chat-menu.chat-menu {
+  display: flex !important;
+  position: static;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  z-index: auto;
+}
+.chat-head .chat-menu-section {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 0 !important;
+  border: 0 !important;
+}
+.chat-head .chat-menu-section + .chat-menu-section {
+  padding-top: 0 !important;
+  border-top: 0 !important;
+}
+.chat-head .chat-menu-label {
+  font-size: 10px;
+  margin: 0;
+  white-space: nowrap;
+}
+/* 极窄屏 chat-head 横向不够时, 让 name/meta 区先 truncate, 4 个 icon 优先
+   显示 (.info 自带 flex:1 + min-width:0, 已 truncate 兜底). */
+
+/* 权限模式选择 popover. 锚到 chat-menu 内 #chat-menu-perm-btn 下方
+   (section-perm 是 relative anchor). right: 0 让 menu 从锚点向左展开,
+   避免靠近 chat-head 右边时 menu 溢出视野. */
+.perm-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 70;
   min-width: 240px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
@@ -1137,9 +1514,13 @@ body.theme-dark .conv-status .cs-spark { color: #e8a690; }
   color: var(--text);
 }
 .perm-menu-item:hover { background: var(--bg-hover); }
-.perm-menu-icon { flex: 0 0 auto; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; }
-.perm-menu-icon-manual   { color: var(--accent); }
-.perm-menu-icon-allowall { color: var(--accent); }
+.perm-menu-icon {
+  flex: 0 0 auto;
+  width: 20px; height: 20px;
+  display: inline-flex; align-items: center; justify-content: center;
+  /* 四个权限模式的 icon 统一用 accent 蓝色, 视觉一致 */
+  color: var(--accent);
+}
 .perm-menu-label { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .perm-menu-title { font-size: 13px; font-weight: 600; }
 .perm-menu-sub { font-size: 11px; color: var(--text-dim); }
@@ -1150,8 +1531,10 @@ body.theme-dark .conv-status .cs-spark { color: #e8a690; }
   flex: 1; min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;   /* 内容兜底：任何超宽元素被裁，不撑大 chat-log */
-  /* 顶端留 chat-head 高度，因为 chat-head 是 fixed 脱离了流 */
-  padding: calc(56px + env(safe-area-inset-top, 0px)) clamp(12px, 4vw, 24px) 16px;
+  /* chat-head 的让位写在父 .chat 的 padding-top 上 (head 高度); 这里 12px
+     是消息和 head bottom 之间的呼吸距离 — 不放, 顶部消息紧贴 head 底边
+     看着挤. */
+  padding: 12px clamp(12px, 4vw, 24px) 16px;
   display: flex; flex-direction: column; gap: 12px;
   background: var(--bg-page);
   position: relative;   /* 让 .history-loader 绝对定位相对 chat-log */
@@ -1324,6 +1707,49 @@ body.theme-dark .conv-status .cs-spark { color: #e8a690; }
   padding: 0;
   font-size: 1em;
 }
+/* 代码块一键复制: pre 被 .code-block-wrap 包住, 右上角浮一个 icon-only
+   .copy-code-btn. 常显 (不依赖 hover). pre 右侧 padding 给按钮留位, 防止
+   长代码首行跟按钮重叠. */
+.code-block-wrap {
+  position: relative;
+  margin: 0.6em 0;
+}
+/* specificity 必须 ≥ .bubble.assistant pre (0.0.2.1), 否则 padding-right
+   被覆盖. 用 .bubble.assistant .code-block-wrap > pre 提到 0.0.3.1. */
+.code-block-wrap > pre,
+.bubble.assistant .code-block-wrap > pre {
+  margin: 0;
+  padding-right: 42px;   /* 给右上角 copy-code-btn 让位, 避免行内文本被盖 */
+}
+.copy-code-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  width: 28px; height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-page);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: color 0.15s ease, background-color 0.15s ease,
+              border-color 0.15s ease;
+  user-select: none;
+}
+.copy-code-btn svg { display: block; }
+.copy-code-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  border-color: var(--border);
+}
+.copy-code-btn:focus,
+.copy-code-btn:focus-visible { outline: none; }
+.copy-code-btn.copied {
+  color: var(--ok-fg, #1f883d);
+  border-color: var(--ok-border, #1f883d);
+}
 .bubble.assistant blockquote {
   margin: 0.4em 0;
   padding: 4px 12px;
@@ -1428,9 +1854,16 @@ body.theme-dark .conv-status .cs-spark { color: #e8a690; }
   flex: 0 0 auto;
   /* 上下 padding 收紧；底部仅给 home indicator 必要的间距 */
   padding: 6px clamp(12px, 4vw, 16px) max(4px, env(safe-area-inset-bottom));
-  border-top: 1px solid var(--border-soft);
+  /* border-top 由上方的 .conv-status 承担, 这里去掉避免双线 */
   background: var(--bg-elev);
   display: flex; gap: 6px; align-items: flex-end;
+}
+/* PWA standalone 模式: 键盘弹起时 iOS 仍按 home indicator 报
+   env(safe-area-inset-bottom) ≈ 34 px, chat-foot 底就多 30 px 死空白
+   ("大下巴"). 仅 PWA + 输入获焦时收紧 padding-bottom 到 4 px. Safari
+   tab 不受影响 (Safari 自己处理这部分). */
+body.is-pwa.has-session:has(#chat-input:focus) .chat-foot {
+  padding-bottom: 4px;
 }
 .chat-foot textarea {
   flex: 1;
@@ -1472,25 +1905,46 @@ body.theme-dark .conv-status .cs-spark { color: #e8a690; }
   font-size: 12.5px;
 }
 .tool-group-head {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: flex-start; gap: 8px;
   padding: 6px 10px;
   cursor: pointer;
   user-select: none;
   color: var(--text-muted);
 }
 .tool-group-head:hover { background: var(--bg-hover); }
-.tool-group .group-icon { color: var(--accent); flex: 0 0 auto; }
-.tool-group .group-count { flex: 0 0 auto; font-weight: 600; color: var(--text); }
+.tool-group .group-icon { color: var(--accent); flex: 0 0 auto;
+  /* icon 跟首行文字对齐, 多行时不下沉 */
+  margin-top: 1px;
+}
+.tool-group .group-count {
+  flex: 1 1 auto; min-width: 0;
+  font-weight: 600; color: var(--text);
+  /* 多工具时 label 串可能很长 ("Read 5 files, edited 3 files, running 2 commands"
+     之类). 之前是 flex: 0 0 auto + 无 wrap, 文本撑超 head 宽度后会被父
+     .tool-group 的 overflow: hidden 截掉. 改成允许换行: break-word 让长串
+     (路径 / 命令) 也能在任意位置断行, 整个 head 高度按内容自动撑高. */
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
 .tool-group .group-summary {
   flex: 1 1 auto; min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* 多行换行: 之前是 nowrap + ellipsis 强行单行截断, 现在改成自动 wrap.
+     break-word 让没有空格的长串 (路径 / 命令) 也能在任意位置断行. */
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
+  line-height: 1.4;
 }
 .tool-group .group-status {
   flex: 0 0 auto;
   width: 8px; height: 8px; border-radius: 50%;
   background: transparent;
+  /* status dot 也跟首行对齐, 多行时不在垂直中部 */
+  margin-top: 5px;
 }
 .tool-group .group-status.pending { background: var(--accent); animation: tool-pulse 1.2s ease-in-out infinite; }
 .tool-group .group-status.error   { background: #d70015; }
@@ -1898,6 +2352,12 @@ body.theme-dark .conv-status .cs-spark { color: #e8a690; }
     box-shadow: none;
     padding: 0;
   }
+  /* sticky home-top 默认 var(--bg-page)=#fff. 桌面双栏布局 sidebar
+     底色是 var(--bg-elev) 浅灰, home-top 白色块跟周围格格不入. 桌面
+     模式下让 home-top 用同样的 bg-elev. */
+  body.stage-app #view-home .home-top {
+    background: var(--bg-elev);
+  }
   body.stage-app #view-home h1 {
     font-size: 13px;
     color: var(--text-muted);
@@ -1928,3 +2388,4 @@ body.theme-dark .conv-status .cs-spark { color: #e8a690; }
   body.stage-app:not(.has-session) #view-chat .chat-attachments,
   body.stage-app:not(.has-session) #view-chat #chat-status { display: none; }
 }
+

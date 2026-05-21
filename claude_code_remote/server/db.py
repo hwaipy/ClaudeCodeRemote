@@ -31,7 +31,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     finished_at         REAL,
     deleted_at          REAL,
     deactivated_at      REAL,
-    stashed_at          REAL
+    stashed_at          REAL,
+    model               TEXT NOT NULL DEFAULT '',
+    effort              TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -68,6 +70,10 @@ def _open() -> sqlite3.Connection:
         conn.execute("ALTER TABLE sessions ADD COLUMN deactivated_at REAL")
     if "stashed_at" not in cols:
         conn.execute("ALTER TABLE sessions ADD COLUMN stashed_at REAL")
+    if "model" not in cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN model TEXT NOT NULL DEFAULT ''")
+    if "effort" not in cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN effort TEXT NOT NULL DEFAULT ''")
     return conn
 
 
@@ -92,12 +98,22 @@ async def _run(fn, *args, **kwargs):
 
 # ---------- sessions ----------
 
-async def insert_session(sess_id: str, name: str, cwd: str, created_at: float) -> None:
+async def insert_session(sess_id: str, name: str, cwd: str, created_at: float,
+                         model: str = "", effort: str = "") -> None:
     def _w() -> None:
         _conn.execute(
-            "INSERT INTO sessions(id, name, cwd, created_at, last_activity_at) "
-            "VALUES (?,?,?,?,?)",
-            (sess_id, name, cwd, created_at, created_at),
+            "INSERT INTO sessions(id, name, cwd, created_at, last_activity_at, "
+            "model, effort) VALUES (?,?,?,?,?,?,?)",
+            (sess_id, name, cwd, created_at, created_at, model, effort),
+        )
+    await _run(_w)
+
+
+async def update_model_effort(sess_id: str, model: str, effort: str) -> None:
+    def _w() -> None:
+        _conn.execute(
+            "UPDATE sessions SET model=?, effort=? WHERE id=?",
+            (model, effort, sess_id),
         )
     await _run(_w)
 
@@ -192,7 +208,7 @@ async def mark_stashed(sess_id: str) -> None:
 
 _SESS_COLS = ("id", "claude_session_id", "name", "cwd", "created_at",
               "last_activity_at", "hibernated_at", "finished_at", "deleted_at",
-              "deactivated_at", "stashed_at")
+              "deactivated_at", "stashed_at", "model", "effort")
 
 
 async def get_session(sess_id: str) -> dict[str, Any] | None:

@@ -53,3 +53,24 @@ def test_static_assets_carry_build_id_query(base_url):
     """Index references static assets with ?v=<BUILD_ID> for cache busting."""
     r = httpx.get(base_url + "/")
     assert "?v=" in r.text, "expected cache-busting ?v= on static URLs"
+
+
+def test_sw_uses_cache_first_strategy_with_manual_refresh_escape(base_url):
+    """§16 SW 策略契约: 默认 cache-first (含 navigate / HTML), 仅在
+    req.cache === 'reload' / 'no-cache' (用户手动刷新) 时走网络. 这样
+    所有资源都从 cache 命中, 直到用户主动 refresh."""
+    r = httpx.get(f"{base_url}/sw.js")
+    src = r.text
+    # 必须检测 req.cache 判断是否手动刷新
+    assert 'req.cache === "reload"' in src or "req.cache === 'reload'" in src, (
+        "SW must branch on req.cache to detect manual refresh; "
+        "expected `req.cache === 'reload'` or `'no-cache'`"
+    )
+    assert '"no-cache"' in src or "'no-cache'" in src, (
+        "SW must also treat req.cache === 'no-cache' as manual refresh"
+    )
+    # 必须保留 cache-first 兜底分支 (caches.match → cached || fetch)
+    assert "caches.match" in src
+    # /api/ 和 ws 必须跳过 SW
+    assert "/api/" in src
+    assert "ws-global" in src

@@ -44,6 +44,11 @@
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
           </svg>
         </button>
+        <button class="icon-btn" id="new-btn-quick" type="button" title="Quick new (no setup)" aria-label="Quick new session" hidden>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M13 2 4 13h7l-1 9 9-11h-7l1-9z"/>
+          </svg>
+        </button>
         <button class="icon-btn" id="new-btn" type="button" title="New session" aria-label="New session">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
             <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -65,6 +70,7 @@
       <div id="sessions-active">
         <h2 class="section-label">
           <span class="section-label-text">Active</span>
+          <span class="count"></span>
           <button id="sessions-sort" type="button" class="sort-btn" data-mode="created" title="Sort by creation date — click to switch to last-active" aria-label="Sort">
             <svg class="sort-icon-created" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="4" y="6" width="16" height="14" rx="2"/>
@@ -146,70 +152,190 @@
   </div>
   <span class="conn-dot" id="conn-dot" title="Network status"></span>
   <span class="status" id="chat-status"></span>
-  <button class="chat-perm" id="chat-perm" type="button" title="Permission mode" aria-label="Permission mode" hidden>
-    <svg class="perm-svg perm-svg-manual"   viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-      <path d="M7 11V8a5 5 0 0 1 10 0v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-      <rect x="5" y="11" width="14" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/>
-      <circle cx="12" cy="15.5" r="1.2" fill="currentColor"/>
-    </svg>
-    <svg class="perm-svg perm-svg-allowall" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-      <path d="M13.5 2.5 6 13h5.5l-1 8.5L18 11h-5.5l1-8.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
-    </svg>
-  </button>
-  <button class="chat-interrupt" id="chat-interrupt" type="button" title="Interrupt current session" aria-label="Interrupt" hidden>⏹</button>
-</div>
-<div class="perm-menu" id="perm-menu" hidden>
-  <button class="perm-menu-item" data-mode="manual">
-    <span class="perm-menu-icon perm-menu-icon-manual">
-      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-        <path d="M7 11V8a5 5 0 0 1 10 0v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-        <rect x="5" y="11" width="14" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/>
-        <circle cx="12" cy="15.5" r="1.2" fill="currentColor"/>
-      </svg>
-    </span>
-    <span class="perm-menu-label">
-      <span class="perm-menu-title">Ask each time</span>
-      <span class="perm-menu-sub">Default — every tool call needs approval</span>
-    </span>
-    <span class="perm-menu-check">✓</span>
-  </button>
-  <button class="perm-menu-item" data-mode="accept_edits">
-    <span class="perm-menu-icon">
-      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-        <path d="M12 20h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-        <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-      </svg>
-    </span>
-    <span class="perm-menu-label">
-      <span class="perm-menu-title">Auto edits</span>
-      <span class="perm-menu-sub">Auto-approve Edit/Write only</span>
-    </span>
-    <span class="perm-menu-check">✓</span>
-  </button>
-  <button class="perm-menu-item" data-mode="plan">
-    <span class="perm-menu-icon">
-      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-        <path d="M12 3l9 4.5v9L12 21 3 16.5v-9L12 3z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
-      </svg>
-    </span>
-    <span class="perm-menu-label">
-      <span class="perm-menu-title">Plan only</span>
-      <span class="perm-menu-sub">No tool execution, plan-only</span>
-    </span>
-    <span class="perm-menu-check">✓</span>
-  </button>
-  <button class="perm-menu-item" data-mode="allow_all">
-    <span class="perm-menu-icon perm-menu-icon-allowall">
-      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-        <path d="M13.5 2.5 6 13h5.5l-1 8.5L18 11h-5.5l1-8.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
-      </svg>
-    </span>
-    <span class="perm-menu-label">
-      <span class="perm-menu-title">Allow all</span>
-      <span class="perm-menu-sub">Auto-approve every tool call</span>
-    </span>
-    <span class="perm-menu-check">✓</span>
-  </button>
+  <div class="chat-menu-wrap" id="chat-menu-wrap">
+    <button class="chat-menu-btn" id="chat-menu-btn" type="button" title="Session settings" aria-label="Session settings">⋯</button>
+    <div class="chat-menu" id="chat-menu" hidden>
+      <div class="chat-menu-section section-perm" title="Permission mode">
+        <button class="chat-menu-perm-btn" id="chat-menu-perm-btn" type="button" aria-haspopup="true" aria-label="Permission mode" title="Permission mode">
+          <svg class="perm-svg perm-svg-manual" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <!-- closed lock -->
+            <rect x="5" y="11" width="14" height="9" rx="2"/>
+            <path d="M7 11V8a5 5 0 0 1 10 0v3"/>
+          </svg>
+          <svg class="perm-svg perm-svg-accept_edits" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <!-- pencil = auto edits -->
+            <path d="M12 20h9"/>
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
+          </svg>
+          <svg class="perm-svg perm-svg-plan" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <!-- eye = plan only (look but don't touch) -->
+            <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+          <svg class="perm-svg perm-svg-allow_all" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <!-- lightning = allow all -->
+            <path d="M13.5 2.5 6 13h5.5l-1 8.5L18 11h-5.5l1-8.5z"/>
+          </svg>
+        </button>
+        <div class="perm-menu" id="perm-menu" role="menu" hidden>
+          <button class="perm-menu-item" data-mode="manual" role="menuitem" type="button">
+            <span class="perm-menu-icon">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="5" y="11" width="14" height="9" rx="2"/>
+                <path d="M7 11V8a5 5 0 0 1 10 0v3"/>
+              </svg>
+            </span>
+            <span class="perm-menu-label">
+              <span class="perm-menu-title">Ask each time</span>
+              <span class="perm-menu-sub">Confirm every tool call</span>
+            </span>
+            <span class="perm-menu-check">✓</span>
+          </button>
+          <button class="perm-menu-item" data-mode="accept_edits" role="menuitem" type="button">
+            <span class="perm-menu-icon">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 20h9"/>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
+              </svg>
+            </span>
+            <span class="perm-menu-label">
+              <span class="perm-menu-title">Auto edits</span>
+              <span class="perm-menu-sub">Auto-accept file edits</span>
+            </span>
+            <span class="perm-menu-check">✓</span>
+          </button>
+          <button class="perm-menu-item" data-mode="plan" role="menuitem" type="button">
+            <span class="perm-menu-icon">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            </span>
+            <span class="perm-menu-label">
+              <span class="perm-menu-title">Plan only</span>
+              <span class="perm-menu-sub">No tool execution</span>
+            </span>
+            <span class="perm-menu-check">✓</span>
+          </button>
+          <button class="perm-menu-item" data-mode="allow_all" role="menuitem" type="button">
+            <span class="perm-menu-icon">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M13.5 2.5 6 13h5.5l-1 8.5L18 11h-5.5l1-8.5z"/>
+              </svg>
+            </span>
+            <span class="perm-menu-label">
+              <span class="perm-menu-title">Allow all</span>
+              <span class="perm-menu-sub">No confirmation</span>
+            </span>
+            <span class="perm-menu-check">✓</span>
+          </button>
+        </div>
+      </div>
+      <div class="chat-menu-section section-model" title="Model">
+        <button class="chat-menu-model-btn" id="chat-menu-model-btn" type="button" aria-haspopup="true" aria-label="Model" title="Model">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="6" y="6" width="12" height="12" rx="2"/>
+            <line x1="3" y1="9" x2="6" y2="9"/>
+            <line x1="3" y1="15" x2="6" y2="15"/>
+            <line x1="18" y1="9" x2="21" y2="9"/>
+            <line x1="18" y1="15" x2="21" y2="15"/>
+            <line x1="9" y1="3" x2="9" y2="6"/>
+            <line x1="15" y1="3" x2="15" y2="6"/>
+            <line x1="9" y1="18" x2="9" y2="21"/>
+            <line x1="15" y1="18" x2="15" y2="21"/>
+          </svg>
+        </button>
+        <div class="model-menu" id="model-menu" role="menu" hidden>
+          <button class="model-menu-item" data-model="" role="menuitem" type="button">
+            <span class="model-menu-icon">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="6" y="6" width="12" height="12" rx="2"/>
+                <line x1="3" y1="9" x2="6" y2="9"/>
+                <line x1="3" y1="15" x2="6" y2="15"/>
+                <line x1="18" y1="9" x2="21" y2="9"/>
+                <line x1="18" y1="15" x2="21" y2="15"/>
+                <line x1="9" y1="3" x2="9" y2="6"/>
+                <line x1="15" y1="3" x2="15" y2="6"/>
+                <line x1="9" y1="18" x2="9" y2="21"/>
+                <line x1="15" y1="18" x2="15" y2="21"/>
+              </svg>
+            </span>
+            <span class="model-menu-label">
+              <span class="model-menu-title">Default</span>
+              <span class="model-menu-sub" id="model-menu-sub-default">CLI picks</span>
+            </span>
+            <span class="model-menu-check">✓</span>
+          </button>
+          <button class="model-menu-item" data-model="opus" role="menuitem" type="button">
+            <span class="model-menu-icon">
+              <!-- crown = top tier -->
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M2 17l2-9 5 5 3-9 3 9 5-5 2 9z"/>
+                <line x1="4" y1="20" x2="20" y2="20"/>
+              </svg>
+            </span>
+            <span class="model-menu-label">
+              <span class="model-menu-title">Opus</span>
+              <span class="model-menu-sub">Most capable</span>
+            </span>
+            <span class="model-menu-check">✓</span>
+          </button>
+          <button class="model-menu-item" data-model="sonnet" role="menuitem" type="button">
+            <span class="model-menu-icon">
+              <!-- star = balanced -->
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polygon points="12,3 14.7,9.3 21.5,10 16.3,14.5 17.9,21 12,17.6 6.1,21 7.7,14.5 2.5,10 9.3,9.3"/>
+              </svg>
+            </span>
+            <span class="model-menu-label">
+              <span class="model-menu-title">Sonnet</span>
+              <span class="model-menu-sub">Balanced</span>
+            </span>
+            <span class="model-menu-check">✓</span>
+          </button>
+          <button class="model-menu-item" data-model="haiku" role="menuitem" type="button">
+            <span class="model-menu-icon">
+              <!-- feather = light / fast -->
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"/>
+                <line x1="16" y1="8" x2="2" y2="22"/>
+                <line x1="17.5" y1="15" x2="9" y2="15"/>
+              </svg>
+            </span>
+            <span class="model-menu-label">
+              <span class="model-menu-title">Haiku</span>
+              <span class="model-menu-sub">Fast / cheap</span>
+            </span>
+            <span class="model-menu-check">✓</span>
+          </button>
+        </div>
+      </div>
+      <div class="chat-menu-section section-notify" title="Notify on turn end">
+        <button class="chat-menu-notify-btn" id="chat-menu-notify-btn" type="button" aria-label="Toggle turn-end notification">
+          <svg class="notify-svg notify-on" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+          </svg>
+          <svg class="notify-svg notify-off" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            <line x1="4" y1="4" x2="20" y2="20"/>
+          </svg>
+          <input type="checkbox" id="chat-menu-notify" style="display:none">
+        </button>
+      </div>
+      <div class="chat-menu-section section-ctx ctx-ring-wrap" id="ctx-ring-wrap">
+        <svg class="chat-ctx-ring" id="chat-ctx-ring" viewBox="0 0 24 24" width="24" height="24" aria-label="Context usage">
+          <circle class="track" cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2.4" opacity="0.18"/>
+          <circle class="fill" cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-dasharray="62.83" stroke-dashoffset="62.83" transform="rotate(-90 12 12)"/>
+        </svg>
+        <div class="ctx-tooltip" id="ctx-tooltip" hidden>
+          <div class="ctx-tooltip-pct" id="ctx-tooltip-pct">—</div>
+          <div class="ctx-tooltip-detail" id="ctx-tooltip-detail">no data</div>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 <div class="view" id="view-chat">
   <!-- session 初次加载 overlay：放在 view-chat 内，swipe-back 会跟着滑出 -->
@@ -231,13 +357,22 @@
     <div class="chat-attachments" id="chat-attachments" hidden></div>
     <div class="chat-foot">
       <input id="att-input" type="file" multiple hidden>
-      <textarea id="chat-input" rows="1" enterkeyhint="send"></textarea>
       <button class="btn-att" id="chat-att" type="button" title="Add attachment" aria-label="Add attachment">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
-          <line x1="12" y1="5" x2="12" y2="19"></line>
-          <line x1="5" y1="12" x2="19" y2="12"></line>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <!-- 回形针 (paperclip): 顶端环 + 直线身, 表示"附件" -->
+          <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
         </svg>
       </button>
+      <div class="chat-input-wrap">
+        <textarea id="chat-input" rows="1" enterkeyhint="send"></textarea>
+        <button class="chat-interrupt" id="chat-interrupt" type="button" title="Interrupt current session" aria-label="Interrupt" hidden>
+          <svg viewBox="0 0 28 28" width="28" height="28" aria-hidden="true">
+            <circle class="ring" cx="14" cy="14" r="11" fill="none" stroke="currentColor"
+                    stroke-width="1.6" stroke-linecap="round" stroke-dasharray="42 22"/>
+            <rect class="block" x="9" y="9" width="10" height="10" rx="1.5" fill="currentColor"/>
+          </svg>
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -264,6 +399,17 @@
         <button type="button" class="spawn-perm-btn" data-mode="accept_edits">Auto edits</button>
         <button type="button" class="spawn-perm-btn" data-mode="plan">Plan</button>
         <button type="button" class="spawn-perm-btn" data-mode="allow_all">Allow all</button>
+      </div>
+      <div class="spawn-model-effort">
+        <div class="spawn-me-col">
+          <label for="spawn-model">Model</label>
+          <select id="spawn-model">
+            <option value="">Default</option>
+            <option value="opus">opus</option>
+            <option value="sonnet">sonnet</option>
+            <option value="haiku">haiku</option>
+          </select>
+        </div>
       </div>
       <div class="err" id="spawn-err"></div>
     </div>

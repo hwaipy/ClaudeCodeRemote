@@ -574,16 +574,23 @@ def test_login_card_is_centered_and_compact(fresh_page):
 
 # ---------- §2 home: home-top ----------
 
-def test_new_session_button_is_padded(logged_in_page):
-    """Spec §2.1: New session is a real button, not a bare link."""
+def test_new_session_button_is_a_round_icon(logged_in_page):
+    """Spec §2.1: New session is a round icon button (36×36), grouped
+    with the settings and search buttons in the home-top row.
+    (Previously a wide text button; now uses .icon-btn shape.)"""
     btn = logged_in_page.locator("#new-btn")
     expect(btn).to_be_visible()
-    # Padding present horizontally (button shape, not naked text)
-    assert computed_px(logged_in_page, btn, "padding-left") >= 10
-    assert computed_px(logged_in_page, btn, "padding-right") >= 10
-    # Has a background fill (not transparent)
-    bg = computed(logged_in_page, btn, "background-color")
-    assert bg not in ("rgba(0, 0, 0, 0)", "transparent"), bg
+    box = btn.bounding_box()
+    assert box is not None
+    # Roughly square: width ≈ height
+    assert abs(box["width"] - box["height"]) <= 6, (
+        f"new-btn should be round-ish (width≈height), got {box}"
+    )
+    # Round via border-radius
+    radius = computed_px(logged_in_page, btn, "border-top-left-radius")
+    assert radius >= box["width"] / 2 - 4, (
+        f"new-btn should be round: radius={radius}, w={box['width']}"
+    )
 
 
 def test_search_bar_is_round_when_collapsed(logged_in_page):
@@ -672,20 +679,17 @@ def test_search_button_no_focus_ring(logged_in_page):
 
 def test_new_btn_visibly_squeezes_on_search_open(logged_in_page):
     """Playback test: clicking search must visibly squeeze new-btn from
-    its natural width down to 0, NOT just snap it away.
-
-    The implementation measures the button's current width inline before
-    adding .search-open so the transition has concrete pixel endpoints.
-    A 170ms sample must land in the middle of that animation, NOT at
-    either extreme — that's the contract that catches "snap" regressions."""
+    its natural width (~36px icon) down to 0, NOT just snap it away.
+    A 170ms sample must land mid-animation."""
     new_btn = logged_in_page.locator("#new-btn")
     w_start = new_btn.bounding_box()["width"]
-    assert w_start >= 80, f"new-btn should have natural width: {w_start}"
+    assert w_start >= 30, f"new-btn natural icon width too small: {w_start}"
 
     logged_in_page.locator("#search-btn").click()
     logged_in_page.wait_for_timeout(170)
     w_mid = new_btn.bounding_box()["width"]
-    assert 5 < w_mid < w_start - 20, (
+    # Must be strictly between 0 and start — i.e. mid-transition, not a snap.
+    assert 2 < w_mid < w_start - 2, (
         f"new-btn must be visibly mid-squeeze 170ms after search opens: "
         f"start={w_start}, mid={w_mid} (snap?)"
     )
@@ -697,7 +701,7 @@ def test_new_btn_visibly_squeezes_on_search_open(logged_in_page):
 
 def test_new_btn_visibly_un_squeezes_on_search_close(logged_in_page):
     """Playback test: closing search must visibly expand new-btn from 0
-    back to its natural width."""
+    back to its natural width (~36px icon)."""
     new_btn = logged_in_page.locator("#new-btn")
     w_natural = new_btn.bounding_box()["width"]
     logged_in_page.locator("#search-btn").click()
@@ -707,7 +711,7 @@ def test_new_btn_visibly_un_squeezes_on_search_close(logged_in_page):
     logged_in_page.locator("#search-clear").click()
     logged_in_page.wait_for_timeout(170)
     w_mid = new_btn.bounding_box()["width"]
-    assert 5 < w_mid < w_natural - 20, (
+    assert 2 < w_mid < w_natural - 2, (
         f"new-btn must be visibly mid-expand 170ms after close: "
         f"natural={w_natural}, mid={w_mid}"
     )
@@ -775,8 +779,9 @@ def test_new_btn_width_grows_monotonically_during_close(logged_in_page):
         assert samples[i] + 1.5 >= samples[i - 1], (
             f"new-btn width should grow monotonically during close: {samples}"
         )
-    assert samples[-1] >= samples[0] + 30, (
-        f"close should have made visible progress: {samples}"
+    # new-btn is a 36px icon — close must take it from 0 back to ~36.
+    assert samples[-1] >= samples[0] + 20, (
+        f"close should have made visible progress (≥20 px): {samples}"
     )
 
 

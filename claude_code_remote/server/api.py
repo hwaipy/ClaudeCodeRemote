@@ -25,11 +25,57 @@ class SpawnRequest(BaseModel):
     cwd: str = Field(..., min_length=1)
     name: str = ""
     permission_mode: str = "manual"
+    model: str = ""    # claude CLI --model (alias 或完整 id); 空 = 用 CLI 默认
+    effort: str = ""   # claude CLI --effort: low/medium/high/xhigh/max; 空 = 默认
 
 
 class DbgLogRequest(BaseModel):
     tag: str
     data: Any = None
+
+
+@router.get("/cli/defaults")
+async def cli_defaults() -> dict[str, Any]:
+    """读 ~/.claude/settings.json 解析用户配置的 model / effort 默认值.
+    前端 chat-menu 的 Default 选项文本注释用 — claude stream event 只报
+    cur_model, 不报 effort, settings.json 是探知 effort 默认的唯一线索.
+    文件不存在 / 解析失败 / 字段缺失 → 对应字段返回 null."""
+    import json
+    out: dict[str, Any] = {"model": None, "effort": None}
+    path = Path.home() / ".claude" / "settings.json"
+    if not path.exists():
+        return out
+    try:
+        data = json.loads(path.read_text())
+        if isinstance(data, dict):
+            m = data.get("model")
+            e = data.get("effort")
+            if isinstance(m, str) and m:
+                out["model"] = m
+            if isinstance(e, str) and e:
+                out["effort"] = e
+    except Exception:
+        pass
+    return out
+
+
+class ModelEffortRequest(BaseModel):
+    # Optional 区分: None = 不改这字段, 空字符串 = 显式清掉.
+    # 前端 effort UI 已移除, 默认不发 effort 字段 → 不动 sess.effort.
+    model: str | None = None
+    effort: str | None = None
+
+
+@router.patch("/sessions/{session_id}/model_effort")
+async def update_session_model_effort(
+    session_id: str, req: ModelEffortRequest,
+) -> dict[str, Any]:
+    """改 session 的 model / effort. None 字段保持原值, 字符串字段写入."""
+    ok = await manager.update_model_effort(session_id, req.model, req.effort)
+    if not ok:
+        raise HTTPException(404, "session not found")
+    sess = await manager.get(session_id)
+    return {"model": sess.model, "effort": sess.effort}
 
 
 @router.post("/dbg/log")
@@ -44,7 +90,8 @@ async def spawn(req: SpawnRequest) -> dict[str, Any]:
     cwd = os.path.expanduser(req.cwd)
     if not Path(cwd).is_dir():
         raise HTTPException(400, f"cwd not a directory: {cwd}")
-    sess = await manager.spawn(cwd=cwd, name=req.name)
+    sess = await manager.spawn(cwd=cwd, name=req.name,
+                                model=req.model, effort=req.effort)
     if req.permission_mode and req.permission_mode != "manual":
         try:
             await gateway.set_mode(sess.id, req.permission_mode)
@@ -55,6 +102,8 @@ async def spawn(req: SpawnRequest) -> dict[str, Any]:
         "cwd": sess.cwd,
         "name": sess.name,
         "created_at": sess.created_at,
+        "model": sess.model,
+        "effort": sess.effort,
     }
 
 

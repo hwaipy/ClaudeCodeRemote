@@ -78,6 +78,10 @@ async def ws_global(ws: WebSocket) -> None:
 
 @router.websocket("/ws/{session_id}")
 async def ws_session(ws: WebSocket, session_id: str) -> None:
+    import time as _time
+    _t0 = _time.perf_counter()
+    def _ms(): return int((_time.perf_counter() - _t0) * 1000)
+    log.info("DBG ws-handler-enter %s sess=%s", _ms(), session_id)
     token = ws.query_params.get("token")
     if not check_ws_token(token):
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="invalid token")
@@ -86,8 +90,11 @@ async def ws_session(ws: WebSocket, session_id: str) -> None:
     if not sess:
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="session not found")
         return
-
+    _alive = (sess.proc is not None and sess.proc.proc is not None
+              and sess.proc.proc.returncode is None)
+    log.info("DBG ws-proc-alive-pre-accept %s alive=%s", _ms(), _alive)
     await ws.accept()
+    log.info("DBG ws-accepted %s", _ms())
 
     async def push_events() -> None:
         log.debug("push_events task started for %s", session_id)

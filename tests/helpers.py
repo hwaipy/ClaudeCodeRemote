@@ -4,12 +4,18 @@ from __future__ import annotations
 import httpx
 
 
-def api_spawn(base_url: str, token: str, cwd: str, name: str = "") -> str:
+def api_spawn(base_url: str, token: str, cwd: str, name: str = "",
+              model: str = "", effort: str = "") -> str:
     """POST /api/spawn, return new session id."""
+    body = {"cwd": cwd, "name": name}
+    if model:
+        body["model"] = model
+    if effort:
+        body["effort"] = effort
     r = httpx.post(
         f"{base_url}/api/spawn",
         headers={"Authorization": f"Bearer {token}"},
-        json={"cwd": cwd, "name": name},
+        json=body,
         timeout=10,
     )
     r.raise_for_status()

@@ -1,14 +1,15 @@
 // ClaudeCodeRemote service worker.
-// 策略：
-//   navigate (HTML)  网络优先，失败回缓存；保证 BUILD_ID 变更立即生效
-//   其它 GET       缓存优先，未命中走网络再缓存；带 ?v= 的静态资源天然
-//                    受 cache-buster 控制，文件变更后浏览器请求新 URL
-//   /api/ 和 /ws    完全不走 SW
+// 策略 (cache-first, 用户手动刷新才回源):
+//   所有 GET (含 navigate)  默认缓存优先, 命中即返回, 缺货才下载并写入缓存.
+//   req.cache === "reload" / "no-cache"  网络优先, 把新内容写回缓存.
+//     浏览器把 F5 / Ctrl+R / 下拉刷新 / location.reload() 等手动操作
+//     标记为 "reload" / "no-cache" — 用户主动要新版本就给新版本.
+//   /api/ 和 /ws  完全不走 SW (业务数据永远新鲜).
 //
-// 反代前缀通过 self.registration.scope 自动获得（注册时由 client 端按
-// document.baseURI 算好），不需要硬编码 /remote 之类。
+// 反代前缀通过 self.registration.scope 自动获得 (注册时由 client 端按
+// document.baseURI 算好), 不需要硬编码 /remote 之类.
 
-const CACHE = "ccr-v1";
+const CACHE = "ccr-v58";   // bump 强制清掉旧 cache, PWA 重启后拿新代码
 const SCOPE_PATH = new URL(self.registration.scope).pathname;  // 末尾保证带 /
 const SHELL = [
   SCOPE_PATH,
@@ -39,30 +40,39 @@ self.addEventListener("fetch", e => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  // 跳过 API / WS（WS 是 ws:/wss: scheme，本身就不会过 fetch handler，
-  // 这里只防御性兜底）
+  // 跳过 API / WS (WS 是 ws:/wss: scheme, 本身就不会过 fetch handler,
+  // 这里只防御性兜底)
   if (url.pathname.startsWith(SCOPE_PATH + "api/")
       || url.pathname.startsWith(SCOPE_PATH + "ws/")
       || url.pathname === SCOPE_PATH + "ws-global") return;
 
-  if (req.mode === "navigate") {
+  // 用户手动刷新: req.cache 是 "reload" 或 "no-cache" — 走网络, 把
+  // 新版本写回缓存, 失败回退到缓存兜底.
+  const isManualRefresh = req.cache === "reload" || req.cache === "no-cache";
+
+  const cacheKey = (req.mode === "navigate") ? SCOPE_PATH : req;
+
+  if (isManualRefresh) {
     e.respondWith(
       fetch(req)
         .then(res => {
-          const copy = res.clone();
-          caches.open(CACHE).then(c => c.put(SCOPE_PATH, copy)).catch(() => {});
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then(c => c.put(cacheKey, copy)).catch(() => {});
+          }
           return res;
         })
-        .catch(() => caches.match(SCOPE_PATH))
+        .catch(() => caches.match(cacheKey))
     );
     return;
   }
 
+  // 默认: cache-first. 命中即返回 (零网络), 未命中再下载 + 写缓存.
   e.respondWith(
-    caches.match(req).then(cached => cached || fetch(req).then(res => {
+    caches.match(cacheKey).then(cached => cached || fetch(req).then(res => {
       if (res.ok) {
         const copy = res.clone();
-        caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {});
+        caches.open(CACHE).then(c => c.put(cacheKey, copy)).catch(() => {});
       }
       return res;
     }))
