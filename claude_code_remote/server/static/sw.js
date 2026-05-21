@@ -9,7 +9,7 @@
 // 反代前缀通过 self.registration.scope 自动获得 (注册时由 client 端按
 // document.baseURI 算好), 不需要硬编码 /remote 之类.
 
-const CACHE = "ccr-v64";   // bump 强制清掉旧 cache, PWA 重启后拿新代码
+const CACHE = "ccr-v65";   // bump 强制清掉旧 cache, PWA 重启后拿新代码
 const SCOPE_PATH = new URL(self.registration.scope).pathname;  // 末尾保证带 /
 const SHELL = [
   SCOPE_PATH,

@@ -1186,6 +1186,153 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
   });
 })();
 
+// ---------- Apps (Cloud server) management view ----------
+(function setupApps() {
+  const view = $("view-apps");
+  const openBtn = $("apps-btn");
+  const backBtn = $("apps-back");
+  const newBtn = $("apps-new-btn");
+  const listEl = $("apps-list");
+  const modal = $("modal-new-app");
+  const step1 = $("new-app-step1");
+  const step2 = $("new-app-step2");
+  const nameInput = $("new-app-name");
+  const errEl = $("new-app-err");
+  const goBtn = $("new-app-go");
+  const cancelBtn = $("new-app-cancel");
+  const closeBtn = $("new-app-close");
+  const doneBtn = $("new-app-done");
+  const tokenEl = $("new-app-token");
+  const envEl = $("new-app-env");
+  const tokenCopyBtn = $("new-app-token-copy");
+  const envCopyBtn = $("new-app-env-copy");
+  if (!view || !openBtn) return;
+
+  function isOpen() { return view.classList.contains("active"); }
+  async function reload() {
+    try {
+      const apps = await api("/api/hub/apps");
+      renderList(apps);
+    } catch (e) {
+      listEl.innerHTML = `<div class="apps-empty">Failed to load: ${escHTML(e.message || String(e))}</div>`;
+    }
+  }
+  function renderList(apps) {
+    if (!apps || !apps.length) {
+      listEl.innerHTML = '<div class="apps-empty">No apps registered yet. Click + to add one.</div>';
+      return;
+    }
+    listEl.innerHTML = "";
+    for (const a of apps) {
+      const row = document.createElement("div");
+      row.className = "app-row " + (a.online ? "online" : "offline");
+      row.innerHTML = `
+        <span class="state-dot" aria-hidden="true"></span>
+        <span class="app-name"></span>
+        <span class="app-meta"></span>
+        <button class="app-revoke" type="button">Revoke</button>
+      `;
+      row.querySelector(".app-name").textContent = a.name || "(unnamed)";
+      row.querySelector(".app-meta").textContent = a.online ? "online" : "offline";
+      row.querySelector(".app-revoke").addEventListener("click", async () => {
+        if (!confirm(`Revoke "${a.name}"? Its device token will be invalidated.`)) return;
+        try {
+          await api(`/api/hub/apps/${encodeURIComponent(a.id)}`, { method: "DELETE" });
+          reload();
+        } catch (e) {
+          alert("Revoke failed: " + (e.message || e));
+        }
+      });
+      listEl.appendChild(row);
+    }
+  }
+  function open() {
+    if (isOpen()) return;
+    view.classList.add("active");
+    reload();
+  }
+  function close() {
+    view.classList.remove("active");
+  }
+  openBtn.addEventListener("click", open);
+  backBtn.addEventListener("click", close);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && isOpen() && !modal.hidden === false) close();
+  });
+
+  // ---- New app modal ----
+  function openModal() {
+    step1.hidden = false;
+    step2.hidden = true;
+    nameInput.value = "";
+    errEl.classList.remove("show");
+    errEl.textContent = "";
+    modal.removeAttribute("hidden");
+    setTimeout(() => nameInput.focus(), 0);
+  }
+  function closeModal() { modal.setAttribute("hidden", ""); }
+
+  newBtn.addEventListener("click", openModal);
+  closeBtn.addEventListener("click", closeModal);
+  cancelBtn.addEventListener("click", closeModal);
+  doneBtn.addEventListener("click", () => { closeModal(); reload(); });
+
+  modal.addEventListener("click", (e) => {
+    if (e.target.id === "modal-new-app") closeModal();
+  });
+  nameInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") goBtn.click();
+  });
+
+  goBtn.addEventListener("click", async () => {
+    const name = nameInput.value.trim();
+    errEl.classList.remove("show");
+    if (!name) {
+      errEl.textContent = "Name required";
+      errEl.classList.add("show");
+      return;
+    }
+    goBtn.disabled = true;
+    goBtn.textContent = "Creating…";
+    try {
+      // 1. POST /api/hub/pair → 拿 code (登录用户调)
+      const pair = await api("/api/hub/pair", { method: "POST" });
+      // 2. 立刻 redeem (无需 cookie 但带也行) → 拿 device_token
+      const red = await api("/api/hub/pair/redeem", {
+        method: "POST",
+        body: JSON.stringify({ code: pair.code, app_name: name }),
+      });
+      // 3. 显示给用户复制
+      tokenEl.textContent = red.device_token;
+      envEl.textContent =
+        `CCR_HUB_URL=wss://${location.host}\n` +
+        `CCR_HUB_DEVICE_TOKEN=${red.device_token}\n` +
+        `CCR_HUB_APP_NAME=${red.app_name}`;
+      step1.hidden = true;
+      step2.hidden = false;
+    } catch (e) {
+      errEl.textContent = "Create failed: " + (e.message || e);
+      errEl.classList.add("show");
+    } finally {
+      goBtn.disabled = false;
+      goBtn.textContent = "Create";
+    }
+  });
+
+  async function copyText(text, btn) {
+    try {
+      await navigator.clipboard.writeText(text);
+      const old = btn.textContent;
+      btn.textContent = "Copied!";
+      setTimeout(() => { btn.textContent = old; }, 1200);
+    } catch (e) {
+      alert("Copy failed; please select + Ctrl-C manually.");
+    }
+  }
+  tokenCopyBtn.addEventListener("click", () => copyText(tokenEl.textContent, tokenCopyBtn));
+  envCopyBtn.addEventListener("click", () => copyText(envEl.textContent, envCopyBtn));
+})();
+
 // ---------- Session list search ----------
 (function setupSearch() {
   const btn    = $("search-btn");

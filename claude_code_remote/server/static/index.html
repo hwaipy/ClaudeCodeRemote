@@ -54,6 +54,15 @@
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
           </svg>
         </button>
+        <!-- hub mode only: 云服务器/App 管理 -->
+        <button class="icon-btn hub-only" id="apps-btn" type="button" title="Apps" aria-label="Manage cloud apps">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="4"  width="18" height="6" rx="1.5"></rect>
+            <rect x="3" y="14" width="18" height="6" rx="1.5"></rect>
+            <line x1="7" y1="7"  x2="7.01"  y2="7"></line>
+            <line x1="7" y1="17" x2="7.01"  y2="17"></line>
+          </svg>
+        </button>
         <button class="icon-btn" id="new-btn-quick" type="button" title="Quick new (no setup)" aria-label="Quick new session" hidden>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M13 2 4 13h7l-1 9 9-11h-7l1-9z"/>
@@ -150,6 +159,67 @@
       <button type="button" class="spawn-perm-btn" data-mode="allow_all">Allow all</button>
     </div>
     <div class="settings-hint">These values pre-fill the new-session dialog.</div>
+  </div>
+</div>
+
+<!-- 云服务器 / Apps 管理 (hub mode only). 跟 view-settings 同款滑入. -->
+<div class="view" id="view-apps">
+  <div class="settings-head">
+    <button class="back" id="apps-back" type="button" title="Back" aria-label="Back">←</button>
+    <div class="info">
+      <div class="name">Cloud Apps</div>
+    </div>
+    <button class="icon-btn" id="apps-new-btn" type="button" title="Register new app" aria-label="Register new app">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+    </button>
+  </div>
+  <div class="settings-body">
+    <div class="apps-list" id="apps-list">
+      <div class="apps-empty">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<!-- 新建注册 modal -->
+<div class="modal" id="modal-new-app" hidden>
+  <div class="modal-panel">
+    <div class="modal-head">
+      <div class="modal-title">Register new app</div>
+      <button class="modal-x" id="new-app-close" type="button">×</button>
+    </div>
+    <div class="modal-body">
+      <!-- step 1: 输入名字 -->
+      <div id="new-app-step1">
+        <label for="new-app-name">App name</label>
+        <input id="new-app-name" type="text" placeholder="e.g. ClawDocker / mac-home / vps-01" autocomplete="off">
+        <div class="hint">A friendly name shown next to sessions from this app.</div>
+        <div class="err" id="new-app-err"></div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" id="new-app-cancel" type="button">Cancel</button>
+          <button class="btn btn-primary" id="new-app-go" type="button">Create</button>
+        </div>
+      </div>
+      <!-- step 2: 显示 token + 配置 hint -->
+      <div id="new-app-step2" hidden>
+        <div class="hint">Done. Copy the device token below into your app's environment, then start it.</div>
+        <label>Device token (copy now — won't be shown again)</label>
+        <div class="copybox" id="new-app-token-box">
+          <code class="copybox-text" id="new-app-token"></code>
+          <button class="btn btn-secondary" id="new-app-token-copy" type="button">Copy</button>
+        </div>
+        <label>Environment snippet</label>
+        <div class="copybox">
+          <code class="copybox-text" id="new-app-env"></code>
+          <button class="btn btn-secondary" id="new-app-env-copy" type="button">Copy</button>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-primary" id="new-app-done" type="button">Done</button>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
