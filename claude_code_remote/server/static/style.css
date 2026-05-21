@@ -2400,15 +2400,16 @@ body.is-pwa.has-session:has(#chat-input:focus) .chat-foot {
 body:not(.hub-mode) .login-hub { display: none; }
 body.hub-mode .login-local { display: none; }
 
-/* Session card 上的 app chip — 仅 hub mode 显示. 跟 kebab (⋯, top:4 right:4)
-   同高, abs 定位在 kebab 左侧, 不占 row1 flex 空间. */
+/* Session card 上的 app chip — 仅 hub mode 显示. 跟 kebab (⋯, top:4 right:4
+   width:26 height:26) 同 top + 同 height = 中心对齐. abs 定位在 kebab 左侧. */
 .session-card .app-chip {
   position: absolute;
-  top: 6px;
-  right: 36px;          /* kebab 是 width:26 right:4 → 4+26+6 留 6px 间距 */
-  padding: 1px 8px;
+  top: 4px;
+  right: 36px;          /* kebab right:4 + width:26 + 6px 间距 */
+  height: 26px;
+  line-height: 26px;
+  padding: 0 10px;
   font-size: 11px;
-  line-height: 1.5;
   border-radius: 999px;
   background: rgba(56,139,253,.08);
   color: var(--text);
@@ -2417,6 +2418,7 @@ body.hub-mode .login-local { display: none; }
   max-width: 35%;
   overflow: hidden;
   text-overflow: ellipsis;
+  box-sizing: border-box;
 }
 .session-card .app-chip.offline {
   background: rgba(150,150,150,.10);
