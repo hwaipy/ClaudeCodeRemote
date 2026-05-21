@@ -2394,24 +2394,25 @@ body.is-pwa.has-session:has(#chat-input:focus) .chat-foot {
 body:not(.hub-mode) .login-hub { display: none; }
 body.hub-mode .login-local { display: none; }
 
-/* Session card 上的 app chip — 仅 hub mode 显示, 颜色用 accent 区分 */
+/* Session card 上的 app chip — 仅 hub mode 显示. 第一行末尾, 颜色尽量淡
+   (尾随的元数据, 不能跟 name 抢视觉重量). flex 上 margin-left:auto 推到右边
+   (在 .card-menu-btn 之前 — kebab 是 abs 定位的, 不占 flex 空间). */
 .session-card .app-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-right: 6px;
-  padding: 1px 6px;
-  font-size: 11px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 0 6px;
+  font-size: 10.5px;
+  line-height: 1.4;
   border-radius: 999px;
-  background: rgba(63,185,80,.10);
-  color: var(--text-muted, #59636e);
-  border: 1px solid rgba(63,185,80,.35);
-  vertical-align: baseline;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border-soft, rgba(125,125,125,.18));
+  opacity: 0.55;
+  white-space: nowrap;
 }
 .session-card .app-chip.offline {
-  background: rgba(150,150,150,.10);
-  border-color: rgba(150,150,150,.35);
-  color: var(--text-dim);
+  opacity: 0.35;
+  font-style: italic;
 }
 body:not(.hub-mode) .session-card .app-chip { display: none; }
 

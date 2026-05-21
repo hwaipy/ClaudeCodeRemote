@@ -487,9 +487,9 @@ function renderOneCard(s, container, section) {
       <span class="state-dot" aria-hidden="true"></span>
       <div class="name">${escHTML(s.name || "untitled")}</div>
       ${showBadge ? `<span class="badge ${badge.cls}">${escHTML(badgeLabel)}</span>` : ""}
+      ${appChipHTML}
     </div>
     <div class="meta-line">
-      ${appChipHTML}
       <span class="cwd-short" dir="rtl"><bdo dir="ltr">${escHTML(cwdShort)}</bdo></span>
       <span class="ts">${escHTML(active)} ago</span>
     </div>`;
