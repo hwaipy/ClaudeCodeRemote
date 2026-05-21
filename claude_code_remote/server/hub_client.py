@@ -108,9 +108,19 @@ class HubClient:
             log.info("hub_client ready app_id=%s user_id=%s",
                      self.app_id, self.user_id)
 
+            # M-Hub-2: 启 metadata pump task — 订阅 session_manager 的
+            # global stream, 翻成 control 帧推 hub.
+            meta_task = asyncio.create_task(
+                self._metadata_pump(ws), name="hub_metadata_pump",
+            )
             try:
                 await self._loop(ws)
             finally:
+                meta_task.cancel()
+                try:
+                    await meta_task
+                except (asyncio.CancelledError, Exception):
+                    pass
                 self.connected.clear()
                 self.app_id = None
                 self.user_id = None
@@ -345,6 +355,46 @@ class HubClient:
                 ))
             except Exception:
                 pass
+
+
+    # ---------- Metadata pump (M-Hub-2) ----------
+
+    async def _metadata_pump(self, ws) -> None:
+        """订阅 session_manager 的全局事件流, 翻成 control 帧推 hub.
+
+        manager.global_subscribe() 先 yield 一个 {type:snapshot} (启动时所有
+        sessions), 之后实时推 session_state / session_deleted 等.
+        """
+        from .session_manager import manager
+        send_lock = asyncio.Lock()
+
+        async def send_control(op: str, data: dict) -> None:
+            frame = tp.Control(stream_id="*", op=op, data=data)
+            async with send_lock:
+                await ws.send(tp.encode(frame))
+
+        try:
+            async for evt in manager.global_subscribe():
+                etype = evt.get("type")
+                if etype == "snapshot":
+                    await send_control(
+                        "sessions_snapshot",
+                        {"sessions": evt.get("sessions") or []},
+                    )
+                elif etype == "session_state":
+                    # status_payload 已平铺在 evt 顶层 (除了 type)
+                    payload = {k: v for k, v in evt.items() if k != "type"}
+                    await send_control("session_state", payload)
+                elif etype == "session_deleted":
+                    await send_control(
+                        "session_removed", {"id": evt.get("id")},
+                    )
+                else:
+                    log.debug("metadata pump: skip evt type=%s", etype)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("metadata pump crashed")
 
 
 def maybe_start(asgi_app) -> HubClient | None:

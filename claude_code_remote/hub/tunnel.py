@@ -155,6 +155,64 @@ class _Registry:
 registry = _Registry()
 
 
+async def _handle_app_control(online: "_OnlineApp", frame: tp.Control) -> None:
+    """App → Hub control 帧 dispatch (M-Hub-2 metadata sync)."""
+    op = frame.op
+    if op == "sessions_snapshot":
+        # 全量覆盖: 先清该 app 旧 cache, 再 upsert 当前所有 sessions
+        sessions = frame.data.get("sessions") or []
+        await hub_db.clear_app_sessions(online.app_id)
+        for s in sessions:
+            sid = s.get("id")
+            if not sid:
+                continue
+            await hub_db.upsert_session(
+                online.app_id, online.user_id, sid, _norm_session(s),
+            )
+    elif op == "session_state":
+        # delta upsert. data 含 status_payload 字段 (id, name, cwd, state, ...)
+        sid = frame.data.get("id")
+        if sid:
+            await hub_db.upsert_session(
+                online.app_id, online.user_id, sid,
+                _norm_session(frame.data),
+            )
+    elif op == "session_removed":
+        sid = frame.data.get("id")
+        if sid:
+            await hub_db.remove_session(online.app_id, sid)
+    elif op == "session_touch":
+        sid = frame.data.get("id")
+        la = frame.data.get("last_active")
+        if sid and la is not None:
+            await hub_db.upsert_session(
+                online.app_id, online.user_id, sid,
+                {"last_active": la},
+            )
+    else:
+        log.debug("unhandled control op=%s from %s", op, online.app_id)
+
+
+def _norm_session(payload: dict) -> dict:
+    """status_payload → sessions_cache fields. 只挑能写入的列."""
+    out = {}
+    if "name" in payload: out["name"] = payload.get("name") or ""
+    if "cwd" in payload: out["cwd"] = payload.get("cwd") or ""
+    if "state" in payload: out["state"] = payload.get("state")
+    if "model" in payload: out["model"] = payload.get("model") or ""
+    if "effort" in payload: out["effort"] = payload.get("effort") or ""
+    if "permission_mode" in payload:
+        out["permission_mode"] = payload.get("permission_mode")
+    # status_payload 命名约定: last_activity_at; spec/db 命名: last_active
+    if "last_activity_at" in payload:
+        out["last_active"] = payload.get("last_activity_at")
+    elif "last_active" in payload:
+        out["last_active"] = payload.get("last_active")
+    if "created_at" in payload:
+        out["created_at"] = payload.get("created_at")
+    return out
+
+
 async def _safe_close(ws: WebSocket, code: int, reason: str = "") -> None:
     if ws.client_state == WebSocketState.DISCONNECTED:
         return
@@ -257,8 +315,7 @@ async def app_tunnel(
                     except Exception:
                         log.exception("ws inbound enqueue failed")
             elif isinstance(frame, tp.Control):
-                # M-Hub-2 metadata sync 来填; M-Hub-1 还没用到.
-                log.debug("control op=%s ignored", frame.op)
+                await _handle_app_control(online, frame)
             else:
                 log.debug("frame type=%s unhandled",
                           getattr(frame, "type", "?"))

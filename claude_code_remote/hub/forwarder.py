@@ -60,6 +60,32 @@ class ForwardMiddleware(BaseHTTPMiddleware):
                 {"error": "unauthorized"}, status_code=401,
             )
 
+        # GET /api/sessions: 走 hub 的 sessions_cache (聚合该 user 所有 apps).
+        # 不再 forward — M-Hub-2: home view 看到合并 list, 每条带 app_id 等.
+        if request.method == "GET" and path == "/api/sessions":
+            sessions = await hub_db.list_user_sessions(user_id)
+            online_set = set(registry.online_app_ids())
+            apps = await hub_db.list_apps_for_user(user_id)
+            app_name_by_id = {a["id"]: a["name"] for a in apps}
+            out = []
+            for s in sessions:
+                out.append({
+                    "id": s["sid"],
+                    "name": s.get("name") or "",
+                    "cwd": s.get("cwd") or "",
+                    "state": s.get("state"),
+                    "last_activity_at": s.get("last_active"),
+                    "created_at": s.get("created_at"),
+                    "model": s.get("model") or "",
+                    "effort": s.get("effort") or "",
+                    "permission_mode": s.get("permission_mode"),
+                    "app_id": s["app_id"],
+                    "app_name": s.get("app_name")
+                                 or app_name_by_id.get(s["app_id"], ""),
+                    "app_online": s["app_id"] in online_set,
+                })
+            return JSONResponse(out)
+
         online = await _pick_app_for_user(user_id)
         if not online:
             return JSONResponse(

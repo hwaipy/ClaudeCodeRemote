@@ -220,3 +220,96 @@ async def touch_app_seen(app_id: str) -> None:
             (time.time(), app_id),
         )
     await asyncio.to_thread(_q)
+
+
+# ---- sessions_cache ----
+
+_CACHE_COLS = (
+    "name", "cwd", "state", "last_active", "model", "effort",
+    "permission_mode", "created_at",
+)
+
+
+def _upsert_session_sync(app_id: str, user_id: str, sid: str,
+                         fields: dict) -> None:
+    """UPSERT 一条 sessions_cache. fields 缺的 key 不动 (partial update)."""
+    c = _get_conn()
+    cur = c.execute(
+        "SELECT 1 FROM sessions_cache WHERE app_id=? AND sid=?",
+        (app_id, sid),
+    ).fetchone()
+    now = time.time()
+    if cur:
+        # UPDATE — 只动 fields 有的列
+        kept = {k: v for k, v in fields.items() if k in _CACHE_COLS}
+        if kept:
+            cols = ", ".join(f"{k}=?" for k in kept)
+            vals = list(kept.values())
+            c.execute(
+                f"UPDATE sessions_cache SET {cols}, updated_at=? "
+                "WHERE app_id=? AND sid=?",
+                (*vals, now, app_id, sid),
+            )
+        else:
+            c.execute(
+                "UPDATE sessions_cache SET updated_at=? "
+                "WHERE app_id=? AND sid=?",
+                (now, app_id, sid),
+            )
+    else:
+        # INSERT — 缺字段填默认
+        c.execute(
+            "INSERT INTO sessions_cache(app_id, sid, user_id, name, cwd, "
+            "state, last_active, model, effort, permission_mode, "
+            "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                app_id, sid, user_id,
+                fields.get("name", ""),
+                fields.get("cwd", ""),
+                fields.get("state"),
+                fields.get("last_active"),
+                fields.get("model", ""),
+                fields.get("effort", ""),
+                fields.get("permission_mode"),
+                fields.get("created_at", now),
+                now,
+            ),
+        )
+
+
+async def upsert_session(app_id: str, user_id: str, sid: str,
+                         fields: dict) -> None:
+    await asyncio.to_thread(_upsert_session_sync, app_id, user_id, sid, fields)
+
+
+async def remove_session(app_id: str, sid: str) -> None:
+    def _q():
+        _get_conn().execute(
+            "DELETE FROM sessions_cache WHERE app_id=? AND sid=?",
+            (app_id, sid),
+        )
+    await asyncio.to_thread(_q)
+
+
+async def clear_app_sessions(app_id: str) -> None:
+    """app 发 sessions_snapshot 前先清自己的 cache, 避免老条目残留."""
+    def _q():
+        _get_conn().execute(
+            "DELETE FROM sessions_cache WHERE app_id=?", (app_id,),
+        )
+    await asyncio.to_thread(_q)
+
+
+async def list_user_sessions(user_id: str) -> list[dict]:
+    """该 user 所有 apps 的合并 sessions, 按 last_active desc."""
+    def _q():
+        rows = _get_conn().execute(
+            "SELECT sc.*, a.name AS app_name "
+            "FROM sessions_cache sc "
+            "JOIN apps a ON a.id = sc.app_id "
+            "WHERE sc.user_id=? "
+            "ORDER BY COALESCE(sc.last_active, sc.updated_at) DESC",
+            (user_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    return await asyncio.to_thread(_q)

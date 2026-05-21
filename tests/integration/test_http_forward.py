@@ -22,14 +22,16 @@ def test_forward_get_sessions_returns_json(hub_and_app):
         r = c.get("/api/sessions")
         assert r.status_code == 200, r.text
         via_hub = r.json()
-        # 跟 app 直接拿到的应一致 (内容字符级相同, 不论 dict / list shape)
-        with httpx.Client(base_url=hub_and_app["app_url"],
-                          headers={"Authorization":
-                                   f"Bearer {hub_and_app['app_token']}"},
-                          timeout=5) as ac:
-            r2 = ac.get("/api/sessions")
-            assert r2.status_code == 200
-            assert r2.json() == via_hub
+        # M-Hub-2: hub /api/sessions 返聚合 list, 不是 app 的 {sessions: [...]} dict.
+        # 这是 hub mode 的接口形态; SPA M-Hub-4 时按需 normalize.
+        assert isinstance(via_hub, list)
+        # 用空 cache 启动时, list 应为空 (fixture session-level cache 已被前面
+        # spawn 测试污染时, 至少含 forwardable-app 自己的 session). 我们只
+        # 验证基础形状 + 每条带 app_id / app_online.
+        for s in via_hub:
+            assert "app_id" in s, s
+            assert "app_name" in s, s
+            assert "app_online" in s, s
 
 
 def test_forward_404_passthrough(hub_and_app):
