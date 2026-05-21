@@ -19,7 +19,7 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
 from ..shared import tunnel_proto as tp
-from . import auth as hub_auth
+from . import auth as hub_auth, db as hub_db
 from .tunnel import _WsStream, registry
 
 log = logging.getLogger("ccr.hub.ws_forwarder")
@@ -48,14 +48,34 @@ async def _forward_ws(user_ws: WebSocket, path: str) -> None:
         await user_ws.close(code=1008, reason="unauthorized")
         return
 
-    # 找 online app (M-Hub-1: 第一个该 user 的 online app)
+    # 按 sid 路由 — 查 sessions_cache 找归属 app, 不能挑"第一个 online".
+    # 多 app 场景下挑错 → forward 到不存在该 sid 的 app → close → SPA 重连
+    # 死循环. /ws-global 没有 sid, 退化到第一个 online (仅做实时 delta source).
     online = None
-    for o in registry.online_apps():
-        if o.user_id == user_id:
-            online = o
-            break
+    parts = path.split("/")
+    is_session_ws = (len(parts) >= 3 and parts[1] == "ws" and parts[2])
+    if is_session_ws:
+        sid = parts[2]
+        rows = await hub_db.list_user_sessions(user_id)
+        target_app_id = None
+        for r in rows:
+            if r["sid"] == sid:
+                target_app_id = r["app_id"]
+                break
+        if target_app_id:
+            for o in registry.online_apps():
+                if o.user_id == user_id and o.app_id == target_app_id:
+                    online = o
+                    break
+        # cache 没该 sid 或对应 app offline — 拒, 不 fallback
+    else:
+        # /ws-global / 其它无 sid 路径: 第一个 online 兜底
+        for o in registry.online_apps():
+            if o.user_id == user_id:
+                online = o
+                break
     if online is None:
-        await user_ws.close(code=1011, reason="app_offline")
+        await user_ws.close(code=1011, reason="app_offline_or_no_session")
         return
 
     await user_ws.accept()
