@@ -108,3 +108,9 @@ async def pwa_sw() -> Response:
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/me")
+async def api_me() -> dict:
+    """SPA probe — local mode: 没 user identity, 不 forward."""
+    return {"mode": "local", "user_id": None, "apps": []}

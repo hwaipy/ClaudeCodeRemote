@@ -6,6 +6,11 @@ const $ = (id) => document.getElementById(id);
 const state = {
   token: localStorage.getItem("ccr.token") || "",
   cwd: localStorage.getItem("ccr.cwd") || "",
+  // M-Hub-4: SPA probe 后由 /api/me 设. hubMode=true → 走 cookie auth +
+  // session card 显 app chip + spawn modal 显 app selector. 默认 local 不变.
+  hubMode: false,
+  userId: null,
+  apps: [],
   ws: null,
   sessionId: null,
   // 流式状态：
@@ -100,8 +105,14 @@ function apiPath(p) {
 
 async function api(path, opts = {}) {
   const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
-  if (state.token) headers["Authorization"] = "Bearer " + state.token;
-  const res = await fetch(apiPath(path), { ...opts, headers });
+  // local mode 用 bearer token; hub mode 走 cookie (credentials: include).
+  if (!state.hubMode && state.token) {
+    headers["Authorization"] = "Bearer " + state.token;
+  }
+  const res = await fetch(apiPath(path), {
+    ...opts, headers,
+    credentials: state.hubMode ? "include" : "same-origin",
+  });
   let body = null;
   try { body = await res.json(); } catch (_) {}
   if (!res.ok) {
@@ -135,9 +146,38 @@ async function tryLogin(tok) {
   }
 }
 
+async function hubLogin(email, password) {
+  // hub mode: POST /api/hub/login → server set ccr_sess cookie
+  await api("/api/hub/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+  // 重新探一次 me 同步 userId + apps
+  const me = await api("/api/me");
+  state.userId = me.user_id;
+  state.apps = me.apps || [];
+}
+
 $("login-go").addEventListener("click", async () => {
-  const tok = $("login-token").value.trim();
   $("login-err").classList.remove("show");
+  if (state.hubMode) {
+    const email = ($("login-email").value || "").trim();
+    const pw = $("login-password").value || "";
+    if (!email || !pw) {
+      $("login-err").textContent = "Email + password required";
+      $("login-err").classList.add("show");
+      return;
+    }
+    try {
+      await hubLogin(email, pw);
+      enterHome();
+    } catch (e) {
+      $("login-err").textContent = "Sign in failed: " + (e.message || e);
+      $("login-err").classList.add("show");
+    }
+    return;
+  }
+  const tok = $("login-token").value.trim();
   if (!tok) {
     $("login-err").textContent = "Token required";
     $("login-err").classList.add("show");
@@ -154,9 +194,23 @@ $("login-go").addEventListener("click", async () => {
 $("login-token").addEventListener("keydown", e => {
   if (e.key === "Enter") $("login-go").click();
 });
+["login-email", "login-password"].forEach(id => {
+  const el = $(id);
+  if (el) el.addEventListener("keydown", e => {
+    if (e.key === "Enter") $("login-go").click();
+  });
+});
 
-$("logout").addEventListener("click", (e) => {
+$("logout").addEventListener("click", async (e) => {
   e.preventDefault();
+  if (state.hubMode) {
+    try { await api("/api/hub/logout", { method: "POST" }); } catch (_) {}
+    state.userId = null;
+    state.apps = [];
+    state.sessionId = null;
+    showView("login");
+    return;
+  }
   state.token = "";
   state.sessionId = null;
   localStorage.removeItem("ccr.token");
@@ -418,6 +472,14 @@ function renderOneCard(s, container, section) {
       <button class="card-menu-item" role="menuitem" data-action="stash">Stash</button>
       <button class="card-menu-item card-menu-item-danger" role="menuitem" data-action="delete">Delete</button>`;
   }
+  // hub mode: 加 app chip 显示 session 归属的 app + online 状态. local 模式
+  // CSS 用 display:none 隐藏, 不渲染分支也行.
+  const appChipHTML = (state.hubMode && s.app_name) ? (
+    `<span class="app-chip ${s.app_online ? "" : "offline"}"
+            title="${escHTML(s.app_name)} (${s.app_online ? "online" : "offline"})">
+       ${escHTML(s.app_name)}
+     </span>`
+  ) : "";
   el.innerHTML = `
     <button class="card-menu-btn" aria-label="More" title="More">⋯</button>
     <div class="card-menu" hidden role="menu">${menuItemsHtml}</div>
@@ -427,6 +489,7 @@ function renderOneCard(s, container, section) {
       ${showBadge ? `<span class="badge ${badge.cls}">${escHTML(badgeLabel)}</span>` : ""}
     </div>
     <div class="meta-line">
+      ${appChipHTML}
       <span class="cwd-short" dir="rtl"><bdo dir="ltr">${escHTML(cwdShort)}</bdo></span>
       <span class="ts">${escHTML(active)} ago</span>
     </div>`;
@@ -745,6 +808,10 @@ function enterHome() {
   showView("home");
   if (!$("spawn-cwd").value) $("spawn-cwd").value = abbreviateHome(state.cwd || "");
   syncPresetChips();
+  if (state.hubMode) {
+    // hub mode 用 HTTP 拉聚合 list; ws-global 后续做实时 delta (M-Hub-5).
+    hubFetchSessions();
+  }
   connectGlobalWS();
   // 拉一次 ~/.claude/settings.json 的 model/effort 默认 (用于 chat-menu
   // Default 选项加注). 只 fetch 一次, 缓存到 state.cliDefaults.
@@ -761,9 +828,14 @@ function connectGlobalWS() {
   if (state.globalWS
       && (state.globalWS.readyState === WebSocket.OPEN
           || state.globalWS.readyState === WebSocket.CONNECTING)) return;
-  if (!state.token) return;   // 未登录
+  if (!state.hubMode && !state.token) return;   // local 未登录
+  if (state.hubMode && !state.userId) return;    // hub 未登录
   if (_globalTimer) { clearTimeout(_globalTimer); _globalTimer = null; }
-  const url = wsURL("ws-global?token=" + encodeURIComponent(state.token));
+  // hub mode 走 cookie, token 留空; local mode 走 token query.
+  const tokenSeg = state.hubMode
+    ? ""
+    : ("?token=" + encodeURIComponent(state.token));
+  const url = wsURL("ws-global" + tokenSeg);
   const ws = new WebSocket(url);
   state.globalWS = ws;
   ws.addEventListener("open", () => { _globalBackoff = 1000; });
@@ -773,10 +845,27 @@ function connectGlobalWS() {
   });
   ws.addEventListener("close", () => {
     if (state.globalWS === ws) state.globalWS = null;
-    if (!state.token) return;
+    if (!state.hubMode && !state.token) return;
+    if (state.hubMode && !state.userId) return;
     _globalTimer = setTimeout(connectGlobalWS, _globalBackoff);
     _globalBackoff = Math.min(30000, _globalBackoff * 2);
   });
+}
+
+// M-Hub-4: hub mode 用 HTTP 拉 /api/sessions 替代 ws snapshot — server 端
+// 返聚合 list (跨所有 user 的 apps). ws-global 还是连, 用于实时 delta.
+async function hubFetchSessions() {
+  try {
+    const list = await api("/api/sessions");
+    if (!Array.isArray(list)) return;
+    state.sessionsById.clear();
+    for (const s of list) {
+      state.sessionsById.set(s.id, _withSortKey(s, null));
+    }
+    renderSessionList();
+  } catch (e) {
+    console.warn("hubFetchSessions failed:", e.message);
+  }
 }
 
 // Sessions currently in an optimistic-rename window. Skipping
@@ -896,9 +985,16 @@ $("spawn-go").addEventListener("click", async () => {
   $("spawn-go").disabled = true;
   $("spawn-go").textContent = "Starting…";
   try {
+    const body = { cwd, name, permission_mode, model, effort: "" };
+    // Hub mode: 选定的 app_id 加进 body, 让 hub 决定 forward 目标.
+    if (state.hubMode) {
+      const sel = $("spawn-app");
+      const appId = sel && sel.value;
+      if (appId) body.app_id = appId;
+    }
     const r = await api("/api/spawn", {
       method: "POST",
-      body: JSON.stringify({ cwd, name, permission_mode, model, effort: "" }),
+      body: JSON.stringify(body),
     });
     state.cwd = cwd;
     localStorage.setItem("ccr.cwd", cwd);
@@ -961,6 +1057,28 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
   const closeX    = $("new-modal-close");
   const cancelBtn = $("new-modal-cancel");
 
+  function _fillAppSelect() {
+    if (!state.hubMode) return;
+    const sel = $("spawn-app");
+    if (!sel) return;
+    sel.innerHTML = "";
+    const apps = (state.apps || []).filter(a => a.online);
+    for (const a of apps) {
+      const opt = document.createElement("option");
+      opt.value = a.id;
+      opt.textContent = a.name + (a.online ? "" : " (offline)");
+      sel.appendChild(opt);
+    }
+    // 没有 online app 时, 显示一个 disabled placeholder
+    if (!apps.length) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "(no app online)";
+      opt.disabled = true;
+      sel.appendChild(opt);
+    }
+  }
+
   function open() {
     modal.removeAttribute("hidden");
     if (!$("spawn-cwd").value) {
@@ -972,6 +1090,7 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
     _setSpawnPermMode(
       localStorage.getItem("ccr.defaultPermMode") || "manual"
     );
+    _fillAppSelect();
     setTimeout(() => $("spawn-name").focus(), 0);
   }
   function close() {
@@ -4430,13 +4549,31 @@ if ("serviceWorker" in navigator) {
       .catch(err => console.warn("SW register failed (expected on http):", err.message));
   });
 }
-if (state.token) {
-  tryLogin(state.token).then(enterHome).catch(() => {
-    state.token = "";
-    localStorage.removeItem("ccr.token");
+// M-Hub-4: probe /api/me 决定 hub mode + login flow. local mode 老路径不变.
+(async function boot() {
+  let me = null;
+  try { me = await api("/api/me"); } catch (_) {}
+  if (me && me.mode === "hub") {
+    state.hubMode = true;
+    state.userId = me.user_id || null;
+    state.apps = me.apps || [];
+    document.body.classList.add("hub-mode");
+    if (state.userId) {
+      enterHome();
+    } else {
+      showView("login");
+    }
+    return;
+  }
+  // local 模式
+  if (state.token) {
+    tryLogin(state.token).then(enterHome).catch(() => {
+      state.token = "";
+      localStorage.removeItem("ccr.token");
+      showView("login");
+    });
+  } else {
     showView("login");
-  });
-} else {
-  showView("login");
-}
+  }
+})();
 

@@ -2389,3 +2389,32 @@ body.is-pwa.has-session:has(#chat-input:focus) .chat-foot {
   body.stage-app:not(.has-session) #view-chat #chat-status { display: none; }
 }
 
+/* ---------- M-Hub-4: hub mode 切换 ---------- */
+/* Login view 切换显示: 默认 local, body.hub-mode 时翻转. */
+body:not(.hub-mode) .login-hub { display: none; }
+body.hub-mode .login-local { display: none; }
+
+/* Session card 上的 app chip — 仅 hub mode 显示, 颜色用 accent 区分 */
+.session-card .app-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 6px;
+  padding: 1px 6px;
+  font-size: 11px;
+  border-radius: 999px;
+  background: rgba(63,185,80,.10);
+  color: var(--text-muted, #59636e);
+  border: 1px solid rgba(63,185,80,.35);
+  vertical-align: baseline;
+}
+.session-card .app-chip.offline {
+  background: rgba(150,150,150,.10);
+  border-color: rgba(150,150,150,.35);
+  color: var(--text-dim);
+}
+body:not(.hub-mode) .session-card .app-chip { display: none; }
+
+/* Spawn modal app selector — 仅 hub mode 显示 */
+body:not(.hub-mode) #spawn-app-row { display: none; }
+

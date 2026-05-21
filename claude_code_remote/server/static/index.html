@@ -24,11 +24,21 @@
   <div class="center-wrap">
     <div class="card">
       <h1>ClaudeCodeRemote</h1>
-      <label for="login-token">Bearer Token</label>
-      <input id="login-token" type="password" autocomplete="current-password" placeholder="CCR_TOKEN">
+      <!-- local mode: 单 token. hub mode: email+password (body.hub-mode 时切换显示). -->
+      <div class="login-local">
+        <label for="login-token">Bearer Token</label>
+        <input id="login-token" type="password" autocomplete="current-password" placeholder="CCR_TOKEN">
+      </div>
+      <div class="login-hub">
+        <label for="login-email">Email</label>
+        <input id="login-email" type="email" autocomplete="username" placeholder="you@example.com">
+        <label for="login-password">Password</label>
+        <input id="login-password" type="password" autocomplete="current-password" placeholder="password">
+      </div>
       <button class="btn btn-primary btn-block" id="login-go">Sign in</button>
       <div class="err" id="login-err"></div>
-      <div class="hint">Token is set via the server env var <span class="kbd">CCR_TOKEN</span>.</div>
+      <div class="hint login-local">Token is set via the server env var <span class="kbd">CCR_TOKEN</span>.</div>
+      <div class="hint login-hub">Hub mode — sign in with the account configured on the Hub.</div>
     </div>
   </div>
 </div>
@@ -385,6 +395,11 @@
       <button class="modal-x" id="new-modal-close" type="button">×</button>
     </div>
     <div class="modal-body">
+      <!-- Hub mode 才显示 App selector. CSS body:not(.hub-mode) #spawn-app-row 隐藏. -->
+      <div id="spawn-app-row">
+        <label for="spawn-app">App</label>
+        <select id="spawn-app"></select>
+      </div>
       <label for="spawn-name">Name (optional)</label>
       <input id="spawn-name" type="text" placeholder="e.g. debug logs">
       <label for="spawn-cwd">Working directory</label>

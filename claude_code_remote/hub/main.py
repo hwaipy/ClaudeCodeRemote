@@ -10,14 +10,22 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 
+from fastapi import Cookie
+from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
+
+from .. import server as app_server_pkg
 from . import db as hub_db
-from .api import router as api_router
+from .api import me_handler, router as api_router
 from .forwarder import ForwardMiddleware
 from .tunnel import router as tunnel_router, registry
 from .ws_forwarder import router as ws_forwarder_router
+
+STATIC_DIR = Path(app_server_pkg.__file__).parent / "static"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,3 +64,42 @@ app.add_middleware(ForwardMiddleware)
 @app.get("/healthz")
 async def healthz():
     return {"ok": True, "online_apps": len(registry.online_apps())}
+
+
+@app.get("/api/me")
+async def get_me(ccr_sess: str | None = Cookie(None)):
+    return await me_handler(ccr_sess)
+
+
+# ---- Static SPA (跟 app 端共用一份 static, html=True 自动 fallback 到 index.html) ----
+
+@app.get("/")
+async def index() -> HTMLResponse:
+    return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
+
+
+@app.get("/icon.svg")
+async def icon() -> FileResponse:
+    return FileResponse(STATIC_DIR / "icon.svg", media_type="image/svg+xml")
+
+
+@app.get("/sw.js")
+async def sw() -> Response:
+    return Response(
+        (STATIC_DIR / "sw.js").read_text(encoding="utf-8"),
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/",
+                 "Cache-Control": "no-cache, must-revalidate"},
+    )
+
+
+@app.get("/manifest.webmanifest")
+async def manifest() -> Response:
+    return Response(
+        (STATIC_DIR / "manifest.webmanifest").read_text(encoding="utf-8"),
+        media_type="application/manifest+json",
+    )
+
+
+# 兜底 — /static 下面是 app.js / style.css 等
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="hub-static")

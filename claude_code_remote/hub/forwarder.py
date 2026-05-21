@@ -23,7 +23,11 @@ from .tunnel import registry
 log = logging.getLogger("ccr.hub.forwarder")
 
 # 不 forward 的路径前缀 (Hub 自己处理)
-_HUB_LOCAL_PREFIXES = ("/api/hub/", "/healthz", "/app-tunnel")
+_HUB_LOCAL_PREFIXES = (
+    "/api/hub/", "/api/me",
+    "/healthz", "/app-tunnel",
+    "/static/", "/sw.js", "/icon.svg", "/manifest.webmanifest",
+)
 # 透传 user 请求时不该带过去的 header
 _DROP_HEADERS = {
     "host", "connection", "cookie",   # cookie 是 hub 的, 不该给 app
@@ -39,11 +43,60 @@ def _is_local_path(path: str) -> bool:
 
 
 async def _pick_app_for_user(user_id: str):
-    """M-Hub-1: 简单挑该 user 的第一个 online app. M-Hub-2 按 sid 路由."""
+    """M-Hub-1 兜底: 该 user 第一个 online app."""
     for online in registry.online_apps():
         if online.user_id == user_id:
             return online
     return None
+
+
+async def _pick_app_for_sid(user_id: str, sid: str):
+    """按 sid 查 sessions_cache 找归属 app, 路由实时请求 (M-Hub-2+)."""
+    rows = await hub_db.list_user_sessions(user_id)
+    for r in rows:
+        if r["sid"] == sid:
+            for o in registry.online_apps():
+                if o.app_id == r["app_id"]:
+                    return o
+    return None
+
+
+async def _resolve_target(request, user_id: str):
+    """根据 path / method / body 决定 forward 目标 app.
+
+    - POST /api/spawn: body 里如果带 app_id 用它; 否则挑第一个 online
+    - /api/sessions/<sid>/...: 按 sid 路由
+    - 其它: 第一个 online (兼容老行为)
+
+    返回 (online_app, body_bytes). body 是被 consume 过的, 调用方拿 cached.
+    """
+    body = await request.body()
+    path = request.url.path
+    # Spawn: 显式 app_id
+    if request.method == "POST" and path == "/api/spawn":
+        try:
+            import json as _json
+            j = _json.loads(body) if body else {}
+            req_app_id = (j.get("app_id") or "").strip()
+        except Exception:
+            req_app_id = ""
+        if req_app_id:
+            for o in registry.online_apps():
+                if o.user_id == user_id and o.app_id == req_app_id:
+                    # 给 app 清掉 app_id 字段, 它不需要
+                    j.pop("app_id", None)
+                    body = _json.dumps(j).encode("utf-8")
+                    return o, body
+        return await _pick_app_for_user(user_id), body
+
+    # /api/sessions/<sid>/... or DELETE /api/sessions/<sid>
+    parts = path.split("/")
+    if len(parts) >= 4 and parts[1] == "api" and parts[2] == "sessions":
+        sid = parts[3]
+        o = await _pick_app_for_sid(user_id, sid)
+        if o is not None:
+            return o, body
+    return await _pick_app_for_user(user_id), body
 
 
 class ForwardMiddleware(BaseHTTPMiddleware):
@@ -86,16 +139,15 @@ class ForwardMiddleware(BaseHTTPMiddleware):
                 })
             return JSONResponse(out)
 
-        online = await _pick_app_for_user(user_id)
+        online, body = await _resolve_target(request, user_id)
         if not online:
             return JSONResponse(
                 {"error": "app_offline",
-                 "message": "no online app for this user"},
+                 "message": "no online app for this user / sid"},
                 status_code=503,
             )
 
-        # 构造 HttpReq
-        body = await request.body()
+        # body 已被 _resolve_target 读取过 (并可能改了 app_id 字段)
         headers = {}
         for k, v in request.headers.items():
             if k.lower() in _DROP_HEADERS:
