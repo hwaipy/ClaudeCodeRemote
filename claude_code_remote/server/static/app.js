@@ -4233,6 +4233,25 @@ function refreshChatMeta() {
     tailEl.textContent = (cwd ? " · " : "") + tailParts.join(" · ");
     meta.appendChild(tailEl);
   }
+  // hub mode: chat-head 右侧 #chat-app-chip 显示当前 session 归属的 app.
+  // 数据从 state.sessionsById (HTTP /api/sessions 拉的, 含 app_name/app_online).
+  const chipEl = $("chat-app-chip");
+  if (chipEl) {
+    if (state.hubMode && state.sessionId) {
+      const sess = state.sessionsById.get(state.sessionId);
+      const aname = sess && sess.app_name;
+      if (aname) {
+        chipEl.textContent = aname;
+        chipEl.title = aname + (sess.app_online ? "" : " (offline)");
+        chipEl.classList.toggle("offline", sess.app_online === false);
+        chipEl.hidden = false;
+      } else {
+        chipEl.hidden = true;
+      }
+    } else {
+      chipEl.hidden = true;
+    }
+  }
   refreshConvStatus();   // 任意时刻 chat-meta 刷新都同步底部状态栏，下行 token 跟着 text_delta 实时
 }
 

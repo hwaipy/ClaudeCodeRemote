@@ -2427,6 +2427,34 @@ body.hub-mode .login-local { display: none; }
 }
 body:not(.hub-mode) .session-card .app-chip { display: none; }
 
+/* Chat head 右侧的 app chip — 同款视觉, 但作为 chat-head flex item 出现
+   (而非 abs). align-self: center 让它跟 conn-dot / status / menu 一行中心对齐.
+   max-width 不能太宽否则挤压 .info. */
+.chat-head .app-chip {
+  flex: 0 0 auto;
+  align-self: center;
+  height: 26px;
+  line-height: 26px;
+  padding: 0 10px;
+  margin: 0 6px;
+  font-size: 11px;
+  border-radius: 999px;
+  background: rgba(56,139,253,.08);
+  color: var(--text);
+  border: 0;
+  white-space: nowrap;
+  max-width: 35vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-sizing: border-box;
+}
+.chat-head .app-chip.offline {
+  background: rgba(150,150,150,.10);
+  color: var(--text-dim);
+  font-style: italic;
+}
+.chat-head .app-chip[hidden] { display: none; }
+
 /* Spawn modal app selector — 仅 hub mode 显示 */
 body:not(.hub-mode) #spawn-app-row { display: none; }
 
