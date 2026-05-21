@@ -902,6 +902,10 @@ function _withSortKey(msg, existing) {
 
 function handleGlobalMsg(msg) {
   if (msg.type === "snapshot") {
+    // Hub mode: HTTP /api/sessions 聚合 list 才是权威 (多 app + 带 app_id 等
+    // 字段). ws-global snapshot 只来自单一 app, 字段不全, 会闪 — 整段忽略,
+    // 只吃 session_state / session_deleted delta.
+    if (state.hubMode) return;
     state.sessionsById.clear();
     for (const s of msg.sessions || []) {
       state.sessionsById.set(s.id, _withSortKey(s, null));
@@ -909,7 +913,11 @@ function handleGlobalMsg(msg) {
     renderSessionList();
   } else if (msg.type === "session_state") {
     const existing = state.sessionsById.get(msg.id);
-    state.sessionsById.set(msg.id, _withSortKey(msg, existing));
+    // Hub mode merge — 保留 app_id/app_name/app_online (msg 不带)
+    const next = state.hubMode && existing
+      ? { ...existing, ...msg }
+      : msg;
+    state.sessionsById.set(msg.id, _withSortKey(next, existing));
     // Skip the full-list re-render if we just optimistically renamed
     // this session — the card already shows the new name; rebuilding
     // would just flash an empty cell during innerHTML="" reset.
