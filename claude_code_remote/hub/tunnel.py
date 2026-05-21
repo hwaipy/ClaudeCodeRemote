@@ -151,6 +151,18 @@ class _Registry:
     def online_app_ids(self) -> list[str]:
         return list(self._apps.keys())
 
+    async def disconnect_app(self, app_id: str) -> bool:
+        """主动关掉指定 app 的反向 WS (revoke 时调). 找不到也算 OK."""
+        async with self._lock:
+            app = self._apps.pop(app_id, None)
+        if app is None:
+            return False
+        try:
+            await app.ws.close(code=1008, reason="revoked")
+        except Exception:
+            pass
+        return True
+
 
 registry = _Registry()
 

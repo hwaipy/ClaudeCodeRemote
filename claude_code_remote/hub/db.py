@@ -222,6 +222,80 @@ async def touch_app_seen(app_id: str) -> None:
     await asyncio.to_thread(_q)
 
 
+async def revoke_app(app_id: str) -> bool:
+    def _q():
+        c = _get_conn()
+        cur = c.execute(
+            "UPDATE apps SET revoked_at=? WHERE id=? AND revoked_at IS NULL",
+            (time.time(), app_id),
+        )
+        return cur.rowcount > 0
+    return await asyncio.to_thread(_q)
+
+
+def _create_app_sync(user_id: str, name: str, tok_hash: str) -> str:
+    c = _get_conn()
+    app_id = "app-" + secrets.token_hex(8)
+    c.execute(
+        "INSERT INTO apps(id, user_id, name, device_token_hash, created_at) "
+        "VALUES(?,?,?,?,?)",
+        (app_id, user_id, name, tok_hash, time.time()),
+    )
+    return app_id
+
+
+async def create_app(user_id: str, name: str, device_token: str) -> str:
+    return await asyncio.to_thread(
+        _create_app_sync, user_id, name, hash_token(device_token),
+    )
+
+
+# ---- pairing tokens ----
+
+def _make_pair_code() -> str:
+    """6 位数字 + 8 字符 hex (不冲突). e.g. "423917-a1b2c3d4"."""
+    return f"{secrets.randbelow(900_000) + 100_000:06d}-{secrets.token_hex(4)}"
+
+
+async def create_pairing(user_id: str, ttl_seconds: int = 300) -> dict:
+    def _q():
+        c = _get_conn()
+        code = _make_pair_code()
+        exp = time.time() + ttl_seconds
+        c.execute(
+            "INSERT INTO pairing_tokens(code, user_id, expires_at) "
+            "VALUES(?,?,?)",
+            (code, user_id, exp),
+        )
+        return {"code": code, "expires_at": exp}
+    return await asyncio.to_thread(_q)
+
+
+def _consume_pairing_sync(code: str) -> str | None:
+    """返回 user_id, 或 None 当 code 无效 / 过期 / 已消费. 一次性消费."""
+    c = _get_conn()
+    row = c.execute(
+        "SELECT user_id, expires_at, consumed_at FROM pairing_tokens "
+        "WHERE code=?",
+        (code,),
+    ).fetchone()
+    if not row:
+        return None
+    if row["consumed_at"] is not None:
+        return None
+    if row["expires_at"] < time.time():
+        return None
+    c.execute(
+        "UPDATE pairing_tokens SET consumed_at=? WHERE code=?",
+        (time.time(), code),
+    )
+    return row["user_id"]
+
+
+async def consume_pairing(code: str) -> str | None:
+    return await asyncio.to_thread(_consume_pairing_sync, code)
+
+
 # ---- sessions_cache ----
 
 _CACHE_COLS = (
