@@ -901,8 +901,14 @@ input:focus, textarea:focus { border-color: var(--accent); }
   display: flex; align-items: center; gap: 8px;
   /* Reserve space at the right edge for the kebab (absolutely
      positioned at right:4 / width:26). Long names then truncate with a
-     visible gap before the ⋯, instead of running under it. */
+     visible gap before the ⋯, instead of running under it.
+     hub mode 下 .app-chip 也 abs 定位在 kebab 左侧 — JS 给它带 max-width
+     35%, 长名字 chip 自己 ellipsis, 不需要这里给更多 padding. */
   padding-right: 32px;
+}
+body.hub-mode .session-card .session-row1 {
+  /* hub mode 给 chip 让出额外空间, 避免 name 末尾撞 chip. */
+  padding-right: 132px;
 }
 .session-card .name { flex: 1; font-weight: 600;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -2394,24 +2400,27 @@ body.is-pwa.has-session:has(#chat-input:focus) .chat-foot {
 body:not(.hub-mode) .login-hub { display: none; }
 body.hub-mode .login-local { display: none; }
 
-/* Session card 上的 app chip — 仅 hub mode 显示. 第一行末尾, 颜色尽量淡
-   (尾随的元数据, 不能跟 name 抢视觉重量). flex 上 margin-left:auto 推到右边
-   (在 .card-menu-btn 之前 — kebab 是 abs 定位的, 不占 flex 空间). */
+/* Session card 上的 app chip — 仅 hub mode 显示. 跟 kebab (⋯, top:4 right:4)
+   同高, abs 定位在 kebab 左侧, 不占 row1 flex 空间. */
 .session-card .app-chip {
-  flex: 0 0 auto;
-  margin-left: auto;
-  padding: 0 6px;
-  font-size: 10.5px;
-  line-height: 1.4;
+  position: absolute;
+  top: 6px;
+  right: 36px;          /* kebab 是 width:26 right:4 → 4+26+6 留 6px 间距 */
+  padding: 1px 8px;
+  font-size: 11px;
+  line-height: 1.5;
   border-radius: 999px;
-  background: transparent;
-  color: var(--text-dim);
-  border: 1px solid var(--border-soft, rgba(125,125,125,.18));
-  opacity: 0.55;
+  background: rgba(56,139,253,.08);
+  color: var(--text);
+  border: 0;
   white-space: nowrap;
+  max-width: 35%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .session-card .app-chip.offline {
-  opacity: 0.35;
+  background: rgba(150,150,150,.10);
+  color: var(--text-dim);
   font-style: italic;
 }
 body:not(.hub-mode) .session-card .app-chip { display: none; }
