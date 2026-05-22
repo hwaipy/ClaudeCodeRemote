@@ -11,9 +11,5 @@ services:
       CCR_HUB_DB: /data/hub.db
       CCR_HUB_ADMIN_EMAIL: "${CCR_HUB_ADMIN_EMAIL:?must set}"
       CCR_HUB_ADMIN_PW: "${CCR_HUB_ADMIN_PW:?must set}"
-      # Passkey RP — 必须跟 hub 对外 https 域名一致, 否则 WebAuthn 校验失败.
-      CCR_HUB_RP_ID: "${CCR_HUB_RP_ID:-hub.qpqi.group}"
-      CCR_HUB_ORIGIN: "${CCR_HUB_ORIGIN:-https://hub.qpqi.group}"
-      CCR_HUB_RP_NAME: "${CCR_HUB_RP_NAME:-ClaudeCodeRemote Hub}"
     volumes:
       - ./data:/data

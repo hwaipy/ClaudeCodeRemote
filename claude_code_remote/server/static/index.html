@@ -36,14 +36,6 @@
         <input id="login-password" type="password" autocomplete="current-password" placeholder="password">
       </div>
       <button class="btn btn-primary btn-block" id="login-go">Sign in</button>
-      <!-- Passkey 登录 — 仅 hub mode 显示 (跟 login-hub 类) -->
-      <button class="btn btn-secondary btn-block login-hub" id="login-passkey" type="button" style="margin-top:8px">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px" aria-hidden="true">
-          <rect x="3" y="11" width="18" height="11" rx="2"></rect>
-          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-        </svg>
-        Sign in with passkey
-      </button>
       <div class="err" id="login-err"></div>
       <div class="hint login-local">Token is set via the server env var <span class="kbd">CCR_TOKEN</span>.</div>
       <div class="hint login-hub">Hub mode — sign in with the account configured on the Hub.</div>
@@ -172,16 +164,6 @@
       <button type="button" class="spawn-perm-btn" data-mode="allow_all">Allow all</button>
     </div>
     <div class="settings-hint">These values pre-fill the new-session dialog.</div>
-
-    <!-- Passkey 管理 — hub mode only -->
-    <div class="settings-section hub-only">
-      <label>Passkeys (sign in without password)</label>
-      <div class="passkey-list" id="settings-passkey-list">
-        <div class="apps-empty">Loading…</div>
-      </div>
-      <button class="btn btn-secondary" id="settings-passkey-add" type="button" style="margin-top:8px">+ Add a passkey on this device</button>
-      <div class="settings-hint">Use Face ID / Touch ID / Windows Hello / a security key. One passkey per device; iCloud / Google sync them across your devices.</div>
-    </div>
   </div>
 </div>
 

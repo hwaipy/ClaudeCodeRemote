@@ -28,7 +28,6 @@ _HUB_LOCAL_PREFIXES = (
     "/healthz", "/app-tunnel",
     "/static/", "/sw.js", "/icon.svg", "/manifest.webmanifest",
 )
-# 注: /api/hub/passkey/* /api/hub/passkeys 也已经在 /api/hub/ 前缀里, 不需另列.
 # 透传 user 请求时不该带过去的 header
 _DROP_HEADERS = {
     "host", "connection", "cookie",   # cookie 是 hub 的, 不该给 app
