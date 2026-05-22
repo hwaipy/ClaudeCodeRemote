@@ -464,6 +464,64 @@ if (_hardReloadEl) _hardReloadEl.addEventListener("click", async (e) => {
   }
 });
 
+// 显示 IDB 缓存状态 — 手机上没 DevTools 时用. 弹一个简单的 alert.
+const _cacheStatsLink = $("cache-stats-link");
+if (_cacheStatsLink) _cacheStatsLink.addEventListener("click", async (e) => {
+  e.preventDefault();
+  try {
+    const db = await idbOpen();
+    // messages 总数 + 按 sess 分桶
+    const msgs = await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE_MESSAGES, "readonly");
+      const req = tx.objectStore(IDB_STORE_MESSAGES).getAllKeys();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+    const bySess = {};
+    for (const k of msgs) {   // k = [sess_id, seq]
+      bySess[k[0]] = (bySess[k[0]] || 0) + 1;
+    }
+    // outbox
+    const outbox = await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE_OUTBOX, "readonly");
+      const req = tx.objectStore(IDB_STORE_OUTBOX).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+    // 当前 session 第一条 / 最后一条
+    const curSid = state.sessionId;
+    let curStats = "";
+    if (curSid) {
+      const rows = await idbGetSessionMessages(curSid);
+      if (rows.length) {
+        const first = rows[0], last = rows[rows.length - 1];
+        const fmt = t => new Date((t || 0) * 1000).toLocaleString();
+        curStats = `\nCurrent session (${curSid.slice(0,14)}…):
+  ${rows.length} envelopes, seq ${first.seq}…${last.seq}
+  first: ${fmt(first.ts)}
+  last:  ${fmt(last.ts)}`;
+      } else {
+        curStats = `\nCurrent session (${curSid.slice(0,14)}…): no IDB rows`;
+      }
+    }
+    // sessionCache (内存)
+    const memN = state.sessionCache ? state.sessionCache.size : 0;
+    const nSess = Object.keys(bySess).length;
+    const top5 = Object.entries(bySess)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([s, n]) => `  ${s.slice(0, 14)}…  ${n}`).join("\n");
+    alert(
+      `IDB messages:  ${msgs.length} total across ${nSess} sessions\n${top5}\n\n` +
+      `IDB outbox (unacked):  ${outbox.length}\n` +
+      `Memory sessionCache:  ${memN} sessions\n` +
+      curStats
+    );
+  } catch (err) {
+    alert("Cache stats failed: " + (err.message || err));
+  }
+});
+
 // ---------- Home ----------
 function renderPresets() {
   const box = $("cwd-presets");
