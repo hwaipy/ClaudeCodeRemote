@@ -1186,6 +1186,76 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
   });
 })();
 
+// ---------- Help view (无需登录可见) ----------
+(function setupHelp() {
+  const view = $("view-help");
+  const back = $("help-back");
+  const helpLink = $("help-link");
+  const loginHelpLink = $("login-help-link");
+  const urlEl = $("help-url");
+  const urlCopyBtn = $("help-url-copy");
+  const envEl = $("help-env-snippet");
+  const envCopyBtn = $("help-env-copy");
+  const dockerEnvEl = $("help-docker-env");
+  const dockerEnvCopyBtn = $("help-docker-env-copy");
+  if (!view) return;
+
+  function fill() {
+    const url = location.origin + (location.pathname.replace(/\/$/, "") || "");
+    urlEl.textContent = url;
+    const wsUrl = url.replace(/^http/, "ws");
+    envEl.textContent =
+      `CCR_TOKEN=$(openssl rand -hex 16)
+CCR_HUB_URL=${wsUrl}
+CCR_HUB_DEVICE_TOKEN=tok-paste-from-cloud-servers`;
+    dockerEnvEl.textContent =
+      `CCR_TOKEN=$(openssl rand -hex 16)
+CCR_HUB_URL=${wsUrl}
+CCR_HUB_DEVICE_TOKEN=tok-paste-from-cloud-servers
+ANTHROPIC_API_KEY=                    # optional, blank = mock`;
+  }
+  function open() {
+    if (view.classList.contains("active")) return;
+    fill();
+    view.classList.add("active");
+  }
+  function close() {
+    view.classList.remove("active");
+    // 清掉 #help hash 否则下次再打开页面就自动进 help
+    if (location.hash === "#help") {
+      history.replaceState(null, "", location.pathname + location.search);
+    }
+  }
+  if (helpLink) helpLink.addEventListener("click", e => { e.preventDefault(); open(); });
+  if (loginHelpLink) loginHelpLink.addEventListener("click", e => { e.preventDefault(); open(); });
+  back.addEventListener("click", close);
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && view.classList.contains("active")) close();
+  });
+  // 启动时检测 #help hash, 自动开 (用户从分享链接进来)
+  if (location.hash === "#help") {
+    setTimeout(open, 0);
+  }
+  window.addEventListener("hashchange", () => {
+    if (location.hash === "#help") open();
+  });
+
+  async function _copy(text, btn) {
+    try {
+      await navigator.clipboard.writeText(text);
+      const old = btn.textContent;
+      btn.textContent = "Copied!";
+      setTimeout(() => { btn.textContent = old; }, 1200);
+    } catch (e) {
+      alert("Copy failed. Select the text and Ctrl-C.");
+    }
+  }
+  urlCopyBtn.addEventListener("click", () => _copy(urlEl.textContent, urlCopyBtn));
+  envCopyBtn.addEventListener("click", () => _copy(envEl.textContent, envCopyBtn));
+  dockerEnvCopyBtn.addEventListener("click",
+    () => _copy(dockerEnvEl.textContent, dockerEnvCopyBtn));
+})();
+
 // ---------- Apps (Cloud server) management view ----------
 (function setupApps() {
   const view = $("view-apps");
@@ -2124,6 +2194,15 @@ installSwipeBack("view-settings", {
 installSwipeBack("view-apps", {
   narrowOnly: false,
   commit: () => $("view-apps").classList.remove("active"),
+});
+installSwipeBack("view-help", {
+  narrowOnly: false,
+  commit: () => {
+    $("view-help").classList.remove("active");
+    if (location.hash === "#help") {
+      history.replaceState(null, "", location.pathname + location.search);
+    }
+  },
 });
 
 function setConnDot(kind, title) {

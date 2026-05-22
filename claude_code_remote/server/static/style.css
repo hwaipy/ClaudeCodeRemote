@@ -2552,6 +2552,110 @@ body:not(.hub-mode) .hub-only { display: none !important; }
   background: rgba(215,0,21,.08);
 }
 
+/* ---- Help / setup guide view ---- */
+#view-help {
+  display: flex !important;
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 420ms cubic-bezier(0.25, 1, 0.5, 1);
+  will-change: transform;
+  background: var(--bg-page);
+  pointer-events: none;
+  box-shadow: -2px 0 12px rgba(0, 0, 0, 0.08);
+  overflow-y: auto;
+}
+#view-help.active {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+.help-body {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 16px 24px 40px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.help-body h2 {
+  font-size: 16px;
+  margin: 28px 0 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+.help-body h2:first-of-type { border-top: 0; padding-top: 0; }
+.help-body h3 {
+  font-size: 14px;
+  margin: 14px 0 6px;
+  font-weight: 600;
+}
+.help-body p, .help-body ol, .help-body ul { margin: 6px 0; }
+.help-body ol, .help-body ul { padding-left: 22px; }
+.help-body code:not(.copybox-text) {
+  background: var(--bg-elev, #f6f8fa);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+}
+.help-step { margin: 10px 0 18px; }
+.help-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-top: 6px;
+}
+.help-table th, .help-table td {
+  text-align: left; vertical-align: top;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.help-table th {
+  font-weight: 600; width: 30%;
+  color: var(--text-muted);
+}
+.help-footer {
+  margin-top: 32px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+/* 醒目 banner */
+.help-banner {
+  background: linear-gradient(135deg,
+                              rgba(56,139,253,0.12),
+                              rgba(56,139,253,0.04));
+  border: 1px solid rgba(56,139,253,0.30);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin: 8px 0 16px;
+}
+.help-banner-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  color: var(--text);
+}
+.help-banner-url { margin-bottom: 8px; }
+.help-banner-sub {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.login-footer {
+  margin-top: 14px;
+  text-align: center;
+  font-size: 13px;
+}
+.login-footer a {
+  color: var(--text-dim);
+  text-decoration: none;
+}
+.login-footer a:hover { text-decoration: underline; }
+
 /* 新建 app 内嵌面板 — 出现在 apps-list 上方 */
 .new-app-panel {
   background: var(--bg-card, #fff);

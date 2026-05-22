@@ -39,6 +39,9 @@
       <div class="err" id="login-err"></div>
       <div class="hint login-local">Token is set via the server env var <span class="kbd">CCR_TOKEN</span>.</div>
       <div class="hint login-hub">Hub mode — sign in with the account configured on the Hub.</div>
+      <div class="login-footer">
+        <a href="#help" id="login-help-link">Help &amp; setup guide</a>
+      </div>
     </div>
   </div>
 </div>
@@ -133,6 +136,8 @@
       <a href="#" id="logout">Sign out</a>
       <span class="sep">·</span>
       <a href="#" id="hard-reload">Hard reload</a>
+      <span class="sep">·</span>
+      <a href="#help" id="help-link">Help</a>
     </div>
   </div>
 </div>
@@ -216,6 +221,169 @@
     <div class="apps-list" id="apps-list">
       <div class="apps-empty">Loading…</div>
     </div>
+  </div>
+</div>
+
+<!-- 帮助 / 接入指南 (无需登录) -->
+<div class="view" id="view-help">
+  <div class="settings-head">
+    <button class="back" id="help-back" type="button" title="Back" aria-label="Back">←</button>
+    <div class="info">
+      <div class="name">Help &amp; setup guide</div>
+    </div>
+  </div>
+  <div class="settings-body help-body">
+
+    <!-- 顶部醒目 banner: paste URL to AI -->
+    <div class="help-banner">
+      <div class="help-banner-title">Paste this URL into your AI agent — it'll set up everything for you.</div>
+      <div class="copybox help-banner-url">
+        <code class="copybox-text" id="help-url"></code>
+        <button class="btn btn-primary" id="help-url-copy" type="button">Copy URL</button>
+      </div>
+      <div class="help-banner-sub">
+        Drop the URL above into Claude / ChatGPT / Cursor along with
+        "set up CCR to connect to this hub" and follow the agent's lead. The
+        rest of this page is the manual route.
+      </div>
+    </div>
+
+    <h2>What is this?</h2>
+    <p><strong>Claude Code Remote (CCR)</strong> is a self-hosted web console
+       for the <code>claude</code> CLI. The <em>Hub</em> you're looking at is
+       a central server that aggregates one or more <em>app</em> processes
+       running on your machines. From here you can chat with Claude on any
+       of them, approve tool calls, see diffs — same UI regardless of which
+       machine the session lives on.</p>
+
+    <h2>How it works</h2>
+    <ol>
+      <li><strong>App</strong> processes run on your dev machines (Linux,
+          macOS, Docker, …). They host the actual <code>claude</code> CLI
+          subprocesses and persist sessions locally.</li>
+      <li>Each app opens a reverse WebSocket to this <strong>Hub</strong>.
+          No inbound port on your machine — outbound TLS only.</li>
+      <li>Your browser hits the Hub. The Hub routes HTTP + WS to the right
+          app via the tunnel. Multiple apps from the same user are merged
+          into one session list.</li>
+    </ol>
+
+    <h2>Setup — quick path</h2>
+    <ol>
+      <li>Sign in to this Hub (top of the page).</li>
+      <li>Open <strong>Cloud Servers</strong> (icon in the top bar).</li>
+      <li>Click <strong>+</strong>, name the server (e.g. <code>laptop</code>,
+          <code>vps-01</code>), and you'll get a <strong>device token</strong>.
+          Copy it now — it's shown only once.</li>
+      <li>On your dev machine, install CCR app and set three env vars
+          (see below). Restart the service.</li>
+      <li>Refresh this page. The new server should appear under
+          Cloud Servers as <em>online</em>; its sessions show up in the
+          merged session list with a chip indicating which server they're on.</li>
+    </ol>
+
+    <h2>Installing the app on a Linux host</h2>
+    <p>Source: <code>https://github.com/hwaipy/ClaudeCodeRemote</code>
+       (or your fork).</p>
+
+    <div class="help-step">
+      <h3>1. Get the source</h3>
+      <div class="copybox">
+        <code class="copybox-text">git clone https://github.com/hwaipy/ClaudeCodeRemote.git
+cd ClaudeCodeRemote
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt</code>
+      </div>
+    </div>
+
+    <div class="help-step">
+      <h3>2. Set environment (~/.config/ccr/env)</h3>
+      <div class="copybox">
+        <code class="copybox-text" id="help-env-snippet"></code>
+        <button class="btn btn-secondary" id="help-env-copy" type="button">Copy</button>
+      </div>
+      <p class="hint">Replace <code>tok-...</code> with the device token from
+         step 3 of the quick path. <code>CCR_TOKEN</code> protects the local
+         port if you also browse the app directly (LAN); pick any random
+         hex string.</p>
+    </div>
+
+    <div class="help-step">
+      <h3>3. systemd user service</h3>
+      <p>Drop a unit at
+         <code>~/.config/systemd/user/ccr.service</code> from
+         <code>deploy/ccr.service.example</code> in the repo. Then:</p>
+      <div class="copybox">
+        <code class="copybox-text">systemctl --user daemon-reload
+systemctl --user enable --now ccr.service
+journalctl --user -u ccr.service -f</code>
+      </div>
+      <p class="hint">For the app to keep running when you log out:
+         <code>sudo loginctl enable-linger $USER</code>.</p>
+    </div>
+
+    <h2>Installing the app in Docker</h2>
+    <p>Cleaner option — full stack (Python + Node + Claude Code) in a
+       container, drop-in replacement for the Linux host path.</p>
+
+    <div class="help-step">
+      <h3>1. Get the source &amp; cd</h3>
+      <div class="copybox">
+        <code class="copybox-text">git clone https://github.com/hwaipy/ClaudeCodeRemote.git
+cd ClaudeCodeRemote/deploy/local-app</code>
+      </div>
+    </div>
+
+    <div class="help-step">
+      <h3>2. Write .env</h3>
+      <div class="copybox">
+        <code class="copybox-text" id="help-docker-env"></code>
+        <button class="btn btn-secondary" id="help-docker-env-copy" type="button">Copy</button>
+      </div>
+    </div>
+
+    <div class="help-step">
+      <h3>3. Bring it up</h3>
+      <div class="copybox">
+        <code class="copybox-text">docker compose up -d --build
+docker compose logs -f ccr-app-local</code>
+      </div>
+    </div>
+
+    <h2>Verifying</h2>
+    <ul>
+      <li>Refresh this Hub page → the server appears <em>online</em> in
+          <strong>Cloud Servers</strong>.</li>
+      <li>Click <strong>+</strong> in the home top-bar to create a new
+          session. The <em>App</em> dropdown lets you choose which server
+          runs it.</li>
+      <li>Tool calls + diffs + stream events flow through the Hub WS in
+          real time. No tunneling per-session — one persistent reverse WS
+          per server.</li>
+    </ul>
+
+    <h2>Troubleshooting</h2>
+    <table class="help-table">
+      <tr><th>Symptom</th><th>Likely cause / fix</th></tr>
+      <tr><td>Server stays <em>offline</em> on Hub</td>
+          <td>Check <code>journalctl --user -u ccr</code> for the hub_client
+              connect line. Common: wrong <code>CCR_HUB_URL</code> (must be
+              <code>wss://</code>) or revoked token.</td></tr>
+      <tr><td>Server constantly disconnects with <em>superseded</em></td>
+          <td>Two processes sharing the same device token. Each server needs
+              its own. Revoke + re-register if unsure.</td></tr>
+      <tr><td>Sessions on one server appear under another</td>
+          <td>Caches; hard-reload (Ctrl+Shift+R). If persists, restart the
+              affected app — it'll resync its session snapshot to the Hub.</td></tr>
+      <tr><td>Lost the device token</td>
+          <td>Revoke the server entry from Cloud Servers and register a new
+              one. Tokens are stored as a SHA-256 hash; the Hub can't
+              recover them.</td></tr>
+    </table>
+
+    <p class="help-footer">
+      <a href="https://github.com/hwaipy/ClaudeCodeRemote" rel="noopener noreferrer">Source on GitHub</a>
+      · v__BUILD_ID__
+    </p>
   </div>
 </div>
 
