@@ -1091,7 +1091,7 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
   }
 
   function open() {
-    modal.removeAttribute("hidden");
+    panel.removeAttribute("hidden");
     if (!$("spawn-cwd").value) {
       $("spawn-cwd").value = abbreviateHome(
         localStorage.getItem("ccr.defaultCwd") || state.cwd || ""
@@ -1193,7 +1193,7 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
   const backBtn = $("apps-back");
   const newBtn = $("apps-new-btn");
   const listEl = $("apps-list");
-  const modal = $("modal-new-app");
+  const panel = $("new-app-panel");
   const step1 = $("new-app-step1");
   const step2 = $("new-app-step2");
   const nameInput = $("new-app-name");
@@ -1257,29 +1257,29 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
   openBtn.addEventListener("click", open);
   backBtn.addEventListener("click", close);
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && isOpen() && !modal.hidden === false) close();
+    if (e.key === "Escape" && isOpen()) {
+      if (!panel.hidden) hidePanel();
+      else close();
+    }
   });
 
-  // ---- New app modal ----
-  function openModal() {
+  // ---- New app inline panel (内嵌, 不是 modal) ----
+  function showPanel() {
     step1.hidden = false;
     step2.hidden = true;
     nameInput.value = "";
     errEl.classList.remove("show");
     errEl.textContent = "";
-    modal.removeAttribute("hidden");
+    panel.removeAttribute("hidden");
     setTimeout(() => nameInput.focus(), 0);
   }
-  function closeModal() { modal.setAttribute("hidden", ""); }
+  function hidePanel() { panel.setAttribute("hidden", ""); }
 
-  newBtn.addEventListener("click", openModal);
-  closeBtn.addEventListener("click", closeModal);
-  cancelBtn.addEventListener("click", closeModal);
-  doneBtn.addEventListener("click", () => { closeModal(); reload(); });
+  newBtn.addEventListener("click", showPanel);
+  closeBtn.addEventListener("click", hidePanel);
+  cancelBtn.addEventListener("click", hidePanel);
+  doneBtn.addEventListener("click", () => { hidePanel(); reload(); });
 
-  modal.addEventListener("click", (e) => {
-    if (e.target.id === "modal-new-app") closeModal();
-  });
   nameInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") goBtn.click();
   });

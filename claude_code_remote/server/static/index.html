@@ -177,20 +177,12 @@
     </button>
   </div>
   <div class="settings-body">
-    <div class="apps-list" id="apps-list">
-      <div class="apps-empty">Loading…</div>
-    </div>
-  </div>
-</div>
-
-<!-- 新建注册 modal -->
-<div class="modal" id="modal-new-app" hidden>
-  <div class="modal-panel">
-    <div class="modal-head">
-      <div class="modal-title">Register new app</div>
-      <button class="modal-x" id="new-app-close" type="button">×</button>
-    </div>
-    <div class="modal-body">
+    <!-- 新建表单 — 内嵌, 不是 modal. 默认 hidden, 点 + 按钮展开. -->
+    <div class="new-app-panel" id="new-app-panel" hidden>
+      <div class="new-app-panel-head">
+        <span class="new-app-panel-title">Register new app</span>
+        <button class="modal-x" id="new-app-close" type="button" title="Cancel">×</button>
+      </div>
       <!-- step 1: 输入名字 -->
       <div id="new-app-step1">
         <label for="new-app-name">App name</label>
@@ -219,6 +211,10 @@
           <button class="btn btn-primary" id="new-app-done" type="button">Done</button>
         </div>
       </div>
+    </div>
+
+    <div class="apps-list" id="apps-list">
+      <div class="apps-empty">Loading…</div>
     </div>
   </div>
 </div>

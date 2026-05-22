@@ -2533,6 +2533,23 @@ body:not(.hub-mode) .hub-only { display: none !important; }
   background: rgba(215,0,21,.08);
 }
 
+/* 新建 app 内嵌面板 — 出现在 apps-list 上方 */
+.new-app-panel {
+  background: var(--bg-card, #fff);
+  border: 1px solid var(--border-soft, rgba(125,125,125,.18));
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.new-app-panel-head {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 10px;
+}
+.new-app-panel-title {
+  font-weight: 600; font-size: 14px;
+  flex: 1;
+}
+
 /* Copy box (token / env snippet) */
 .copybox {
   display: flex; align-items: center; gap: 8px;
