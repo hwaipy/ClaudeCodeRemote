@@ -2501,6 +2501,8 @@ body:not(.hub-mode) .hub-only { display: none !important; }
 }
 .app-row .state-dot {
   flex: 0 0 auto;
+  align-self: flex-start;
+  margin-top: 4px;
   width: 8px; height: 8px;
   border-radius: 50%;
   background: var(--text-dim);
@@ -2510,15 +2512,32 @@ body:not(.hub-mode) .hub-only { display: none !important; }
   background: transparent;
   border: 1.5px solid var(--text-dim);
 }
+.app-row .app-rows {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.app-row .app-row-1 {
+  display: flex; align-items: baseline; gap: 8px;
+}
 .app-row .app-name {
   flex: 1; font-weight: 600;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.app-row .app-meta {
+.app-row .app-status {
   flex: 0 0 auto;
   font-size: 11px;
   color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
 }
+.app-row.online .app-status { color: #3fb950; }
+.app-row .app-row-2 {
+  display: flex; align-items: baseline; gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.app-row .app-row-2 .sep { opacity: 0.5; }
+.app-row .app-row-2 .app-stat { white-space: nowrap; }
 .app-row .app-revoke {
   flex: 0 0 auto;
   padding: 4px 10px;

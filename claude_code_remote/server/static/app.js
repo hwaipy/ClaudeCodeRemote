@@ -1217,23 +1217,45 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
       listEl.innerHTML = `<div class="apps-empty">Failed to load: ${escHTML(e.message || String(e))}</div>`;
     }
   }
+  function _fmtDuration(secs) {
+    secs = Math.max(0, Math.floor(secs || 0));
+    if (secs < 60)      return `${secs}s`;
+    if (secs < 3600)    return `${Math.floor(secs / 60)}m`;
+    if (secs < 86400)   return `${Math.floor(secs / 3600)}h`;
+    return `${Math.floor(secs / 86400)}d`;
+  }
   function renderList(apps) {
     if (!apps || !apps.length) {
-      listEl.innerHTML = '<div class="apps-empty">No apps registered yet. Click + to add one.</div>';
+      listEl.innerHTML = '<div class="apps-empty">No servers registered yet. Click + to add one.</div>';
       return;
     }
     listEl.innerHTML = "";
+    const now = Date.now() / 1000;
     for (const a of apps) {
       const row = document.createElement("div");
       row.className = "app-row " + (a.online ? "online" : "offline");
+      const authoredAgo = a.created_at ? _fmtDuration(now - a.created_at) : "?";
+      // 在线时长: 持久化累计 + 当前 session 实时 (在线时)
+      let totalOnline = a.total_online_seconds || 0;
+      if (a.online && a.connected_at) totalOnline += (now - a.connected_at);
+      const onlineFmt = _fmtDuration(totalOnline);
       row.innerHTML = `
         <span class="state-dot" aria-hidden="true"></span>
-        <span class="app-name"></span>
-        <span class="app-meta"></span>
+        <div class="app-rows">
+          <div class="app-row-1">
+            <span class="app-name"></span>
+            <span class="app-status"></span>
+          </div>
+          <div class="app-row-2">
+            <span class="app-stat">Authorized ${escHTML(authoredAgo)} ago</span>
+            <span class="sep">·</span>
+            <span class="app-stat">Connected ${escHTML(onlineFmt)}</span>
+          </div>
+        </div>
         <button class="app-revoke" type="button">Revoke</button>
       `;
       row.querySelector(".app-name").textContent = a.name || "(unnamed)";
-      row.querySelector(".app-meta").textContent = a.online ? "online" : "offline";
+      row.querySelector(".app-status").textContent = a.online ? "online" : "offline";
       row.querySelector(".app-revoke").addEventListener("click", async () => {
         if (!confirm(`Revoke "${a.name}"? Its device token will be invalidated.`)) return;
         try {
@@ -2098,6 +2120,10 @@ installSwipeBack("view-settings", {
   // 设置页在所有屏幕都是全屏 overlay, 桌面端也支持触屏右滑退出
   narrowOnly: false,
   commit: () => $("view-settings").classList.remove("active"),
+});
+installSwipeBack("view-apps", {
+  narrowOnly: false,
+  commit: () => $("view-apps").classList.remove("active"),
 });
 
 function setConnDot(kind, title) {

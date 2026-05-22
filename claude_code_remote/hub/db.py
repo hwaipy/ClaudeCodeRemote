@@ -31,14 +31,15 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE TABLE IF NOT EXISTS apps (
-  id                TEXT PRIMARY KEY,
-  user_id           TEXT NOT NULL,
-  name              TEXT NOT NULL,
-  device_token_hash TEXT NOT NULL,
-  last_seen_at      REAL,
-  capabilities_json TEXT NOT NULL DEFAULT '[]',
-  revoked_at        REAL,
-  created_at        REAL NOT NULL
+  id                    TEXT PRIMARY KEY,
+  user_id               TEXT NOT NULL,
+  name                  TEXT NOT NULL,
+  device_token_hash     TEXT NOT NULL,
+  last_seen_at          REAL,
+  capabilities_json     TEXT NOT NULL DEFAULT '[]',
+  revoked_at            REAL,
+  total_online_seconds  INTEGER NOT NULL DEFAULT 0,
+  created_at            REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_apps_user  ON apps(user_id);
 CREATE INDEX IF NOT EXISTS idx_apps_token ON apps(device_token_hash);
@@ -162,6 +163,7 @@ async def init(path: str | Path) -> None:
             "ALTER TABLE sessions_cache ADD COLUMN is_inactive INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE sessions_cache ADD COLUMN pending_permissions INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE sessions_cache ADD COLUMN needs_action_detail TEXT",
+            "ALTER TABLE apps ADD COLUMN total_online_seconds INTEGER NOT NULL DEFAULT 0",
         ):
             try:
                 c.execute(ddl)
@@ -329,8 +331,9 @@ async def find_app_by_token(token: str) -> dict | None:
 async def list_apps_for_user(user_id: str) -> list[dict]:
     def _q():
         rows = _get_conn().execute(
-            "SELECT id, user_id, name, last_seen_at, revoked_at, created_at "
-            "FROM apps WHERE user_id=? AND revoked_at IS NULL "
+            "SELECT id, user_id, name, last_seen_at, revoked_at, created_at, "
+            "total_online_seconds FROM apps "
+            "WHERE user_id=? AND revoked_at IS NULL "
             "ORDER BY created_at DESC",
             (user_id,),
         ).fetchall()
@@ -343,6 +346,19 @@ async def touch_app_seen(app_id: str) -> None:
         _get_conn().execute(
             "UPDATE apps SET last_seen_at=? WHERE id=?",
             (time.time(), app_id),
+        )
+    await asyncio.to_thread(_q)
+
+
+async def bump_app_online_time(app_id: str, seconds: float) -> None:
+    """app 反向 WS 断开时调, 累加这次在线时长."""
+    if seconds <= 0:
+        return
+    def _q():
+        _get_conn().execute(
+            "UPDATE apps SET total_online_seconds = total_online_seconds + ? "
+            "WHERE id=?",
+            (int(seconds), app_id),
         )
     await asyncio.to_thread(_q)
 

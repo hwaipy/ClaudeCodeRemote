@@ -68,6 +68,8 @@ async def me_handler(ccr_sess: str | None) -> dict:
             "id": r["id"],
             "name": r["name"],
             "online": r["id"] in online_set,
+            "created_at": r["created_at"],
+            "total_online_seconds": int(r.get("total_online_seconds") or 0),
         }
         for r in apps_rows
     ]
@@ -78,17 +80,21 @@ async def me_handler(ccr_sess: str | None) -> dict:
 async def list_apps(ccr_sess: str | None = Cookie(None)):
     user_id = await _require_user(ccr_sess)
     rows = await hub_db.list_apps_for_user(user_id)
-    online_set = set(registry.online_app_ids())
-    return [
-        {
+    online_by_id = {a.app_id: a for a in registry.online_apps()}
+    out = []
+    for r in rows:
+        online_app = online_by_id.get(r["id"])
+        out.append({
             "id": r["id"],
             "name": r["name"],
             "last_seen_at": r["last_seen_at"],
             "created_at": r["created_at"],
-            "online": r["id"] in online_set,
-        }
-        for r in rows
-    ]
+            "online": online_app is not None,
+            # 持久化累计 + 当前 session 的运行时长 — 前端只看 total 即可.
+            "total_online_seconds": int(r.get("total_online_seconds") or 0),
+            "connected_at": online_app.connected_at if online_app else None,
+        })
+    return out
 
 
 @router.delete("/apps/{app_id}")

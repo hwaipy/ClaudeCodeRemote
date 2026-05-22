@@ -349,5 +349,11 @@ async def app_tunnel(
         online.fail_all_pending(
             RuntimeError(f"app {online.app_id} disconnected"),
         )
+        # 累加这次在线时长到 db
+        elapsed = max(0.0, time.time() - online.connected_at)
+        try:
+            await hub_db.bump_app_online_time(online.app_id, elapsed)
+        except Exception:
+            log.exception("bump_app_online_time failed for %s", online.app_id)
         await registry.remove(online.app_id, ws)
-        log.info("app offline: %s", online.app_id)
+        log.info("app offline: %s (online %.0fs)", online.app_id, elapsed)
