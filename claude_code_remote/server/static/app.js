@@ -3030,18 +3030,8 @@ async function autoFillInitialCards() {
     }
   } finally {
     state.autoFilling = false;
-    // 加载满 2 屏 / 拉到顶 / safety 兜底退出 → fade-out chat-loading overlay,
-    // 用户一次看到完整内容. 200ms 等 layout 稳定 + 220ms transition.
-    const loadingEl = $("chat-loading");
-    if (loadingEl && !loadingEl.hidden) {
-      setTimeout(() => {
-        loadingEl.classList.add("fade-out");
-        setTimeout(() => {
-          loadingEl.hidden = true;
-          loadingEl.classList.remove("fade-out");
-        }, 220);
-      }, 200);
-    }
+    // overlay fade-out 现在由 backlog_done handler 立即做, 这里不再操心.
+    // 即使 autoFill 卡住或 session 很长, 用户也已经看到当前批 backlog 内容.
   }
 }
 
@@ -4134,9 +4124,19 @@ function handleEvent(evt, ts) {
         state.earlierFragment = null;
       }
       state.currentToolGroup = null;
-      // chat-loading overlay 由 autoFillInitialCards 在加载满 2 屏后 fade-out,
-      // 这里不再独立 fade — 用户要等到 2 屏内容渲完才看到, 一次性揭幕.
       hideThinkingPlaceholder();
+      // backlog_done 立即 fade-out chat-loading overlay — 当前批 backlog
+      // 已渲到 chat-log, 用户可以看到. autoFill 后台续拉更早历史让用户
+      // 上滑顺畅, 但不再阻塞 reveal (之前等 autoFill 满 2 屏才 fade-out,
+      // session 很长 / loadEarlier 卡时用户看到"一直转圈圈").
+      const _ld = $("chat-loading");
+      if (_ld && !_ld.hidden) {
+        _ld.classList.add("fade-out");
+        setTimeout(() => {
+          _ld.hidden = true;
+          _ld.classList.remove("fade-out");
+        }, 220);
+      }
       // 用户的视觉锚点已经在底部（recent），多次 RAF 持续贴底应对 layout 抖动
       const stickBottom = () => setScrollTopInstant(log, log.scrollHeight);
       stickBottom();
@@ -4147,8 +4147,7 @@ function handleEvent(evt, ts) {
         if (++n < 30) requestAnimationFrame(settle);
       };
       requestAnimationFrame(settle);
-      // 立即 autoFill — overlay 遮挡, 不需要等 settle. autoFill finally 块
-      // 负责 fade-out overlay 揭幕.
+      // autoFill 在后台续拉更早历史 (用户上滑顺畅), 不再控制 spinner.
       autoFillInitialCards();
       state.pendingScrollToBottomOnBacklog = false;
       return;
