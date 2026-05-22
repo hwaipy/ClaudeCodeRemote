@@ -322,7 +322,8 @@ label {
 }
 label:first-of-type { margin-top: 0; }
 
-input[type=text], input[type=password], textarea {
+input[type=text], input[type=email], input[type=password],
+input[type=search], input[type=url], input[type=tel], textarea {
   width: 100%;
   padding: 11px 13px;
   background: var(--bg-input);
@@ -330,6 +331,8 @@ input[type=text], input[type=password], textarea {
   border-radius: 8px;
   outline: none;
   color: var(--text);
+  font-family: inherit;
+  font-size: inherit;
 }
 input:focus, textarea:focus { border-color: var(--accent); }
 
