@@ -2546,6 +2546,28 @@ function _findTurnCardsByKey(root, key) {
   );
 }
 
+// 推断 model tier — opus/sonnet/haiku 有 menu icon; 其它常见 (deepseek/gpt/...)
+// 返回 "other", turn-card 用 fallback inline SVG 显示 generic spark.
+function _tierFromModel(model) {
+  const lower = (model || "").toLowerCase();
+  if (lower.includes("opus")) return "opus";
+  if (lower.includes("sonnet")) return "sonnet";
+  if (lower.includes("haiku")) return "haiku";
+  if (!lower) return "";
+  // 任何非空但不是 claude 三 tier 的 → 通用图标
+  return "other";
+}
+// 通用 spark fallback (currentColor 走父级 .turn-card-icon 的颜色).
+const _OTHER_TIER_SVG = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 13.5 10.5 21 12 13.5 13.5 12 21 10.5 13.5 3 12 10.5 10.5z"/></svg>`;
+function _iconHTMLForTier(tier) {
+  if (!tier) return "";
+  if (tier === "other") return _OTHER_TIER_SVG;
+  const src = document.querySelector(
+    `.model-menu-item[data-model="${tier}"] .model-menu-icon`,
+  );
+  return src ? src.innerHTML : _OTHER_TIER_SVG;
+}
+
 function _ensureTurnCard() {
   const key = _turnStartKey();
   if (state._turnCard
@@ -2635,18 +2657,10 @@ function _refreshTurnCard() {
   }
   if (iconEl) {
     const curM = state.currentMsgModel || "";
-    const lower = curM.toLowerCase();
-    let tier = "";
-    if (lower.includes("opus")) tier = "opus";
-    else if (lower.includes("sonnet")) tier = "sonnet";
-    else if (lower.includes("haiku")) tier = "haiku";
+    const tier = _tierFromModel(curM);
     if (iconEl.dataset.tier !== tier) {
       iconEl.dataset.tier = tier;
-      const src = tier
-        ? document.querySelector(
-            `.model-menu-item[data-model="${tier}"] .model-menu-icon`)
-        : null;
-      iconEl.innerHTML = src ? src.innerHTML : "";
+      iconEl.innerHTML = _iconHTMLForTier(tier);
     }
   }
 }
@@ -2686,16 +2700,8 @@ function _renderTurnSummary(evt) {
     }
   }
   const curM = evt.model || "";
-  let tier = "";
-  const lower = curM.toLowerCase();
-  if (lower.includes("opus")) tier = "opus";
-  else if (lower.includes("sonnet")) tier = "sonnet";
-  else if (lower.includes("haiku")) tier = "haiku";
-  const src = tier
-    ? document.querySelector(
-        `.model-menu-item[data-model="${tier}"] .model-menu-icon`)
-    : null;
-  const iconHTML = src ? src.innerHTML : "";
+  const tier = _tierFromModel(curM);
+  const iconHTML = _iconHTMLForTier(tier);
   if (card) {
     // 复用现有 card: 移除 active class, 刷新 token / duration / icon.
     card.classList.remove("turn-active");
