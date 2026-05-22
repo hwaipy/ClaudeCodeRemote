@@ -4683,8 +4683,15 @@ function applyTurnState(evt) {
 function handleUserInput(evt, envTs) {
   // outbox ack: server 把 client_msg_id 透传回来, 此刻消息确认已被
   // session_manager 持久化 + DB inject_event 完成 → 安全删 outbox.
+  // 兼容老 server (没透传 client_msg_id): 实时路径下也按 FIFO 把最老
+  // 一条 outbox 项删了 — 每收到一个 user_input echo 就删一项, 顺序对齐.
   if (evt && evt.client_msg_id) {
     idbDeleteOutbox(evt.client_msg_id);
+  } else if (!state.isHistoryReplay && !state.earlierFragment
+              && state.sessionId) {
+    idbListOutboxBySess(state.sessionId).then(rows => {
+      if (rows.length) idbDeleteOutbox(rows[0].client_msg_id);
+    });
   }
   if (!state.isHistoryReplay && !state.earlierFragment) {
     // token / timer 真源在后端: _update_turn_state 判过 "前一轮是否真的
@@ -4980,8 +4987,11 @@ function sendUserMessage() {
 }
 
 // WS open / reconnect 时调 — 扫该 sess 的 pending outbox, 重发.
+// 先 purge stale: created > 30s 的视为 server 已收下但回送的 client_msg_id
+// 字段被老 ws.py 丢了 (无法 ack). 直接放弃, 不再 retry 防止重复发送.
 async function _outboxResend(sessId) {
   if (!sessId || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+  await _outboxPurgeStale(sessId, 30);
   const pending = await idbListOutboxBySess(sessId);
   for (const e of pending) {
     try {
@@ -4994,6 +5004,17 @@ async function _outboxResend(sessId) {
       idbPutOutbox({ ...e, attempts: (e.attempts || 1) + 1 });
     } catch (err) {
       console.warn("outbox resend failed:", err);
+    }
+  }
+}
+
+async function _outboxPurgeStale(sessId, maxAgeSec) {
+  if (!sessId) return;
+  const now = Date.now() / 1000;
+  const rows = await idbListOutboxBySess(sessId);
+  for (const e of rows) {
+    if (now - (e.created_at || 0) > (maxAgeSec || 30)) {
+      idbDeleteOutbox(e.client_msg_id);
     }
   }
 }
