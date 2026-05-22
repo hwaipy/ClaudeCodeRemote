@@ -18,5 +18,8 @@ services:
       CCR_HUB_URL: ${CCR_HUB_URL:?CCR_HUB_URL must be set, e.g. wss://hub.qpqi.group}
       CCR_HUB_DEVICE_TOKEN: ${CCR_HUB_DEVICE_TOKEN:?must redeem on hub UI}
       CCR_HUB_APP_NAME: ${CCR_HUB_APP_NAME:-ClawDocker}
-      # claude code 自己读环境变量, 这里透传 (如果你想跑真 claude 而不是 mock)
+      # claude code 自己读环境变量, 这里透传. 留空 = 用默认 (官方 api).
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}

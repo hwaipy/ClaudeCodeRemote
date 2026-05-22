@@ -1318,7 +1318,7 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
   }
 
   function open() {
-    panel.removeAttribute("hidden");
+    modal.removeAttribute("hidden");
     if (!$("spawn-cwd").value) {
       $("spawn-cwd").value = abbreviateHome(
         localStorage.getItem("ccr.defaultCwd") || state.cwd || ""
