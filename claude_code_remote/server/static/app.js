@@ -1305,10 +1305,14 @@ ANTHROPIC_API_KEY=                    # optional, blank = mock`;
       const row = document.createElement("div");
       row.className = "app-row " + (a.online ? "online" : "offline");
       const authoredAgo = a.created_at ? _fmtDuration(now - a.created_at) : "?";
-      // 在线时长: 持久化累计 + 当前 session 实时 (在线时)
-      let totalOnline = a.total_online_seconds || 0;
-      if (a.online && a.connected_at) totalOnline += (now - a.connected_at);
-      const onlineFmt = _fmtDuration(totalOnline);
+      // online: 显示当前 session 持续时长 ("Connected for X"). offline: 不显示.
+      let connectedHTML = "";
+      if (a.online && a.connected_at) {
+        const cur = _fmtDuration(now - a.connected_at);
+        connectedHTML = `
+          <span class="sep">·</span>
+          <span class="app-stat">Connected for ${escHTML(cur)}</span>`;
+      }
       row.innerHTML = `
         <span class="state-dot" aria-hidden="true"></span>
         <div class="app-rows">
@@ -1318,8 +1322,7 @@ ANTHROPIC_API_KEY=                    # optional, blank = mock`;
           </div>
           <div class="app-row-2">
             <span class="app-stat">Authorized ${escHTML(authoredAgo)} ago</span>
-            <span class="sep">·</span>
-            <span class="app-stat">Connected ${escHTML(onlineFmt)}</span>
+            ${connectedHTML}
           </div>
         </div>
         <button class="app-revoke" type="button">Revoke</button>
