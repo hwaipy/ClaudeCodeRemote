@@ -28,6 +28,231 @@ const state = {
 };
 const SESSION_CACHE_MAX = 10;
 
+// ---------- IndexedDB: 聊天记录浏览器端缓存 (Step 1-2) ----------
+// 目的: 进 session 时立即从 IDB 渲上次缓存内容 (0 latency reveal), 同时
+// WS 后台连 → server 推 backlog → dedup (state.maxSeq) → 只补增量.
+// schema:
+//   ccr/v1/messages  keyPath=['sess_id','seq']  index 'by_sess' on sess_id
+const IDB_NAME = "ccr";
+const IDB_VERSION = 2;
+const IDB_STORE_MESSAGES = "messages";
+const IDB_STORE_OUTBOX = "outbox";
+const IDB_MAX_PER_SESS = 1000;   // LRU cap per session, oldest by seq dropped
+
+let _idbDb = null;
+let _idbOpening = null;
+function idbOpen() {
+  if (_idbDb) return Promise.resolve(_idbDb);
+  if (_idbOpening) return _idbOpening;
+  _idbOpening = new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(new Error("IndexedDB unavailable"));
+      return;
+    }
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE_MESSAGES)) {
+        const store = db.createObjectStore(IDB_STORE_MESSAGES, {
+          keyPath: ["sess_id", "seq"],
+        });
+        store.createIndex("by_sess", "sess_id", { unique: false });
+      }
+      // v2: outbox — 未 ack 的 user_message. keyPath client_msg_id (uuid)
+      // index 'by_sess' 用于 enterChat / reconnect 时按 session 列待发.
+      if (!db.objectStoreNames.contains(IDB_STORE_OUTBOX)) {
+        const obs = db.createObjectStore(IDB_STORE_OUTBOX, {
+          keyPath: "client_msg_id",
+        });
+        obs.createIndex("by_sess", "sess_id", { unique: false });
+      }
+    };
+    req.onsuccess = () => {
+      _idbDb = req.result;
+      _idbDb.onversionchange = () => { try { _idbDb.close(); } catch (_) {} _idbDb = null; };
+      resolve(_idbDb);
+    };
+    req.onerror = () => reject(req.error);
+  });
+  return _idbOpening;
+}
+
+async function idbGetSessionMessages(sessId) {
+  if (!sessId) return [];
+  try {
+    const db = await idbOpen();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE_MESSAGES, "readonly");
+      const store = tx.objectStore(IDB_STORE_MESSAGES);
+      const idx = store.index("by_sess");
+      const req = idx.getAll(IDBKeyRange.only(sessId));
+      req.onsuccess = () => {
+        const rows = (req.result || []).slice();
+        rows.sort((a, b) => a.seq - b.seq);   // 按 seq 升序回放
+        resolve(rows);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) {
+    console.warn("idbGetSessionMessages failed:", e);
+    return [];
+  }
+}
+
+async function idbPutMessage(sessId, env) {
+  // env: {seq, ts, event}. 不 await — 调用方 fire-and-forget.
+  if (!sessId || !env || typeof env.seq !== "number") return;
+  try {
+    const db = await idbOpen();
+    const tx = db.transaction(IDB_STORE_MESSAGES, "readwrite");
+    const store = tx.objectStore(IDB_STORE_MESSAGES);
+    store.put({
+      sess_id: sessId,
+      seq: env.seq,
+      ts: env.ts,
+      event: env.event,
+    });
+  } catch (e) {
+    console.warn("idbPutMessage failed:", e);
+  }
+}
+
+async function idbDeleteSession(sessId) {
+  if (!sessId) return;
+  try {
+    const db = await idbOpen();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE_MESSAGES, "readwrite");
+      const store = tx.objectStore(IDB_STORE_MESSAGES);
+      const idx = store.index("by_sess");
+      const req = idx.openKeyCursor(IDBKeyRange.only(sessId));
+      req.onsuccess = (e) => {
+        const cur = e.target.result;
+        if (cur) {
+          store.delete(cur.primaryKey);
+          cur.continue();
+        } else {
+          resolve();
+        }
+      };
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) {
+    console.warn("idbDeleteSession failed:", e);
+  }
+}
+
+// 跟 server _classify 同款白名单 — 仅缓存这些 envelope, 排除 transient
+// stream_event / message_start / content_block_*.
+function _idbWriteKind(evt) {
+  if (!evt) return false;
+  const t = evt.type;
+  if (t === "assistant" || t === "user" || t === "user_input" || t === "result") {
+    return true;
+  }
+  if (t === "system" && evt.subtype === "init") return true;
+  if (t === "_ccr") {
+    const sub = evt.subtype;
+    // first_paint / backlog_done 是 server 用 seq=-1 wrap 的, 已被 seq>0
+    // 过滤掉, 这里不列. 列的是真正持久化的 _ccr 子类型.
+    return sub === "permission_request" || sub === "permission_resolved"
+        || sub === "askuser_request" || sub === "askuser_resolved"
+        || sub === "turn_summary";
+  }
+  return false;
+}
+
+// ---------- outbox: 未 ack 的 user_message (Step 3) ----------
+// 用户点发送 → 立即写 outbox + ws.send. server 回 user_input event 带回
+// client_msg_id → 此时才 delete outbox. WS 断 / reconnect 时扫 outbox 重发.
+function _uuid() {
+  if (crypto && crypto.randomUUID) return crypto.randomUUID();
+  // Fallback for old browsers
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === "x" ? r : (r & 3 | 8)).toString(16);
+  });
+}
+
+async function idbPutOutbox(entry) {
+  // entry: {client_msg_id, sess_id, content, created_at, attempts}
+  try {
+    const db = await idbOpen();
+    const tx = db.transaction(IDB_STORE_OUTBOX, "readwrite");
+    tx.objectStore(IDB_STORE_OUTBOX).put(entry);
+  } catch (e) {
+    console.warn("idbPutOutbox failed:", e);
+  }
+}
+
+async function idbDeleteOutbox(clientMsgId) {
+  if (!clientMsgId) return;
+  try {
+    const db = await idbOpen();
+    const tx = db.transaction(IDB_STORE_OUTBOX, "readwrite");
+    tx.objectStore(IDB_STORE_OUTBOX).delete(clientMsgId);
+  } catch (e) {
+    console.warn("idbDeleteOutbox failed:", e);
+  }
+}
+
+async function idbListOutboxBySess(sessId) {
+  if (!sessId) return [];
+  try {
+    const db = await idbOpen();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE_OUTBOX, "readonly");
+      const idx = tx.objectStore(IDB_STORE_OUTBOX).index("by_sess");
+      const req = idx.getAll(IDBKeyRange.only(sessId));
+      req.onsuccess = () => {
+        const rows = (req.result || []).slice();
+        rows.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+        resolve(rows);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) {
+    console.warn("idbListOutboxBySess failed:", e);
+    return [];
+  }
+}
+
+// LRU: 超过 IDB_MAX_PER_SESS 时删最老的 (按 seq 升序删头). Step 2 用.
+async function idbTrimSession(sessId, cap) {
+  cap = cap || IDB_MAX_PER_SESS;
+  if (!sessId) return;
+  try {
+    const db = await idbOpen();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE_MESSAGES, "readwrite");
+      const store = tx.objectStore(IDB_STORE_MESSAGES);
+      const idx = store.index("by_sess");
+      const countReq = idx.count(IDBKeyRange.only(sessId));
+      countReq.onsuccess = () => {
+        const n = countReq.result;
+        if (n <= cap) { resolve(); return; }
+        const drop = n - cap;
+        const cur = idx.openKeyCursor(IDBKeyRange.only(sessId));   // seq asc
+        let removed = 0;
+        cur.onsuccess = (e) => {
+          const c = e.target.result;
+          if (c && removed < drop) {
+            store.delete(c.primaryKey);
+            removed++;
+            c.continue();
+          } else {
+            resolve();
+          }
+        };
+        cur.onerror = () => reject(cur.error);
+      };
+      countReq.onerror = () => reject(countReq.error);
+    });
+  } catch (e) {
+    console.warn("idbTrimSession failed:", e);
+  }
+}
+
 // 把 /home/<user>/... 或 /Users/<user>/... 缩成 ~/... 显示形式.
 // 服务器收到 ~ 会用 os.path.expanduser 还原, 所以始终用缩写形式存 +
 // 在 UI 里显示, 既好看, 也省一遍前端展开. 留作弊门: 用户手输 / 之类
@@ -594,6 +819,7 @@ function renderOneCard(s, container, section) {
         if (!confirm(`Delete session "${s.name}"? This cannot be undone.`)) return;
         try {
           await api(`/api/sessions/${encodeURIComponent(s.id)}`, { method: "DELETE" });
+          idbDeleteSession(s.id);   // 顺便清掉浏览器 IDB 缓存
         } catch (err) { alert("Delete failed: " + err.message); }
       } else if (action === "deactivate") {
         try {
@@ -930,6 +1156,7 @@ function handleGlobalMsg(msg) {
   } else if (msg.type === "session_deleted") {
     state.sessionsById.delete(msg.id);
     state.sessionCache.delete(msg.id);   // DOM 缓存也清掉，session 没了
+    idbDeleteSession(msg.id);            // IDB 缓存也清
     renderSessionList();
   }
   updateTitleBadge();
@@ -1750,6 +1977,38 @@ async function enterChat(id, name, cwd, sessionState) {
         }
       });
   }
+
+  // IDB replay: 进 chat 时立刻渲上次缓存的 envelopes (0-latency reveal).
+  // 设置 state.maxSeq 让 WS open 时 dedupeBoundary=maxSeq, server 推的 backlog
+  // 凡 seq <= maxSeq 自动 skip, 只补增量. fire-and-forget — connectWS 不等它.
+  (async () => {
+    const ownId = id;
+    const rows = await idbGetSessionMessages(id);
+    if (state.sessionId !== ownId || !rows.length) return;
+    // 进 chat-log 已经 innerHTML="" 但可能 WS open 慢点先来, 这里渲缓存
+    // 内容. ws 后来的 envelope 走 dedupeBoundary 跳过同 seq.
+    for (const r of rows) {
+      try {
+        handleEvent(r.event, r.ts);
+        if (r.seq > (state.maxSeq || 0)) state.maxSeq = r.seq;
+      } catch (e) {
+        console.warn("idb replay handleEvent failed:", e);
+      }
+    }
+    // 立即 fade-out spinner — 缓存内容已经渲, 用户可见. backlog 还会来,
+    // 走 dedupe 静默合入.
+    const _ld = $("chat-loading");
+    if (_ld && !_ld.hidden) {
+      _ld.classList.add("fade-out");
+      setTimeout(() => {
+        _ld.hidden = true;
+        _ld.classList.remove("fade-out");
+      }, 220);
+    }
+    // 贴底, scroll snap 到最新
+    const log = $("chat-log");
+    if (log) setScrollTopInstant(log, log.scrollHeight);
+  })();
 
   connectWS();
 }
@@ -3100,6 +3359,9 @@ function connectWS() {
       state.dedupeBoundary = state.maxSeq || 0;
       state.loadingHistory = false;
       state.pendingScrollToBottomOnBacklog = state.dedupeBoundary === 0;
+      // outbox 重发: WS 断后未 ack 的 user_message 自动重新投递.
+      // 一旦 server 回 user_input event 带 client_msg_id, handleEvent dequeue.
+      _outboxResend(state.sessionId);
     });
     ws.addEventListener("close", () => {
       if (!isCurrent()) return;
@@ -3123,6 +3385,19 @@ function connectWS() {
           // dedupe 仅针对本次连接前已处理的 seq；本次连接收到的事件（含 backlog 的 earlier 批）都放行
           if (_env.seq <= (state.dedupeBoundary || 0)) return;
           if (_env.seq > (state.maxSeq || 0)) state.maxSeq = _env.seq;
+        }
+        // IDB write: 仅持久化 server 自己持久化的 envelope (有 seq>0).
+        // transient stream_event / content_block delta 没 seq, 不写.
+        // 写完后 trim 老条目 (LRU per session).
+        if (typeof _env.seq === "number" && _env.seq > 0
+            && _idbWriteKind(_env.event)) {
+          const sid = state.sessionId;
+          idbPutMessage(sid, _env);
+          // throttled trim — 不每次都跑, 每 100 个 envelope trim 一次
+          state._idbWriteCount = (state._idbWriteCount || 0) + 1;
+          if (state._idbWriteCount % 100 === 0) {
+            idbTrimSession(sid);
+          }
         }
         handleEvent(_env.event, _env.ts);
       } catch (e) { console.warn("bad ws msg", e, ev.data); }
@@ -4406,6 +4681,11 @@ function applyTurnState(evt) {
 }
 
 function handleUserInput(evt, envTs) {
+  // outbox ack: server 把 client_msg_id 透传回来, 此刻消息确认已被
+  // session_manager 持久化 + DB inject_event 完成 → 安全删 outbox.
+  if (evt && evt.client_msg_id) {
+    idbDeleteOutbox(evt.client_msg_id);
+  }
   if (!state.isHistoryReplay && !state.earlierFragment) {
     // token / timer 真源在后端: _update_turn_state 判过 "前一轮是否真的
     // 结束", 已经把该清的清了, turn_state 广播会让 applyTurnState 镜像
@@ -4674,7 +4954,21 @@ function sendUserMessage() {
   } else {
     content = combinedText;
   }
-  state.ws.send(JSON.stringify({ type: "user_message", content }));
+  // outbox: 写一条 pending entry, 带 client_msg_id. server 回 user_input
+  // event 时带回 client_msg_id, handleEvent 内 dequeue. WS 断 / reconnect
+  // 时未 ack 的会被 _outboxResend 重发.
+  const clientMsgId = _uuid();
+  const sessId = state.sessionId;
+  idbPutOutbox({
+    client_msg_id: clientMsgId,
+    sess_id: sessId,
+    content,
+    created_at: Date.now() / 1000,
+    attempts: 1,
+  });
+  state.ws.send(JSON.stringify({
+    type: "user_message", content, client_msg_id: clientMsgId,
+  }));
   // user bubble 等 server 注入 user_input echo 时再渲染（保证刷新/resume 也能看到）
   ta.value = "";
   ta.style.height = "auto";
@@ -4683,6 +4977,25 @@ function sendUserMessage() {
     localStorage.removeItem("ccr.draft." + state.sessionId);
   }
   clearAttachments();
+}
+
+// WS open / reconnect 时调 — 扫该 sess 的 pending outbox, 重发.
+async function _outboxResend(sessId) {
+  if (!sessId || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+  const pending = await idbListOutboxBySess(sessId);
+  for (const e of pending) {
+    try {
+      state.ws.send(JSON.stringify({
+        type: "user_message",
+        content: e.content,
+        client_msg_id: e.client_msg_id,
+      }));
+      // bump attempts (best effort, 不 await)
+      idbPutOutbox({ ...e, attempts: (e.attempts || 1) + 1 });
+    } catch (err) {
+      console.warn("outbox resend failed:", err);
+    }
+  }
 }
 
 // ---------- 附件 ----------

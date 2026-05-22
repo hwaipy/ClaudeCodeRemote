@@ -122,6 +122,9 @@ async def ws_session(ws: WebSocket, session_id: str) -> None:
                     # First user message after deactivate/stash → reactivate
                     if sess.deactivated_at is not None or sess.stashed_at is not None:
                         await manager.activate(sess.id)
+                    # client_msg_id (optional): SPA outbox 用作 ack 配对.
+                    # 透传到 user_input event 里, client 收回时 match → 标 sent.
+                    client_msg_id = msg.get("client_msg_id")
                     raw = msg.get("content")
                     # 支持 str 或 [{type:text|image, ...}, ...]
                     if isinstance(raw, str):
@@ -148,10 +151,12 @@ async def ws_session(ws: WebSocket, session_id: str) -> None:
                             continue
                     log.debug("ws->claude: user_message sess=%s type=%s",
                               session_id, type(content).__name__)
-                    # 先注入 user_input 事件（DB 持久化 + 前端 echo）
-                    await manager.inject_event(sess, {
-                        "type": "user_input", "content": content,
-                    })
+                    # 先注入 user_input 事件（DB 持久化 + 前端 echo）.
+                    # client_msg_id 也带在 event 里, SPA 收到时 outbox ack.
+                    _evt = {"type": "user_input", "content": content}
+                    if client_msg_id:
+                        _evt["client_msg_id"] = client_msg_id
+                    await manager.inject_event(sess, _evt)
                     # 写 stdin。如果 proc 是中断刚死的，drain 会抛 BrokenPipe /
                     # ConnectionResetError；这种情况 resume 起新 proc 再 retry 一次
                     try:
