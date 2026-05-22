@@ -8,3 +8,9 @@ CCR_HUB_ADMIN_PW=__set-a-strong-password__
 # 可选: hub 监听地址 (默认 127.0.0.1:1885, 经 nginx TLS 暴露).
 # CCR_HUB_HOST=127.0.0.1
 # CCR_HUB_PORT=1885
+
+# Passkey (WebAuthn) — RP ID 是 host (无协议无端口), ORIGIN 是完整 URL.
+# 浏览器跟 hub 通讯的公网名/源. 跟 nginx server_name 一致.
+CCR_HUB_RP_ID=hub.qpqi.group
+CCR_HUB_ORIGIN=https://hub.qpqi.group
+CCR_HUB_RP_NAME=ClaudeCodeRemote Hub

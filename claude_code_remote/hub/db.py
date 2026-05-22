@@ -82,6 +82,21 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_exp ON auth_sessions(expires_at);
+
+-- Passkey (FIDO2 / WebAuthn) 凭据 — 每用户多条 (每个设备一条).
+-- public_key 是 COSE-encoded bytes (BLOB). credential_id 用 base64url 当主键
+-- (FIDO2 spec 推荐, 唯一性来自 authenticator).
+CREATE TABLE IF NOT EXISTS passkeys (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL,
+  public_key    BLOB NOT NULL,
+  sign_count    INTEGER NOT NULL DEFAULT 0,
+  transports    TEXT,
+  nickname      TEXT,
+  created_at    REAL NOT NULL,
+  last_used_at  REAL
+);
+CREATE INDEX IF NOT EXISTS idx_passkeys_user ON passkeys(user_id);
 """
 
 
@@ -267,6 +282,61 @@ async def purge_expired_auth_sessions() -> int:
             "DELETE FROM auth_sessions WHERE expires_at < ?", (time.time(),),
         )
         return c.rowcount
+    return await asyncio.to_thread(_q)
+
+
+# ---- passkeys (WebAuthn / FIDO2 credentials) ----
+
+async def add_passkey(credential_id: str, user_id: str, public_key: bytes,
+                      sign_count: int, transports: str | None = None,
+                      nickname: str | None = None) -> None:
+    def _q():
+        _get_conn().execute(
+            "INSERT INTO passkeys(id, user_id, public_key, sign_count, "
+            "transports, nickname, created_at) VALUES(?,?,?,?,?,?,?)",
+            (credential_id, user_id, public_key, sign_count,
+             transports, nickname, time.time()),
+        )
+    await asyncio.to_thread(_q)
+
+
+async def get_passkey(credential_id: str) -> dict | None:
+    def _q():
+        row = _get_conn().execute(
+            "SELECT * FROM passkeys WHERE id=?", (credential_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    return await asyncio.to_thread(_q)
+
+
+async def list_passkeys_for_user(user_id: str) -> list[dict]:
+    def _q():
+        rows = _get_conn().execute(
+            "SELECT id, nickname, created_at, last_used_at "
+            "FROM passkeys WHERE user_id=? ORDER BY created_at DESC",
+            (user_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    return await asyncio.to_thread(_q)
+
+
+async def bump_passkey_sign_count(credential_id: str, sign_count: int) -> None:
+    def _q():
+        _get_conn().execute(
+            "UPDATE passkeys SET sign_count=?, last_used_at=? WHERE id=?",
+            (sign_count, time.time(), credential_id),
+        )
+    await asyncio.to_thread(_q)
+
+
+async def delete_passkey(credential_id: str, user_id: str) -> bool:
+    """删除该 user 拥有的 passkey. 返 True 当真删了."""
+    def _q():
+        c = _get_conn().execute(
+            "DELETE FROM passkeys WHERE id=? AND user_id=?",
+            (credential_id, user_id),
+        )
+        return c.rowcount > 0
     return await asyncio.to_thread(_q)
 
 

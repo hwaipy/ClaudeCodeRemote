@@ -22,6 +22,7 @@ from .. import server as app_server_pkg
 from . import db as hub_db
 from .api import me_handler, router as api_router
 from .forwarder import ForwardMiddleware
+from .passkey import router as passkey_router
 from .tunnel import router as tunnel_router, registry
 from .ws_forwarder import router as ws_forwarder_router
 
@@ -73,6 +74,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(api_router)
+app.include_router(passkey_router)
 app.include_router(tunnel_router)
 app.include_router(ws_forwarder_router)
 # Forward middleware 必须在 router 注册后加 (它兜底未匹配的 HTTP 路径).
