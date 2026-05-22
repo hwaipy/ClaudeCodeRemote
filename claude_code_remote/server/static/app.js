@@ -4009,9 +4009,58 @@ function markPermissionResolved(evt) {
 }
 
 // ---------- 事件分发 ----------
+// 防御性 DOM ts-sort: server 端 envelope.seq + envelope.ts 已严格单调,
+// WS / TCP 也保序, 正常不会乱. 但加一道兜底 —
+//   1. 每次 handleEvent 进来记 envelope.ts.
+//   2. handleEvent 完成后, 给 chat-log 新 append 的最末 child 打 data-ts.
+//   3. 检测到 ts 比上一个事件早 → schedule microtask 做一次 DOM stable sort.
+function _sortChatLogByTs() {
+  const log = $("chat-log");
+  if (!log) return;
+  const items = Array.from(log.children);
+  // 用 stable sort: 缺 data-ts 的保持原位置 — 给它一个微小的 epsilon
+  // (用 DOM 原始 index 作 secondary key, sort by [ts, originalIndex]).
+  const tagged = items.map((el, i) => {
+    const v = el.dataset && el.dataset.ts;
+    const t = v ? parseFloat(v) : NaN;
+    return { el, t: Number.isFinite(t) ? t : null, i };
+  });
+  tagged.sort((a, b) => {
+    if (a.t === null && b.t === null) return a.i - b.i;
+    if (a.t === null) return a.i - b.i;
+    if (b.t === null) return a.i - b.i;
+    return (a.t - b.t) || (a.i - b.i);
+  });
+  // 重排 DOM (insertBefore 自动 reparent, 不 detach)
+  for (let i = tagged.length - 1; i >= 0; i--) {
+    log.insertBefore(tagged[i].el, log.children[i] || null);
+  }
+}
 function handleEvent(evt, ts) {
   const t = evt && evt.type;
   if (!t) return;
+
+  // 兜底乱序检测 — 仅对实时事件 (有 ts, 非历史回放).
+  const _log = $("chat-log");
+  const _childCountBefore = _log ? _log.children.length : 0;
+  let _outOfOrder = false;
+  if (ts && !state.isHistoryReplay) {
+    if (state._lastEventTs != null && ts < state._lastEventTs - 1e-3) {
+      _outOfOrder = true;
+    }
+    state._lastEventTs = Math.max(state._lastEventTs || 0, ts);
+  }
+  // 把实际 dispatch 推一帧之后再做 reorder, 但 dispatch 同步保留
+  queueMicrotask(() => {
+    if (_log && _log.children.length > _childCountBefore) {
+      const newChild = _log.lastElementChild;
+      if (newChild && !newChild.dataset.ts && ts) {
+        newChild.dataset.ts = String(ts);
+      }
+    }
+    if (_outOfOrder) _sortChatLogByTs();
+  });
+
 
   if (t === "stream_event") return handleStreamEvent(evt.event || {});
   if (t === "assistant")    return handleAssistantMessage(evt.message || {});
