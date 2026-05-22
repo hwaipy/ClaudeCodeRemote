@@ -20,4 +20,5 @@ EXPOSE 1885
 CMD ["python3", "-m", "uvicorn", \
      "claude_code_remote.hub.main:app", \
      "--host", "0.0.0.0", "--port", "1885", \
-     "--log-level", "info"]
+     "--log-level", "info", \
+     "--ws-max-size", "67108864"]

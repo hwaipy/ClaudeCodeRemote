@@ -85,8 +85,12 @@ class HubClient:
     async def _connect_once(self) -> None:
         url = _ws_url(self.hub_url) + f"?token={self.device_token}"
         log.info("hub_client connecting %s", url)
+        # max_size 默认 1 MiB — claude 的大 tool_result / 大 diff 经 base64
+        # 编码 (+33%) 经常超 1MB → 1009 message too big → 整条 tunnel 断开.
+        # 调到 64 MiB 兜底 (跟 hub 端 starlette WebSocket 默认对齐).
         async with websockets.connect(url, ping_interval=20,
-                                       ping_timeout=15) as ws:
+                                       ping_timeout=15,
+                                       max_size=64 * 1024 * 1024) as ws:
             # hello
             hello = tp.Control(
                 stream_id="*",
