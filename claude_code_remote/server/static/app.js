@@ -1606,6 +1606,9 @@ async function enterChat(id, name, cwd, sessionState) {
     state.ws = null;
   }
   state.sessionId = id;
+  // 切 sid 第一时间 restore chat-input 草稿 — 避免上 session 输入残留. 任何
+  // 后续 enterChat 早 return 路径 (tmp / cache hit / cache miss) 都已经覆盖.
+  restoreChatInputDraft(id);
   document.body.classList.add("has-session");
   renderSessionList();   // 让列表的 "当前" 高亮标记跟随切换
   state.loadingHistory = false;
@@ -1666,6 +1669,7 @@ async function enterChat(id, name, cwd, sessionState) {
     $("chat-loading").hidden = true;
     state.revealChat = () => showView("chat");
     state.revealChat();
+    restoreChatInputDraft(id);
     if (window.innerWidth >= 900) $("chat-input").focus();
     if (sessionState && sessionState !== "running") {
       try {
@@ -1730,6 +1734,7 @@ async function enterChat(id, name, cwd, sessionState) {
   // animation right after click. History and /resume run in the
   // background; backlog_done eventually fades the spinner.
   showView("chat");
+  restoreChatInputDraft(id);
   if (window.innerWidth >= 900) $("chat-input").focus();
   state.revealChat = () => {};   // already revealed; first_paint / backlog_done don't need to do it
 
@@ -4635,6 +4640,10 @@ function sendUserMessage() {
     }
     ta.value = "";
     ta.style.height = "auto";
+    // 发出去后清掉该 session 的草稿
+    if (state.sessionId && !state.sessionId.startsWith("tmp-")) {
+      localStorage.removeItem("ccr.draft." + state.sessionId);
+    }
     const attCopy = state.attachments;
     state.attachments = [];
     renderAttachmentBar();
@@ -4669,6 +4678,10 @@ function sendUserMessage() {
   // user bubble 等 server 注入 user_input echo 时再渲染（保证刷新/resume 也能看到）
   ta.value = "";
   ta.style.height = "auto";
+  // 发出去后清该 session 草稿
+  if (state.sessionId && !state.sessionId.startsWith("tmp-")) {
+    localStorage.removeItem("ccr.draft." + state.sessionId);
+  }
   clearAttachments();
 }
 
@@ -4839,7 +4852,28 @@ $("chat-input").addEventListener("keydown", e => {
 $("chat-input").addEventListener("input", e => {
   e.target.style.height = "auto";
   e.target.style.height = Math.min(160, e.target.scrollHeight) + "px";
+  // 草稿持久化: 每 session 独立, 走 localStorage. 刷新 / 切 session 都保留.
+  // tmp 前缀 session 不存 (没真 spawn 过, 跟着销毁).
+  if (state.sessionId && !state.sessionId.startsWith("tmp-")) {
+    const key = "ccr.draft." + state.sessionId;
+    const v = e.target.value || "";
+    if (v) localStorage.setItem(key, v);
+    else localStorage.removeItem(key);
+  }
 });
+
+// 切 session 时还原对应草稿 (在 enterChat 末尾或 reveal 时调).
+function restoreChatInputDraft(sid) {
+  const ta = $("chat-input");
+  if (!ta) return;
+  const draft = sid && !sid.startsWith("tmp-")
+    ? (localStorage.getItem("ccr.draft." + sid) || "")
+    : "";
+  ta.value = draft;
+  // 重算高度
+  ta.style.height = "auto";
+  ta.style.height = Math.min(160, ta.scrollHeight) + "px";
+}
 
 // ---------- 启动 ----------
 renderPresets();
