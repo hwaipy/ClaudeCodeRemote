@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS sessions_cache (
   is_inactive         INTEGER NOT NULL DEFAULT 0,
   pending_permissions INTEGER NOT NULL DEFAULT 0,
   needs_action_detail TEXT,
+  cur_model           TEXT,
   created_at          REAL,
   updated_at          REAL,
   PRIMARY KEY (app_id, sid)
@@ -164,6 +165,7 @@ async def init(path: str | Path) -> None:
             "ALTER TABLE sessions_cache ADD COLUMN pending_permissions INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE sessions_cache ADD COLUMN needs_action_detail TEXT",
             "ALTER TABLE apps ADD COLUMN total_online_seconds INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE sessions_cache ADD COLUMN cur_model TEXT",
         ):
             try:
                 c.execute(ddl)
@@ -444,7 +446,7 @@ async def consume_pairing(code: str) -> str | None:
 _CACHE_COLS = (
     "name", "cwd", "state", "last_active", "model", "effort",
     "permission_mode", "is_stash", "is_inactive", "pending_permissions",
-    "needs_action_detail", "created_at",
+    "needs_action_detail", "cur_model", "created_at",
 )
 
 
@@ -480,8 +482,8 @@ def _upsert_session_sync(app_id: str, user_id: str, sid: str,
             "INSERT INTO sessions_cache(app_id, sid, user_id, name, cwd, "
             "state, last_active, model, effort, permission_mode, "
             "is_stash, is_inactive, pending_permissions, needs_action_detail, "
-            "created_at, updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "cur_model, created_at, updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 app_id, sid, user_id,
                 fields.get("name", ""),
@@ -495,6 +497,7 @@ def _upsert_session_sync(app_id: str, user_id: str, sid: str,
                 int(bool(fields.get("is_inactive"))),
                 int(fields.get("pending_permissions") or 0),
                 fields.get("needs_action_detail"),
+                fields.get("cur_model") or "",
                 fields.get("created_at", now),
                 now,
             ),

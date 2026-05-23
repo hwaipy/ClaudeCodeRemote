@@ -232,6 +232,11 @@ def _norm_session(payload: dict) -> dict:
         out["pending_permissions"] = int(payload.get("pending_permissions") or 0)
     if "needs_action_detail" in payload:
         out["needs_action_detail"] = payload.get("needs_action_detail")
+    # cur_model: claude CLI 报回的实际 model id (e.g. deepseek-v4-pro 走 USTC,
+    # 或 claude-opus-4-7-...). SPA 用它判断该 session 是 native claude 还是
+    # 自定义 endpoint 来决定 model 选择 UI.
+    if "cur_model" in payload:
+        out["cur_model"] = payload.get("cur_model") or ""
     return out
 
 

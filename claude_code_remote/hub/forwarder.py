@@ -133,6 +133,7 @@ class ForwardMiddleware(BaseHTTPMiddleware):
                     "created_at": s.get("created_at"),
                     "model": s.get("model") or "",
                     "effort": s.get("effort") or "",
+                    "cur_model": s.get("cur_model") or "",
                     "permission_mode": s.get("permission_mode"),
                     "is_stash": bool(s.get("is_stash")),
                     "is_inactive": bool(s.get("is_inactive")),
