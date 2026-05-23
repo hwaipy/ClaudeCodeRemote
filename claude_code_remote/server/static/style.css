@@ -323,7 +323,8 @@ label {
 label:first-of-type { margin-top: 0; }
 
 input[type=text], input[type=email], input[type=password],
-input[type=search], input[type=url], input[type=tel], textarea {
+input[type=search], input[type=url], input[type=tel],
+textarea, .modal-body select {
   width: 100%;
   padding: 11px 13px;
   background: var(--bg-input);
@@ -333,6 +334,12 @@ input[type=search], input[type=url], input[type=tel], textarea {
   color: var(--text);
   font-family: inherit;
   font-size: inherit;
+}
+.modal-body select {
+  /* select 默认有 native arrow, 别盖了 — appearance:auto 保留 (UA chevron).
+     padding-right 留点空给 chevron. */
+  padding-right: 28px;
+  cursor: pointer;
 }
 input:focus, textarea:focus { border-color: var(--accent); }
 
