@@ -1375,6 +1375,7 @@ body.theme-dark .conv-status .cs-spark { color: #e8a690; }
   display: flex; flex-direction: column; gap: 2px;
 }
 .model-menu[hidden] { display: none; }
+.model-menu-item[hidden] { display: none !important; }
 .model-menu-item {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 10px;
