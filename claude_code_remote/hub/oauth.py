@@ -189,6 +189,7 @@ async def oauth_callback(provider: str, request: Request):
 
     # 换 access_token
     async with httpx.AsyncClient(timeout=10) as client:
+        r = None
         try:
             r = await client.post(
                 p.token_url,
@@ -204,11 +205,25 @@ async def oauth_callback(provider: str, request: Request):
             r.raise_for_status()
             tok = r.json()
         except Exception as e:  # noqa: BLE001
-            log.warning("[%s] token exchange failed: %s", provider, e)
-            raise HTTPException(status_code=502, detail=f"token_exchange_failed: {e}")
+            body_preview = ""
+            try:
+                if r is not None:
+                    body_preview = (r.text or "")[:200]
+            except Exception:
+                pass
+            log.warning("[%s] token exchange failed type=%s msg=%r body=%r",
+                        provider, type(e).__name__, str(e), body_preview)
+            raise HTTPException(
+                status_code=502,
+                detail=f"token_exchange_failed type={type(e).__name__} msg={e!s} body={body_preview!r}",
+            )
         access_token = tok.get("access_token")
         if not access_token:
-            raise HTTPException(status_code=502, detail="no_access_token")
+            log.warning("[%s] no access_token; tok=%r", provider, tok)
+            raise HTTPException(
+                status_code=502,
+                detail=f"no_access_token: {tok}",
+            )
 
         # 拉 userinfo
         try:
