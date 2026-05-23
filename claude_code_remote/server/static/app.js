@@ -849,16 +849,19 @@ function renderOneCard(s, container, section) {
         try {
           await api(`/api/sessions/${encodeURIComponent(s.id)}/deactivate`,
                      { method: "POST", body: JSON.stringify({}) });
+          if (state.hubMode) setTimeout(hubFetchSessions, 200);
         } catch (err) { alert("Deactivate failed: " + err.message); }
       } else if (action === "stash") {
         try {
           await api(`/api/sessions/${encodeURIComponent(s.id)}/stash`,
                      { method: "POST", body: JSON.stringify({}) });
+          if (state.hubMode) setTimeout(hubFetchSessions, 200);
         } catch (err) { alert("Stash failed: " + err.message); }
       } else if (action === "activate") {
         try {
           await api(`/api/sessions/${encodeURIComponent(s.id)}/activate`,
                      { method: "POST", body: JSON.stringify({}) });
+          if (state.hubMode) setTimeout(hubFetchSessions, 200);
         } catch (err) { alert("Activate failed: " + err.message); }
       }
     });
