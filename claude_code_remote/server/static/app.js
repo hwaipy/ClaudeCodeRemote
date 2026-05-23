@@ -1545,7 +1545,6 @@ ANTHROPIC_API_KEY=                    # optional, blank = mock`;
         <div class="app-rows">
           <div class="app-row-1">
             <span class="app-name"></span>
-            <span class="app-status"></span>
           </div>
           <div class="app-row-2">
             <span class="app-stat">Authorized ${escHTML(authoredAgo)} ago</span>
@@ -1555,7 +1554,6 @@ ANTHROPIC_API_KEY=                    # optional, blank = mock`;
         <button class="app-revoke" type="button" title="Revoke" aria-label="Revoke">✕</button>
       `;
       row.querySelector(".app-name").textContent = a.name || "(unnamed)";
-      row.querySelector(".app-status").textContent = a.online ? "online" : "offline";
       row.querySelector(".app-revoke").addEventListener("click", async () => {
         if (!confirm(`Revoke "${a.name}"? Its device token will be invalidated.`)) return;
         try {
