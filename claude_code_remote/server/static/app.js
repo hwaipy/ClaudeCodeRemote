@@ -1471,9 +1471,16 @@ ANTHROPIC_API_KEY=                    # optional, blank = mock`;
   async function _copy(text, btn) {
     try {
       await navigator.clipboard.writeText(text);
-      const old = btn.textContent;
-      btn.textContent = "Copied!";
-      setTimeout(() => { btn.textContent = old; }, 1200);
+      // icon-only 按钮 (含 SVG 子元素) 走 class flash, 不动 innerHTML.
+      // 普通 text 按钮直接改 textContent 显 "Copied!".
+      if (btn.querySelector("svg")) {
+        btn.classList.add("copied");
+        setTimeout(() => btn.classList.remove("copied"), 1200);
+      } else {
+        const old = btn.textContent;
+        btn.textContent = "Copied!";
+        setTimeout(() => { btn.textContent = old; }, 1200);
+      }
     } catch (e) {
       alert("Copy failed. Select the text and Ctrl-C.");
     }

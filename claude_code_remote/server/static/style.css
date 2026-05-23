@@ -2719,6 +2719,20 @@ body:not(.hub-mode) .hub-only { display: none !important; }
   padding: 4px 10px;
   font-size: 12px;
 }
+/* icon-only copy 按钮 (banner 顶 URL 复制): 紧凑方形, SVG 居中. */
+.copybox .copybox-iconbtn {
+  width: 30px; height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Copied! 反馈 — icon 闪一下绿底, 1.2s 后还原. */
+.copybox .copybox-iconbtn.copied {
+  background: #1f883d;
+  border-color: #1f883d;
+  color: #fff;
+}
 .modal-actions {
   display: flex; gap: 8px; justify-content: flex-end;
   margin-top: 16px;
