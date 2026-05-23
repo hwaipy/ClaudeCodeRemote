@@ -2562,7 +2562,7 @@ const _MODEL_BRANDS = [
   { match: ["llama"],               tier: "llama",    slug: "meta" },
   { match: ["mistral"],             tier: "mistral",  slug: "mistralai" },
   { match: ["grok"],                tier: "grok",     slug: "x" },
-  { match: ["kimi", "moonshot"],    tier: "kimi",     slug: "moonshotai" },
+  { match: ["kimi", "moonshot"],    tier: "kimi",     slug: "moonshotai", boost: 1.2 },
   { match: ["doubao"],              tier: "doubao",   slug: "bytedance" },
   { match: ["phi", "wizardlm", "copilot"],
                                     tier: "copilot",  slug: "githubcopilot" },
