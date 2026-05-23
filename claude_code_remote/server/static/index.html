@@ -651,17 +651,9 @@ docker compose logs -f ccr-app-local</code>
         <button type="button" class="spawn-perm-btn" data-mode="plan">Plan</button>
         <button type="button" class="spawn-perm-btn" data-mode="allow_all">Allow all</button>
       </div>
-      <div class="spawn-model-effort">
-        <div class="spawn-me-col">
-          <label for="spawn-model">Model</label>
-          <select id="spawn-model">
-            <option value="">Default</option>
-            <option value="opus">opus</option>
-            <option value="sonnet">sonnet</option>
-            <option value="haiku">haiku</option>
-          </select>
-        </div>
-      </div>
+      <!-- Model 选项已从 spawn modal 移除 — 创建时不指定, 由 server 端
+           wrapper / CLI / chat-menu 决定. 用户可后续在 chat-menu 切. -->
+      <select id="spawn-model" hidden><option value=""></option></select>
       <div class="err" id="spawn-err"></div>
     </div>
     <div class="modal-foot">
