@@ -2546,26 +2546,55 @@ function _findTurnCardsByKey(root, key) {
   );
 }
 
-// 推断 model tier — opus/sonnet/haiku 有 menu icon; 其它常见 (deepseek/gpt/...)
-// 返回 "other", turn-card 用 fallback inline SVG 显示 generic spark.
+// 推断 model brand — Anthropic 系细分到 tier (opus/sonnet/haiku), 其它 LLM
+// 厂家粒度即可 (品牌 logo 区分度足够).
+// 顺序敏感: 第一个匹配 substring 命中即返回. claude 在最后兜底.
+const _MODEL_BRANDS = [
+  // Anthropic — 细分 tier (现有 .model-menu-item icon 复用)
+  { match: ["opus"],                tier: "opus" },
+  { match: ["sonnet"],              tier: "sonnet" },
+  { match: ["haiku"],               tier: "haiku" },
+  // 其它大厂 — simple-icons.org slug + brand color
+  { match: ["deepseek"],            tier: "deepseek", slug: "deepseek", color: "4D6BFE" },
+  { match: ["gemini"],              tier: "gemini",   slug: "googlegemini", color: "4285F4" },
+  { match: ["gpt", "openai", "o3", "o4", "o1"],
+                                    tier: "openai",   slug: "openai", color: "412991" },
+  { match: ["qwen"],                tier: "qwen",     slug: "qwen", color: "1A6FFF" },
+  { match: ["llama"],               tier: "llama",    slug: "meta", color: "0467DF" },
+  { match: ["mistral"],             tier: "mistral",  slug: "mistralai", color: "FA520F" },
+  { match: ["grok"],                tier: "grok",     slug: "x", color: "000000" },
+  { match: ["kimi", "moonshot"],    tier: "kimi",     slug: "moonshot", color: "16B998" },
+  { match: ["doubao"],              tier: "doubao",   slug: "bytedance", color: "00BFFF" },
+  { match: ["phi", "wizardlm"],     tier: "phi",      slug: "microsoftcopilot", color: "8B5CF6" },
+  { match: ["glm", "zhipu"],        tier: "glm",      slug: "alibabadotcom", color: "2563EB" },
+  // 兜底 Anthropic Claude — 包含 'claude' 字样, 走通用 claude logo
+  { match: ["claude", "anthropic"], tier: "claude",   slug: "claude", color: "DA7757" },
+];
 function _tierFromModel(model) {
   const lower = (model || "").toLowerCase();
-  if (lower.includes("opus")) return "opus";
-  if (lower.includes("sonnet")) return "sonnet";
-  if (lower.includes("haiku")) return "haiku";
   if (!lower) return "";
-  // 任何非空但不是 claude 三 tier 的 → 通用图标
+  for (const b of _MODEL_BRANDS) {
+    if (b.match.some(s => lower.includes(s))) return b.tier;
+  }
   return "other";
 }
-// 通用 spark fallback (currentColor 走父级 .turn-card-icon 的颜色).
+// 通用 spark fallback (currentColor 走父级 icon 的颜色).
 const _OTHER_TIER_SVG = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 13.5 10.5 21 12 13.5 13.5 12 21 10.5 13.5 3 12 10.5 10.5z"/></svg>`;
 function _iconHTMLForTier(tier) {
   if (!tier) return "";
   if (tier === "other") return _OTHER_TIER_SVG;
-  const src = document.querySelector(
+  // Anthropic 系优先用已存在的 .model-menu-icon SVG (跟现有 menu 视觉一致)
+  const menuIcon = document.querySelector(
     `.model-menu-item[data-model="${tier}"] .model-menu-icon`,
   );
-  return src ? src.innerHTML : _OTHER_TIER_SVG;
+  if (menuIcon && menuIcon.innerHTML) return menuIcon.innerHTML;
+  // 其它走 simple-icons CDN brand logo. 用 <img> 不是 inline svg, 浏览器
+  // 自己 cache, SW 不接管 cross-origin 图片.
+  const brand = _MODEL_BRANDS.find(b => b.tier === tier);
+  if (brand && brand.slug) {
+    return `<img src="https://cdn.simpleicons.org/${brand.slug}/${brand.color}" alt="${tier}" width="14" height="14" style="display:block">`;
+  }
+  return _OTHER_TIER_SVG;
 }
 
 function _ensureTurnCard() {
@@ -2839,24 +2868,27 @@ function refreshConvStatus() {
       '.model-menu-item[data-model=""] .model-menu-icon'
     );
     if (defIcon) {
-      const lower = (curM || "").toLowerCase();
-      let tier = "";
-      if (lower.includes("opus")) tier = "opus";
-      else if (lower.includes("sonnet")) tier = "sonnet";
-      else if (lower.includes("haiku")) tier = "haiku";
+      const tier = _tierFromModel(curM);
       const cur = defIcon.dataset.tier || "";
       if (tier !== cur) {
         defIcon.dataset.tier = tier;
         if (tier) {
-          const src = document.querySelector(
-            `.model-menu-item[data-model="${tier}"] .model-menu-icon`
-          );
-          if (src) defIcon.innerHTML = src.innerHTML;
+          defIcon.innerHTML = _iconHTMLForTier(tier);
         } else if (defIcon.dataset.chipHtml) {
           defIcon.innerHTML = defIcon.dataset.chipHtml;
         }
       }
     }
+    // 自定义 endpoint (非 Claude 原生): 隐藏 opus/sonnet/haiku 子项 — 用户
+    // 选了也没用 (USTC / 本地 gateway 不响应 Anthropic alias). 仅 Default
+    // (CLI picks · <cur_model>) 一行.
+    const claudeTiers = new Set(["", "claude", "opus", "sonnet", "haiku"]);
+    const isClaudeNative = claudeTiers.has(_tierFromModel(curM));
+    document.querySelectorAll(
+      '#model-menu .model-menu-item[data-model="opus"], '
+      + '#model-menu .model-menu-item[data-model="sonnet"], '
+      + '#model-menu .model-menu-item[data-model="haiku"]',
+    ).forEach(b => { b.hidden = !isClaudeNative; });
     // chat-head model button icon 跟随当前选定 model: model 非空 → 用对应
     // tier 的 SVG; 空 (Default) → 用 default item 的 icon (即 cur_model
     // 推断出的 tier icon, 在 defIcon 同步后是最新). guard innerHTML 写入
