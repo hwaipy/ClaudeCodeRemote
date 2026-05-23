@@ -2547,29 +2547,33 @@ function _findTurnCardsByKey(root, key) {
 }
 
 // 推断 model brand — Anthropic 系细分到 tier (opus/sonnet/haiku), 其它 LLM
-// 厂家粒度即可 (品牌 logo 区分度足够).
-// 顺序敏感: 第一个匹配 substring 命中即返回. claude 在最后兜底.
+// 厂家粒度即可 (品牌 logo 区分度足够). 顺序敏感: 第一个匹配 substring 命中即返回.
+// 图标来源: simple-icons SVG 已下到 static/lib/llm-icons/<slug>.svg + SW 预 cache,
+// 不走 CDN 减少首次延迟 + 支持离线.
 const _MODEL_BRANDS = [
   // Anthropic — 细分 tier (现有 .model-menu-item icon 复用)
   { match: ["opus"],                tier: "opus" },
   { match: ["sonnet"],              tier: "sonnet" },
   { match: ["haiku"],               tier: "haiku" },
-  // 其它大厂 — simple-icons.org slug + brand color
-  { match: ["deepseek"],            tier: "deepseek", slug: "deepseek", color: "4D6BFE" },
-  { match: ["gemini"],              tier: "gemini",   slug: "googlegemini", color: "4285F4" },
+  // 其它大厂 — 本地 svg 文件名 + brand color (color 已 baked 进 svg)
+  { match: ["deepseek"],            tier: "deepseek", slug: "deepseek" },
+  { match: ["gemini"],              tier: "gemini",   slug: "googlegemini" },
   { match: ["gpt", "openai", "o3", "o4", "o1"],
-                                    tier: "openai",   slug: "openai", color: "412991" },
-  { match: ["qwen"],                tier: "qwen",     slug: "qwen", color: "1A6FFF" },
-  { match: ["llama"],               tier: "llama",    slug: "meta", color: "0467DF" },
-  { match: ["mistral"],             tier: "mistral",  slug: "mistralai", color: "FA520F" },
-  { match: ["grok"],                tier: "grok",     slug: "x", color: "000000" },
-  { match: ["kimi", "moonshot"],    tier: "kimi",     slug: "moonshot", color: "16B998" },
-  { match: ["doubao"],              tier: "doubao",   slug: "bytedance", color: "00BFFF" },
-  { match: ["phi", "wizardlm"],     tier: "phi",      slug: "microsoftcopilot", color: "8B5CF6" },
-  { match: ["glm", "zhipu"],        tier: "glm",      slug: "alibabadotcom", color: "2563EB" },
-  // 兜底 Anthropic Claude — 包含 'claude' 字样, 走通用 claude logo
-  { match: ["claude", "anthropic"], tier: "claude",   slug: "claude", color: "DA7757" },
+                                    tier: "openai",   slug: "_openai_inline" },
+  { match: ["qwen"],                tier: "qwen",     slug: "qwen" },
+  { match: ["llama"],               tier: "llama",    slug: "meta" },
+  { match: ["mistral"],             tier: "mistral",  slug: "mistralai" },
+  { match: ["grok"],                tier: "grok",     slug: "x" },
+  { match: ["kimi", "moonshot"],    tier: "kimi",     slug: "moonshotai" },
+  { match: ["doubao"],              tier: "doubao",   slug: "bytedance" },
+  { match: ["phi", "wizardlm", "copilot"],
+                                    tier: "copilot",  slug: "githubcopilot" },
+  { match: ["glm", "zhipu"],        tier: "glm",      slug: "alibabadotcom" },
+  // 兜底 Anthropic Claude
+  { match: ["claude", "anthropic"], tier: "claude",   slug: "claude" },
 ];
+// OpenAI 无 simple-icons (商标策略). 自己 inline 一个简化"六瓣花"近似形, 紫色填充.
+const _OPENAI_INLINE_SVG = `<svg viewBox="0 0 24 24" width="14" height="14" fill="#412991" aria-hidden="true"><path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z"/></svg>`;
 function _tierFromModel(model) {
   const lower = (model || "").toLowerCase();
   if (!lower) return "";
@@ -2588,13 +2592,12 @@ function _iconHTMLForTier(tier) {
     `.model-menu-item[data-model="${tier}"] .model-menu-icon`,
   );
   if (menuIcon && menuIcon.innerHTML) return menuIcon.innerHTML;
-  // 其它走 simple-icons CDN brand logo. 用 <img> 不是 inline svg, 浏览器
-  // 自己 cache, SW 不接管 cross-origin 图片.
   const brand = _MODEL_BRANDS.find(b => b.tier === tier);
-  if (brand && brand.slug) {
-    return `<img src="https://cdn.simpleicons.org/${brand.slug}/${brand.color}" alt="${tier}" width="14" height="14" style="display:block">`;
-  }
-  return _OTHER_TIER_SVG;
+  if (!brand || !brand.slug) return _OTHER_TIER_SVG;
+  if (brand.slug === "_openai_inline") return _OPENAI_INLINE_SVG;
+  // 本地 <img>, SW 预 cache, 首次/离线都无延迟.
+  const base = new URL("./", document.baseURI).pathname;
+  return `<img src="${base}static/lib/llm-icons/${brand.slug}.svg" alt="${tier}" width="14" height="14" style="display:block">`;
 }
 
 function _ensureTurnCard() {
