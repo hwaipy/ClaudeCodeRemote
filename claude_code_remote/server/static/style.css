@@ -2802,15 +2802,22 @@ body:not(.hub-mode) .hub-only { display: none !important; }
   .hub-landing { padding: 22px 16px 28px; }
 }
 
-/* Home view 顶部 brand 标签 */
+/* Home view brand — 放在 home-top 内部第一个 child, 共享 home-top 的
+   safe-area-inset-top padding (notch 让位). flex 1 让 icons 自然推到右侧. */
 .home-brand {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 13px;
   letter-spacing: 0.3px;
   color: var(--text-muted);
   font-weight: 600;
-  padding: 8px 4px 6px;
-  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 4px;
 }
+/* search-open 时整行 icons 都缩到 0, brand 也得让位 */
+.home-top.search-open .home-brand { display: none; }
 
 .login-oauth-row {
   display: flex;
