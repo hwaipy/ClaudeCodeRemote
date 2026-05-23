@@ -846,23 +846,35 @@ function renderOneCard(s, container, section) {
           idbDeleteSession(s.id);   // 顺便清掉浏览器 IDB 缓存
         } catch (err) { alert("Delete failed: " + err.message); }
       } else if (action === "deactivate") {
+        _optimisticSessionUpdate(s.id, { is_inactive: true, is_stash: false });
         try {
           await api(`/api/sessions/${encodeURIComponent(s.id)}/deactivate`,
                      { method: "POST", body: JSON.stringify({}) });
-          if (state.hubMode) setTimeout(hubFetchSessions, 200);
-        } catch (err) { alert("Deactivate failed: " + err.message); }
+          if (state.hubMode) setTimeout(hubFetchSessions, 500);
+        } catch (err) {
+          alert("Deactivate failed: " + err.message);
+          if (state.hubMode) hubFetchSessions();   // 回滚
+        }
       } else if (action === "stash") {
+        _optimisticSessionUpdate(s.id, { is_stash: true, is_inactive: false });
         try {
           await api(`/api/sessions/${encodeURIComponent(s.id)}/stash`,
                      { method: "POST", body: JSON.stringify({}) });
-          if (state.hubMode) setTimeout(hubFetchSessions, 200);
-        } catch (err) { alert("Stash failed: " + err.message); }
+          if (state.hubMode) setTimeout(hubFetchSessions, 500);
+        } catch (err) {
+          alert("Stash failed: " + err.message);
+          if (state.hubMode) hubFetchSessions();
+        }
       } else if (action === "activate") {
+        _optimisticSessionUpdate(s.id, { is_inactive: false, is_stash: false });
         try {
           await api(`/api/sessions/${encodeURIComponent(s.id)}/activate`,
                      { method: "POST", body: JSON.stringify({}) });
-          if (state.hubMode) setTimeout(hubFetchSessions, 200);
-        } catch (err) { alert("Activate failed: " + err.message); }
+          if (state.hubMode) setTimeout(hubFetchSessions, 500);
+        } catch (err) {
+          alert("Activate failed: " + err.message);
+          if (state.hubMode) hubFetchSessions();
+        }
       }
     });
   });
@@ -1135,6 +1147,15 @@ const renameInFlight = new Set();
 // snapshot forward cumulatively either. The snapshot only rolls forward
 // when a single bump exceeds the threshold.
 const ACTIVE_SORT_HYSTERESIS_S = 180;
+
+// 乐观更新 — stash / deactivate / activate 等用. patch 直接合并到 sessionsById
+// 然后立即 renderSessionList; 200ms 后 hubFetchSessions refetch 校准.
+function _optimisticSessionUpdate(sid, patch) {
+  const cur = state.sessionsById.get(sid);
+  if (!cur) return;
+  state.sessionsById.set(sid, Object.assign({}, cur, patch));
+  renderSessionList();
+}
 
 function _withSortKey(msg, existing) {
   const newLA = msg.last_activity_at || 0;
