@@ -2673,6 +2673,42 @@ body:not(.hub-mode) .hub-only { display: none !important; }
   text-align: center;
   font-size: 13px;
 }
+.login-oauth {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.login-oauth-sep {
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  margin: 8px 0 4px;
+  position: relative;
+}
+.login-oauth-sep::before,
+.login-oauth-sep::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 38%;
+  height: 1px;
+  background: var(--border-soft);
+}
+.login-oauth-sep::before { left: 0; }
+.login-oauth-sep::after  { right: 0; }
+.login-oauth-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 8px;
+  text-decoration: none;
+}
+.login-oauth-icon {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  display: inline-block;
+}
 .login-footer a {
   color: var(--text-dim);
   text-decoration: none;

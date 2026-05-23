@@ -11,5 +11,15 @@ services:
       CCR_HUB_DB: /data/hub.db
       CCR_HUB_ADMIN_EMAIL: "${CCR_HUB_ADMIN_EMAIL:?must set}"
       CCR_HUB_ADMIN_PW: "${CCR_HUB_ADMIN_PW:?must set}"
+      # 自身对外 URL (OAuth callback 用)
+      CCR_HUB_ORIGIN: "${CCR_HUB_ORIGIN:-https://hub.qpqi.group}"
+      # OAuth — provider 的 client_id/secret 留空时该 provider 不启用 (前端
+      # 不显示按钮). 配好任一个就出现对应"Sign in with X"按钮.
+      CCR_HUB_OAUTH_GOOGLE_CLIENT_ID:     "${CCR_HUB_OAUTH_GOOGLE_CLIENT_ID:-}"
+      CCR_HUB_OAUTH_GOOGLE_CLIENT_SECRET: "${CCR_HUB_OAUTH_GOOGLE_CLIENT_SECRET:-}"
+      CCR_HUB_OAUTH_GITHUB_CLIENT_ID:     "${CCR_HUB_OAUTH_GITHUB_CLIENT_ID:-}"
+      CCR_HUB_OAUTH_GITHUB_CLIENT_SECRET: "${CCR_HUB_OAUTH_GITHUB_CLIENT_SECRET:-}"
+      CCR_HUB_OAUTH_GITEE_CLIENT_ID:      "${CCR_HUB_OAUTH_GITEE_CLIENT_ID:-}"
+      CCR_HUB_OAUTH_GITEE_CLIENT_SECRET:  "${CCR_HUB_OAUTH_GITEE_CLIENT_SECRET:-}"
     volumes:
       - ./data:/data

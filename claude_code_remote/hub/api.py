@@ -58,9 +58,14 @@ async def logout(response: Response, ccr_sess: str | None = Cookie(None)):
 async def me_handler(ccr_sess: str | None) -> dict:
     """SPA probe — 让前端知道当前是 hub 模式 + 登录身份 + apps list.
     路径 /api/me (不在 /api/hub/ 下), 让 hub + local 用同一 endpoint."""
+    # OAuth providers (env 配置过 client_id/secret 的) — 即使未登录也返,
+    # 这样 login 页能渲对应按钮.
+    from .oauth import enabled_providers
+    oauth = enabled_providers()
     user_id = await auth.get_user_id(ccr_sess)
     if not user_id:
-        return {"mode": "hub", "user_id": None, "apps": []}
+        return {"mode": "hub", "user_id": None, "apps": [],
+                "oauth_providers": oauth}
     apps_rows = await hub_db.list_apps_for_user(user_id)
     online_set = set(registry.online_app_ids())
     apps = [
@@ -73,7 +78,8 @@ async def me_handler(ccr_sess: str | None) -> dict:
         }
         for r in apps_rows
     ]
-    return {"mode": "hub", "user_id": user_id, "apps": apps}
+    return {"mode": "hub", "user_id": user_id, "apps": apps,
+            "oauth_providers": oauth}
 
 
 @router.get("/apps")

@@ -83,6 +83,20 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_exp ON auth_sessions(expires_at);
+
+-- OAuth 外部身份链接. (provider, sub) 唯一; 一个 user 可链接多 provider.
+CREATE TABLE IF NOT EXISTS oauth_links (
+  provider     TEXT NOT NULL,
+  sub          TEXT NOT NULL,
+  user_id      TEXT NOT NULL,
+  email        TEXT,
+  display      TEXT,
+  created_at   REAL NOT NULL,
+  last_used_at REAL,
+  PRIMARY KEY (provider, sub)
+);
+CREATE INDEX IF NOT EXISTS idx_oauth_links_user  ON oauth_links(user_id);
+CREATE INDEX IF NOT EXISTS idx_oauth_links_email ON oauth_links(email);
 """
 
 
@@ -261,6 +275,66 @@ async def destroy_auth_session(sid: str) -> None:
     def _q():
         _get_conn().execute("DELETE FROM auth_sessions WHERE id=?", (sid,))
     await asyncio.to_thread(_q)
+
+
+# ---- OAuth links ----
+
+async def find_oauth_link(provider: str, sub: str) -> dict | None:
+    def _q():
+        row = _get_conn().execute(
+            "SELECT * FROM oauth_links WHERE provider=? AND sub=?",
+            (provider, sub),
+        ).fetchone()
+        return dict(row) if row else None
+    return await asyncio.to_thread(_q)
+
+
+async def upsert_oauth_link(provider: str, sub: str, user_id: str,
+                            email: str | None, display: str | None) -> None:
+    def _q():
+        c = _get_conn()
+        existing = c.execute(
+            "SELECT 1 FROM oauth_links WHERE provider=? AND sub=?",
+            (provider, sub),
+        ).fetchone()
+        now = time.time()
+        if existing:
+            c.execute(
+                "UPDATE oauth_links SET email=?, display=?, last_used_at=? "
+                "WHERE provider=? AND sub=?",
+                (email, display, now, provider, sub),
+            )
+        else:
+            c.execute(
+                "INSERT INTO oauth_links(provider, sub, user_id, email, "
+                "display, created_at, last_used_at) VALUES(?,?,?,?,?,?,?)",
+                (provider, sub, user_id, email, display, now, now),
+            )
+    await asyncio.to_thread(_q)
+
+
+async def find_user_by_email(email: str) -> str | None:
+    def _q():
+        row = _get_conn().execute(
+            "SELECT id FROM users WHERE email=?", (email,),
+        ).fetchone()
+        return row["id"] if row else None
+    return await asyncio.to_thread(_q)
+
+
+async def create_oauth_user(email: str) -> str:
+    """OAuth 首次登录、email 在 users 表里没有 → 创建一个无密码 user.
+    password_hash 标 'oauth-only' 占位 (verify_password 永不命中)."""
+    def _q():
+        c = _get_conn()
+        uid = "user-" + secrets.token_hex(8)
+        c.execute(
+            "INSERT INTO users(id, email, password_hash, created_at) "
+            "VALUES(?,?,?,?)",
+            (uid, email, "oauth-only", time.time()),
+        )
+        return uid
+    return await asyncio.to_thread(_q)
 
 
 async def purge_expired_auth_sessions() -> int:

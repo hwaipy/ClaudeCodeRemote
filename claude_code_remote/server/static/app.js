@@ -371,6 +371,30 @@ async function tryLogin(tok) {
   }
 }
 
+// 渲染 login 页底部的 OAuth 按钮 (Google / GitHub / Gitee / ...).
+// state.oauthProviders 由 boot() /api/me 拿到. 没启用 provider 时啥都不渲.
+function renderOAuthButtons() {
+  const box = $("login-oauth");
+  if (!box) return;
+  box.innerHTML = "";
+  const list = state.oauthProviders || [];
+  if (!list.length) return;
+  const sep = document.createElement("div");
+  sep.className = "login-oauth-sep";
+  sep.textContent = "or";
+  box.appendChild(sep);
+  for (const p of list) {
+    const a = document.createElement("a");
+    a.href = `api/hub/auth/${encodeURIComponent(p.key)}/start`;
+    a.className = "btn btn-secondary btn-block login-oauth-btn";
+    a.style.borderColor = p.color || "";
+    a.innerHTML =
+      `<span class="login-oauth-icon" style="background:${p.color || "#888"}"></span>`
+      + `Sign in with ${escHTML(p.label || p.key)}`;
+    box.appendChild(a);
+  }
+}
+
 async function hubLogin(email, password) {
   // hub mode: POST /api/hub/login → server set ccr_sess cookie
   await api("/api/hub/login", {
@@ -5307,7 +5331,9 @@ if ("serviceWorker" in navigator) {
     state.hubMode = true;
     state.userId = me.user_id || null;
     state.apps = me.apps || [];
+    state.oauthProviders = me.oauth_providers || [];
     document.body.classList.add("hub-mode");
+    renderOAuthButtons();
     if (state.userId) {
       enterHome();
     } else {

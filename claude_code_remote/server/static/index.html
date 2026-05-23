@@ -36,6 +36,8 @@
         <input id="login-password" type="password" autocomplete="current-password" placeholder="password">
       </div>
       <button class="btn btn-primary btn-block" id="login-go">Sign in</button>
+      <!-- OAuth provider 按钮 — JS 按 /api/me oauth_providers 动态渲染. hub-only. -->
+      <div class="login-oauth login-hub" id="login-oauth"></div>
       <div class="err" id="login-err"></div>
       <div class="hint login-local">Token is set via the server env var <span class="kbd">CCR_TOKEN</span>.</div>
       <div class="hint login-hub">Hub mode — sign in with the account configured on the Hub.</div>
