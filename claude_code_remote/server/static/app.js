@@ -1428,9 +1428,10 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
   if (!view) return;
 
   function fill() {
-    const url = location.origin + (location.pathname.replace(/\/$/, "") || "");
-    urlEl.textContent = url;
-    const wsUrl = url.replace(/^http/, "ws");
+    const baseUrl = location.origin + (location.pathname.replace(/\/$/, "") || "");
+    // banner 让 AI agent 直接读到这页指南, URL 带 #help hash.
+    urlEl.textContent = baseUrl + "/#help";
+    const wsUrl = baseUrl.replace(/^http/, "ws");
     envEl.textContent =
       `CCR_TOKEN=$(openssl rand -hex 16)
 CCR_HUB_URL=${wsUrl}
