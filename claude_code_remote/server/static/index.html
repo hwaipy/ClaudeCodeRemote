@@ -13,37 +13,80 @@
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 <link rel="icon" type="image/png" sizes="192x192" href="static/icon-192.png">
 <link rel="apple-touch-icon" href="static/apple-touch-icon.png">
-<title>ClaudeCodeRemote</title>
+<title>Vibing everything</title>
 <link rel="stylesheet" href="static/lib/katex/katex.min.css?v=__BUILD_ID__">
 <link rel="stylesheet" href="static/style.css?v=__BUILD_ID__">
 </head>
 <body>
 
-<!-- 登录 -->
+<!-- 登录 (hub mode 走 landing 风格; local mode 老 token form) -->
 <div class="view" id="view-login">
   <div class="center-wrap">
-    <div class="card">
+
+    <!-- Hub mode landing: 醒目卖点 + OAuth CTA. CSS body.hub-mode 才显示. -->
+    <div class="hub-landing login-hub">
+      <div class="hub-landing-hero">
+        <div class="hub-landing-eyebrow">Vibing everything · 一个面板搞定你所有 AI 编程任务</div>
+        <h1 class="hub-landing-title">
+          <span class="grad">Vibing</span> everything,<br>
+          everywhere
+        </h1>
+        <p class="hub-landing-sub">
+          家里的 Linux、公司 Mac、云上的 VPS、Docker 沙箱 …… 全部反向接到这里。
+          手机 / 平板 / 桌面浏览器随便开,统一界面跟 Claude 聊天、批准工具、看 diff,
+          <strong>关掉网页进度不丢,session 永远续上</strong>。
+        </p>
+        <div class="hub-landing-features">
+          <div class="hub-landing-feat">
+            <div class="hub-landing-feat-icon">⚡</div>
+            <div class="hub-landing-feat-text">
+              <strong>多机统一面板</strong><br>
+              所有 server 的 session 合并展示
+            </div>
+          </div>
+          <div class="hub-landing-feat">
+            <div class="hub-landing-feat-icon">🔌</div>
+            <div class="hub-landing-feat-text">
+              <strong>任意模型</strong><br>
+              Anthropic / DeepSeek / Kimi / Qwen…自带网关
+            </div>
+          </div>
+          <div class="hub-landing-feat">
+            <div class="hub-landing-feat-icon">📱</div>
+            <div class="hub-landing-feat-text">
+              <strong>PWA 离线就绪</strong><br>
+              加到主屏当 app 用,IndexedDB 缓存
+            </div>
+          </div>
+          <div class="hub-landing-feat">
+            <div class="hub-landing-feat-icon">🔐</div>
+            <div class="hub-landing-feat-text">
+              <strong>你的代码不出你机器</strong><br>
+              server 跑在你这边,Hub 只转发
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hub-landing-cta">
+        <div class="hub-landing-cta-label">⬇ 一键登录,30 秒接上你第一台机器</div>
+        <!-- OAuth icon row — JS 按 oauth_providers 渲染 -->
+        <div class="login-oauth" id="login-oauth"></div>
+        <div class="err" id="login-err"></div>
+        <div class="hub-landing-cta-help">
+          没机器接?<a href="#help" id="login-help-link">看接入指南 →</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Local mode: 原 token 登录 -->
+    <div class="card login-local">
       <h1>ClaudeCodeRemote</h1>
-      <!-- local mode: 单 token. hub mode: email+password (body.hub-mode 时切换显示). -->
-      <div class="login-local">
-        <label for="login-token">Bearer Token</label>
-        <input id="login-token" type="password" autocomplete="current-password" placeholder="CCR_TOKEN">
-      </div>
-      <div class="login-hub">
-        <label for="login-email">Email</label>
-        <input id="login-email" type="email" autocomplete="username" placeholder="you@example.com">
-        <label for="login-password">Password</label>
-        <input id="login-password" type="password" autocomplete="current-password" placeholder="password">
-      </div>
+      <label for="login-token">Bearer Token</label>
+      <input id="login-token" type="password" autocomplete="current-password" placeholder="CCR_TOKEN">
       <button class="btn btn-primary btn-block" id="login-go">Sign in</button>
-      <!-- OAuth provider 按钮 — JS 按 /api/me oauth_providers 动态渲染. hub-only. -->
-      <div class="login-oauth login-hub" id="login-oauth"></div>
-      <div class="err" id="login-err"></div>
-      <div class="hint login-local">Token is set via the server env var <span class="kbd">CCR_TOKEN</span>.</div>
-      <div class="hint login-hub">Hub mode — sign in with the account configured on the Hub.</div>
-      <div class="login-footer">
-        <a href="#help" id="login-help-link">Help &amp; setup guide</a>
-      </div>
+      <div class="err login-local-err"></div>
+      <div class="hint">Token is set via the server env var <span class="kbd">CCR_TOKEN</span>.</div>
     </div>
   </div>
 </div>
@@ -52,6 +95,7 @@
 <div class="view" id="view-home">
   <div class="center-wrap">
     <div class="card">
+      <div class="home-brand" aria-label="Vibing everything"><span class="grad">Vibing</span> everything</div>
       <div class="home-top">
         <button class="icon-btn" id="settings-btn" type="button" title="Settings" aria-label="Settings">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

@@ -2410,6 +2410,9 @@ body.is-pwa.has-session:has(#chat-input:focus) .chat-foot {
 /* Login view 切换显示: 默认 local, body.hub-mode 时翻转. */
 body:not(.hub-mode) .login-hub { display: none; }
 body.hub-mode .login-local { display: none; }
+/* Hub mode 去掉账号密码登录, 只保留 OAuth icons + Help link. */
+body.hub-mode .login-hub:not(.login-oauth):not(.login-footer) { display: none; }
+body.hub-mode #login-go { display: none; }
 
 /* Session card 上的 app chip — 仅 hub mode 显示. 跟 kebab (⋯, top:4 right:4
    width:26 height:26) 同 top + 同 height = 中心对齐. abs 定位在 kebab 左侧. */
@@ -2699,6 +2702,116 @@ body:not(.hub-mode) .hub-only { display: none !important; }
 }
 .login-oauth-sep::before { left: 0; }
 .login-oauth-sep::after  { right: 0; }
+/* ============================================================
+ * Hub mode landing (未登录首页) — 醒目卖点 + OAuth icon CTA.
+ * ============================================================ */
+.hub-landing {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 28px 22px 36px;
+  text-align: center;
+}
+.hub-landing-eyebrow {
+  display: inline-block;
+  font-size: 12px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--text-muted, #59636e);
+  background: rgba(56,139,253,0.08);
+  border: 1px solid rgba(56,139,253,0.25);
+  padding: 5px 12px;
+  border-radius: 999px;
+  margin-bottom: 18px;
+}
+.hub-landing-title {
+  font-size: clamp(28px, 5.5vw, 44px);
+  font-weight: 800;
+  line-height: 1.15;
+  margin: 0 0 18px;
+  letter-spacing: -0.5px;
+}
+.grad {
+  background: linear-gradient(135deg, #38bdf8 0%, #818cf8 45%, #c084fc 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.hub-landing-sub {
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--text-muted, #4a5158);
+  margin: 0 auto 28px;
+  max-width: 560px;
+}
+.hub-landing-features {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 30px;
+  text-align: left;
+}
+.hub-landing-feat {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  background: var(--bg-elev, #f6f8fa);
+  border: 1px solid var(--border-soft, rgba(125,125,125,.18));
+  border-radius: 10px;
+}
+.hub-landing-feat-icon {
+  flex: 0 0 auto;
+  width: 32px; height: 32px;
+  font-size: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(56,139,253,0.10);
+  border-radius: 8px;
+}
+.hub-landing-feat-text { font-size: 13px; line-height: 1.45; }
+.hub-landing-feat-text strong { font-size: 13.5px; }
+
+.hub-landing-cta {
+  background: linear-gradient(180deg,
+                              rgba(56,139,253,0.06),
+                              rgba(56,139,253,0.02));
+  border: 1px solid rgba(56,139,253,0.20);
+  border-radius: 14px;
+  padding: 22px 18px 18px;
+}
+.hub-landing-cta-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+.hub-landing-cta-help {
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.hub-landing-cta-help a {
+  color: var(--accent, #2563eb);
+  text-decoration: none;
+  font-weight: 500;
+}
+.hub-landing-cta-help a:hover { text-decoration: underline; }
+
+@media (max-width: 520px) {
+  .hub-landing-features { grid-template-columns: 1fr; }
+  .hub-landing { padding: 22px 16px 28px; }
+}
+
+/* Home view 顶部 brand 标签 */
+.home-brand {
+  font-size: 13px;
+  letter-spacing: 0.3px;
+  color: var(--text-muted);
+  font-weight: 600;
+  padding: 8px 4px 6px;
+  text-align: left;
+}
+
 .login-oauth-row {
   display: flex;
   justify-content: center;
