@@ -1552,7 +1552,7 @@ ANTHROPIC_API_KEY=                    # optional, blank = mock`;
             ${connectedHTML}
           </div>
         </div>
-        <button class="app-revoke" type="button">Revoke</button>
+        <button class="app-revoke" type="button" title="Revoke" aria-label="Revoke">✕</button>
       `;
       row.querySelector(".app-name").textContent = a.name || "(unnamed)";
       row.querySelector(".app-status").textContent = a.online ? "online" : "offline";

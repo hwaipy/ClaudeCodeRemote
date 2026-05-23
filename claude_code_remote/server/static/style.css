@@ -2549,18 +2549,30 @@ body:not(.hub-mode) .hub-only { display: none !important; }
 }
 .app-row .app-row-2 .sep { opacity: 0.5; }
 .app-row .app-row-2 .app-stat { white-space: nowrap; }
+/* Revoke 改成右上角小圆 ✕ — 不抢卡片宽度. .app-row 自身 position:relative
+   已经隐含 (我们把它设上). hover 才变红, 默认柔和. */
+.app-row { position: relative; }
 .app-row .app-revoke {
-  flex: 0 0 auto;
-  padding: 4px 10px;
-  font-size: 12px;
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
   background: transparent;
-  color: #d70015;
-  border: 1px solid rgba(215,0,21,.4);
-  border-radius: 999px;
+  color: var(--text-dim);
+  border: 0;
+  border-radius: 50%;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .app-row .app-revoke:hover {
-  background: rgba(215,0,21,.08);
+  background: rgba(215,0,21,.10);
+  color: #d70015;
 }
 
 /* ---- Help / setup guide view ---- */
