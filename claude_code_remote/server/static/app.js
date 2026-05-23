@@ -2502,6 +2502,79 @@ installSwipeBack("view-help", {
   },
 });
 
+// ---------- PWA / 浏览器 back-gesture 接管 ----------
+// iOS PWA + Android Chrome 默认边缘右滑 / 系统返回会把用户踢出 SPA,
+// 即使我们已经 installSwipeBack 监听了 touch event — 因为浏览器 / 系统
+// 在 touch 路径外有自己的 history.back() 触发. 唯一 100% 解法: 维护一个
+// 永远在栈顶的 anchor state, 每次 popstate 触发就先自己 close 一个 view,
+// 再 pushState 把 anchor 推回去, 用户永远 back 不出去.
+//
+// 关闭优先级 (从内到外):
+//   1) help / settings / apps / browse modal / new-app panel 等 overlay
+//   2) chat view (has-session) → 退到 home
+//   3) 各种 popup menu (chat-menu / model-menu / perm-menu)
+//   4) 都没 → 啥都不做 (浏览器已被 anchor 兜底)
+(function setupBackInterception() {
+  const ANCHOR = { _ccrAnchor: true };
+  // 启动时先建一层 anchor; 然后任何 popstate 后我们自己再 push 一层
+  // 保持栈深度恒等.
+  try { history.pushState(ANCHOR, "", location.href); } catch (_) {}
+
+  function closeOneLayer() {
+    // 优先: 任何 overlay view 处于 active
+    const help = $("view-help");
+    if (help && help.classList.contains("active")) {
+      help.classList.remove("active");
+      if (location.hash === "#help") {
+        try { history.replaceState(null, "",
+          location.pathname + location.search); } catch (_) {}
+      }
+      return true;
+    }
+    const apps = $("view-apps");
+    if (apps && apps.classList.contains("active")) {
+      apps.classList.remove("active"); return true;
+    }
+    const settings = $("view-settings");
+    if (settings && settings.classList.contains("active")) {
+      settings.classList.remove("active"); return true;
+    }
+    // 弹层 menu
+    const popups = ["model-menu", "perm-menu", "chat-menu"];
+    for (const id of popups) {
+      const el = document.getElementById(id);
+      if (el && !el.hidden) { el.hidden = true; return true; }
+    }
+    // 内嵌 modals (new-session / browse / new-app panel)
+    const modals = ["modal-new-session", "modal-browse"];
+    for (const id of modals) {
+      const el = document.getElementById(id);
+      if (el && !el.hasAttribute("hidden")) {
+        el.setAttribute("hidden", ""); return true;
+      }
+    }
+    const newAppPanel = $("new-app-panel");
+    if (newAppPanel && !newAppPanel.hasAttribute("hidden")) {
+      newAppPanel.setAttribute("hidden", ""); return true;
+    }
+    // chat view → 退到 home (走 chat-back 同款逻辑)
+    if (document.body.classList.contains("has-session")) {
+      const back = $("chat-back");
+      if (back) { back.click(); return true; }
+    }
+    return false;
+  }
+
+  window.addEventListener("popstate", (e) => {
+    // 只关心 PWA 接管语境 — login view 时让浏览器正常退 (用户可能想离开网站)
+    const inLogin = document.body.classList.contains("stage-login");
+    if (!inLogin) closeOneLayer();
+    // 重新 push anchor — 不论刚才有没有真关 view, 都把栈深度复位.
+    // 这样下次 back gesture 仍能被我们截获.
+    try { history.pushState(ANCHOR, "", location.href); } catch (_) {}
+  });
+})();
+
 function setConnDot(kind, title) {
   const el = $("conn-dot");
   if (!el) return;
