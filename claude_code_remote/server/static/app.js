@@ -383,16 +383,19 @@ function renderOAuthButtons() {
   sep.className = "login-oauth-sep";
   sep.textContent = "or";
   box.appendChild(sep);
+  const row = document.createElement("div");
+  row.className = "login-oauth-row";
   for (const p of list) {
     const a = document.createElement("a");
     a.href = `api/hub/auth/${encodeURIComponent(p.key)}/start`;
-    a.className = "btn btn-secondary btn-block login-oauth-btn";
-    a.style.borderColor = p.color || "";
-    a.innerHTML =
-      `<span class="login-oauth-icon" style="background:${p.color || "#888"}"></span>`
-      + `Sign in with ${escHTML(p.label || p.key)}`;
-    box.appendChild(a);
+    a.className = "login-oauth-iconbtn";
+    a.title = `Sign in with ${p.label || p.key}`;
+    a.setAttribute("aria-label", a.title);
+    const base = new URL("./", document.baseURI).pathname;
+    a.innerHTML = `<img src="${base}static/lib/oauth-icons/${encodeURIComponent(p.key)}.svg" alt="${escHTML(p.label || p.key)}" width="22" height="22">`;
+    row.appendChild(a);
   }
+  box.appendChild(row);
 }
 
 async function hubLogin(email, password) {

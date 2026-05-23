@@ -2699,16 +2699,27 @@ body:not(.hub-mode) .hub-only { display: none !important; }
 }
 .login-oauth-sep::before { left: 0; }
 .login-oauth-sep::after  { right: 0; }
-.login-oauth-btn {
+.login-oauth-row {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 4px;
+}
+.login-oauth-iconbtn {
+  width: 44px; height: 44px;
   display: inline-flex; align-items: center; justify-content: center;
-  gap: 8px;
-  text-decoration: none;
-}
-.login-oauth-icon {
-  width: 14px; height: 14px;
+  border: 1px solid var(--border, #d0d7de);
   border-radius: 50%;
-  display: inline-block;
+  background: var(--bg-elev, #f6f8fa);
+  text-decoration: none;
+  transition: background-color .15s ease, transform .15s ease,
+              border-color .15s ease;
 }
+.login-oauth-iconbtn:hover {
+  background: var(--bg-hover);
+  transform: translateY(-1px);
+}
+.login-oauth-iconbtn:active { transform: translateY(0); }
 .login-footer a {
   color: var(--text-dim);
   text-decoration: none;
