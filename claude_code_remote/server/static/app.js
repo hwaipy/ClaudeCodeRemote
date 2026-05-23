@@ -2556,7 +2556,7 @@ const _MODEL_BRANDS = [
   { match: ["sonnet"],              tier: "sonnet" },
   { match: ["haiku"],               tier: "haiku" },
   // 其它大厂 — 本地 svg 文件名 + brand color (color 已 baked 进 svg)
-  { match: ["deepseek"],            tier: "deepseek", slug: "deepseek" },
+  { match: ["deepseek"],            tier: "deepseek", slug: "deepseek", boost: 1.3 },
   { match: ["gemini"],              tier: "gemini",   slug: "googlegemini" },
   { match: ["gpt", "openai", "o3", "o4", "o1"],
                                     tier: "openai",   slug: "_openai_inline" },
@@ -2595,9 +2595,11 @@ function _iconHTMLForTier(tier) {
   const brand = _MODEL_BRANDS.find(b => b.tier === tier);
   if (!brand || !brand.slug) return _OTHER_TIER_SVG;
   if (brand.slug === "_openai_inline") return _OPENAI_INLINE_SVG;
-  // 本地 <img>, SW 预 cache, 首次/离线都无延迟.
+  // 本地 <img>, SW 预 cache, 首次/离线都无延迟. boost 给个别 brand 单独
+  // 放大 (e.g. deepseek 实际占 viewBox 比例小, 视觉偏小, +30%).
   const base = new URL("./", document.baseURI).pathname;
-  return `<img src="${base}static/lib/llm-icons/${brand.slug}.svg" alt="${tier}" width="14" height="14" style="display:block">`;
+  const px = Math.round(14 * (brand.boost || 1));
+  return `<img src="${base}static/lib/llm-icons/${brand.slug}.svg" alt="${tier}" width="${px}" height="${px}" style="display:block">`;
 }
 
 function _ensureTurnCard() {
