@@ -251,21 +251,21 @@
     <h2>What is this?</h2>
     <p><strong>Claude Code Remote (CCR)</strong> is a self-hosted web console
        for the <code>claude</code> CLI. The <em>Hub</em> you're looking at is
-       a central server that aggregates one or more <em>app</em> processes
-       running on your machines. From here you can chat with Claude on any
-       of them, approve tool calls, see diffs — same UI regardless of which
-       machine the session lives on.</p>
+       a central service that aggregates one or more <em>server</em>
+       processes running on your machines. From here you can chat with Claude
+       on any of them, approve tool calls, see diffs — same UI regardless of
+       which machine the session lives on.</p>
 
     <h2>How it works</h2>
     <ol>
-      <li><strong>App</strong> processes run on your dev machines (Linux,
+      <li><strong>Server</strong> processes run on your dev machines (Linux,
           macOS, Docker, …). They host the actual <code>claude</code> CLI
           subprocesses and persist sessions locally.</li>
-      <li>Each app opens a reverse WebSocket to this <strong>Hub</strong>.
+      <li>Each server opens a reverse WebSocket to this <strong>Hub</strong>.
           No inbound port on your machine — outbound TLS only.</li>
       <li>Your browser hits the Hub. The Hub routes HTTP + WS to the right
-          app via the tunnel. Multiple apps from the same user are merged
-          into one session list.</li>
+          server via the tunnel. Multiple servers from the same user are
+          merged into one session list.</li>
     </ol>
 
     <h2>Setup — quick path</h2>
@@ -275,14 +275,14 @@
       <li>Click <strong>+</strong>, name the server (e.g. <code>laptop</code>,
           <code>vps-01</code>), and you'll get a <strong>device token</strong>.
           Copy it now — it's shown only once.</li>
-      <li>On your dev machine, install CCR app and set three env vars
+      <li>On your dev machine, install a CCR server and set three env vars
           (see below). Restart the service.</li>
       <li>Refresh this page. The new server should appear under
           Cloud Servers as <em>online</em>; its sessions show up in the
           merged session list with a chip indicating which server they're on.</li>
     </ol>
 
-    <h2>Installing the app on a Linux host</h2>
+    <h2>Installing a CCR server on a Linux host</h2>
     <p>Source: <code>https://github.com/hwaipy/ClaudeCodeRemote</code>
        (or your fork).</p>
 
@@ -303,7 +303,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt</code>
       </div>
       <p class="hint">Replace <code>tok-...</code> with the device token from
          step 3 of the quick path. <code>CCR_TOKEN</code> protects the local
-         port if you also browse the app directly (LAN); pick any random
+         port if you also browse the server directly (LAN); pick any random
          hex string.</p>
     </div>
 
@@ -317,11 +317,11 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt</code>
 systemctl --user enable --now ccr.service
 journalctl --user -u ccr.service -f</code>
       </div>
-      <p class="hint">For the app to keep running when you log out:
+      <p class="hint">For the server to keep running when you log out:
          <code>sudo loginctl enable-linger $USER</code>.</p>
     </div>
 
-    <h2>Installing the app in Docker</h2>
+    <h2>Installing a CCR server in Docker</h2>
     <p>Cleaner option — full stack (Python + Node + Claude Code) in a
        container, drop-in replacement for the Linux host path.</p>
 
@@ -354,8 +354,8 @@ docker compose logs -f ccr-app-local</code>
       <li>Refresh this Hub page → the server appears <em>online</em> in
           <strong>Cloud Servers</strong>.</li>
       <li>Click <strong>+</strong> in the home top-bar to create a new
-          session. The <em>App</em> dropdown lets you choose which server
-          runs it.</li>
+          session. The <em>Server</em> dropdown lets you choose which
+          machine runs it.</li>
       <li>Tool calls + diffs + stream events flow through the Hub WS in
           real time. No tunneling per-session — one persistent reverse WS
           per server.</li>
@@ -373,7 +373,7 @@ docker compose logs -f ccr-app-local</code>
               its own. Revoke + re-register if unsure.</td></tr>
       <tr><td>Sessions on one server appear under another</td>
           <td>Caches; hard-reload (Ctrl+Shift+R). If persists, restart the
-              affected app — it'll resync its session snapshot to the Hub.</td></tr>
+              affected server — it'll resync its session snapshot to the Hub.</td></tr>
       <tr><td>Lost the device token</td>
           <td>Revoke the server entry from Cloud Servers and register a new
               one. Tokens are stored as a SHA-256 hash; the Hub can't
@@ -631,9 +631,9 @@ docker compose logs -f ccr-app-local</code>
       <button class="modal-x" id="new-modal-close" type="button">×</button>
     </div>
     <div class="modal-body">
-      <!-- Hub mode 才显示 App selector. CSS body:not(.hub-mode) #spawn-app-row 隐藏. -->
+      <!-- Hub mode 才显示 Server selector. CSS body:not(.hub-mode) #spawn-app-row 隐藏. -->
       <div id="spawn-app-row">
-        <label for="spawn-app">App</label>
+        <label for="spawn-app">Server</label>
         <select id="spawn-app"></select>
       </div>
       <label for="spawn-name">Name (optional)</label>

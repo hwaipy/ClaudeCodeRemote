@@ -1311,7 +1311,7 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
     if (!apps.length) {
       const opt = document.createElement("option");
       opt.value = "";
-      opt.textContent = "(no app online)";
+      opt.textContent = "(no server online)";
       opt.disabled = true;
       sel.appendChild(opt);
     }
