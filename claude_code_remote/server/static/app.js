@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v126";
+const __CCR_APP_VER = "v127";
 
 const $ = (id) => document.getElementById(id);
 
@@ -4225,6 +4225,15 @@ function dbgLog(tag, data) {
   }).catch(() => {});
 }
 
+// AskUser tool 别名集合: builtin "AskUserQuestion" + 我们自定义的 MCP
+// "mcp__ccr__ask_user". 任何 tool_use.name 命中这两个之一都路由到 askuser-card,
+// 不渲染普通 tool-card (避免 user 看到丑陋的 mcp__ccr__ask_user 名字).
+const ASKUSER_TOOL_NAMES = new Set([
+  "AskUserQuestion",
+  "mcp__ccr__ask_user",
+]);
+function isAskUserTool(name) { return ASKUSER_TOOL_NAMES.has(name); }
+
 // ---------- AskUserQuestion 交互卡 ----------
 // 后端 PreToolUse hook 命中 AskUserQuestion 时挂起整条 hook 调用，把 `_ccr askuser_request`
 // 推给前端。这里据此渲染交互卡。用户提交答案 → WS `askuser_answer` → 后端 resolve hook，
@@ -4716,7 +4725,7 @@ function handleStreamEvent(ev) {
       state.msgById.set(state.activeMsgId, { bubble, text: "" });
       state.blocksByIdx.set(idx, { type: "text", msgId: state.activeMsgId });
     } else if (cb.type === "tool_use") {
-      if (cb.name === "AskUserQuestion") {
+      if (isAskUserTool(cb.name)) {
         // 交互卡：起骨架，input 完整后由 assistant 事件填问题/选项
         ensureAskUserCard(cb.id);
         state.blocksByIdx.set(idx, { type: "askuser", toolUseId: cb.id });
@@ -4806,7 +4815,7 @@ function handleAssistantMessage(msg) {
         if (id) state.msgById.set(id, { bubble, text: b.text });
       }
     } else if (b.type === "tool_use") {
-      if (b.name === "AskUserQuestion") {
+      if (isAskUserTool(b.name)) {
         // 最终 input 到位，渲染问题/选项；live 路径上 ensureAskUserCard 已经在 content_block_start 时建好
         const ent = ensureAskUserCard(b.id);
         populateAskUserCard(ent, b.input || {});
