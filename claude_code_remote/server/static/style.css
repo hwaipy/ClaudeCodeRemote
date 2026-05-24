@@ -2813,6 +2813,15 @@ body:not(.hub-mode) .hub-only { display: none !important; }
   font-weight: 500;
 }
 .hub-landing-cta-help a:hover { text-decoration: underline; }
+.hub-landing-footer {
+  margin-top: 28px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-dim, #6a7178);
+  opacity: 0.55;
+  font-style: italic;
+  letter-spacing: 0.3px;
+}
 
 @media (max-width: 520px) {
   .hub-landing-features { grid-template-columns: 1fr; }
