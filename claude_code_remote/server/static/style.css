@@ -2451,11 +2451,12 @@ body.hub-mode .login-local { display: none; }
    width:26 height:26) 同 top + 同 height = 中心对齐. abs 定位在 kebab 左侧. */
 .session-card .app-chip {
   position: absolute;
-  top: 4px;
+  /* kebab top:4 + height:26, 中心 y=17; chip height 18 + top:8 → 中心 y=17 对齐 */
+  top: 8px;
   right: 36px;          /* kebab right:4 + width:26 + 6px 间距 */
-  height: 26px;
-  line-height: 26px;
-  padding: 0 10px;
+  height: 18px;
+  line-height: 18px;
+  padding: 0 6px;
   font-size: 11px;
   border-radius: 999px;
   background: rgba(56,139,253,.08);
