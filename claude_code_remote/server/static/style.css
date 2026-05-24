@@ -2822,6 +2822,12 @@ body:not(.hub-mode) .hub-only { display: none !important; }
   font-style: italic;
   letter-spacing: 0.3px;
 }
+.hub-landing-footer a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 0.5px;
+}
+.hub-landing-footer a:hover { color: var(--accent, #0969da); opacity: 1; }
 
 @media (max-width: 520px) {
   .hub-landing-features { grid-template-columns: 1fr; }
