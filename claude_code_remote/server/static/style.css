@@ -256,13 +256,13 @@ a:hover { text-decoration: underline; }
   overflow-y: auto;
   min-height: 0;
 }
-/* login view (hub landing) 顶部空白减半 — 8vh → 4vh, max 80px → 40px;
+/* login view (hub landing) 顶部空白进一步减半 — 2vh / max 20px.
    PWA 仍至少留 safe-area 高度让出 notch.
    `align-items: safe center`: 内容 < 视口高度时垂直居中 (上下空白均分);
    内容 > 视口时 fallback start (滚动从顶 padding 开始, 不裁内容). */
 #view-login > .center-wrap {
   align-items: safe center;
-  padding-top: max(clamp(12px, 4vh, 40px), env(safe-area-inset-top, 0px));
+  padding-top: max(clamp(6px, 2vh, 20px), env(safe-area-inset-top, 0px));
 }
 .card {
   width: 100%;
