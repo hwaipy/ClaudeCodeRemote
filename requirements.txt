@@ -3,3 +3,5 @@ uvicorn[standard]>=0.30
 python-multipart>=0.0.9
 # Hub OAuth (Google/GitHub/Gitee) 用来 token exchange + userinfo
 httpx>=0.27
+# Custom ask_user MCP server (绕过 builtin AskUserQuestion 短 timeout)
+mcp>=1.0

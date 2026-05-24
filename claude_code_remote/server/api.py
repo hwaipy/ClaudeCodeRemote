@@ -541,6 +541,69 @@ async def _handle_askuser_hook(sess: Any, tool_use_id: str,
             "message": "askuser answered"}
 
 
+class McpAskUserRequest(BaseModel):
+    ccr_session_id: str
+    tool_use_id: str
+    questions: list[dict[str, Any]]
+
+
+@router.post("/mcp/ask_user")
+async def mcp_ask_user(req: McpAskUserRequest) -> dict[str, Any]:
+    """MCP custom ask_user tool 后端. 跟 _handle_askuser_hook 平行, 但
+    不写 stdin (MCP tool return value IS the tool_result, claude 通过 MCP
+    协议直接读到). 复用 gateway + SPA WS, 体验完全一致."""
+    import json as _json
+    sess = await manager.get(req.ccr_session_id)
+    if not sess:
+        raise HTTPException(404, "ccr session not found")
+    aq = await gateway.open_askuser(
+        sess.id, req.tool_use_id, {"questions": req.questions},
+    )
+    log.info("mcp ask_user opened: req=%s sess=%s tool_use_id=%s",
+             aq.req_id, sess.id, req.tool_use_id)
+    await manager.inject_event(sess, {
+        "type": "_ccr",
+        "subtype": "askuser_request",
+        "req_id": aq.req_id,
+        "tool_use_id": req.tool_use_id,
+        "tool_input": {"questions": req.questions},
+    })
+    try:
+        answer = await asyncio.wait_for(aq.future,
+                                         timeout=PERMISSION_WAIT_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        log.warning("mcp ask_user timeout: req=%s", aq.req_id)
+        await gateway.resolve_askuser_by_tool_id(req.tool_use_id, None)
+        await manager.inject_event(sess, {
+            "type": "_ccr", "subtype": "askuser_resolved",
+            "req_id": aq.req_id, "tool_use_id": req.tool_use_id,
+            "cancelled": True,
+        })
+        return {"answers": None, "error": "timeout"}
+    if answer is None:
+        await manager.inject_event(sess, {
+            "type": "_ccr", "subtype": "askuser_resolved",
+            "req_id": aq.req_id, "tool_use_id": req.tool_use_id,
+            "cancelled": True,
+        })
+        return {"answers": None, "error": "cancelled"}
+    # persist visible tool_result event so SPA history shows the answer too
+    # (matches hook path UX); MCP path skips stdin write entirely.
+    await manager.inject_event(sess, {
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": req.tool_use_id,
+                "content": _json.dumps(answer, ensure_ascii=False),
+            }],
+        },
+    })
+    log.info("mcp ask_user resolved: req=%s sess=%s", aq.req_id, sess.id)
+    return {"answers": answer}
+
+
 @router.post("/permission/wait")
 async def permission_wait(req: PermissionWaitRequest) -> dict[str, Any]:
     """PreToolUse hook 桥接器 POST 进来。命中白名单直接 allow，否则推 WS 等用户决定。"""

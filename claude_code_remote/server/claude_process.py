@@ -9,6 +9,7 @@ import contextlib
 import json
 import logging
 import os
+import sys
 import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -38,6 +39,40 @@ class ClaudeProcess:
         self._stderr_buf: list[str] = []
         self._stderr_task: asyncio.Task[None] | None = None
         self._settings_path: Path | None = None
+        self._mcp_config_path: Path | None = None
+
+    def _write_mcp_config(self) -> Path:
+        """生成临时 mcp-config.json, 注册 CCR 的 ask_user MCP server.
+
+        Claude 启动 MCP server 子进程 (stdio mode), env 通过 config 注入.
+        MCP server 拿到 backend URL + token + ccr session id, 触发 ask_user
+        tool 时 POST CCR 后端等用户答 — 绕过 SDK builtin AskUserQuestion 的
+        硬编码极短 timeout."""
+        # http://127.0.0.1:{PORT} 是 CCR server 自己的本地 URL.
+        backend_url = f"http://127.0.0.1:{config.PORT}"
+        # 用绝对脚本路径而不是 `-m claude_code_remote.mcp.ask_user_server`:
+        # claude 启动 MCP server 子进程时 cwd 不是项目根, `-m` 找不到 package
+        # (ModuleNotFoundError). 直接跑 .py 文件, python 自动把它父 dir 加进
+        # sys.path, 脚本本身只 import 外部 mcp/httpx, 不需要 claude_code_remote.
+        mcp_script = str(Path(__file__).resolve().parent.parent
+                         / "mcp" / "ask_user_server.py")
+        mcp_cfg = {
+            "mcpServers": {
+                "ccr": {
+                    "command": sys.executable,
+                    "args": [mcp_script],
+                    "env": {
+                        "CCR_MCP_BACKEND_URL": backend_url,
+                        "CCR_MCP_BACKEND_TOKEN": config.TOKEN,
+                        "CCR_MCP_SESSION_ID": self.ccr_session_id or "",
+                    },
+                },
+            },
+        }
+        fd, p = tempfile.mkstemp(prefix="ccr-mcp-", suffix=".json")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(mcp_cfg, f, ensure_ascii=False)
+        return Path(p)
 
     def _write_hook_settings(self) -> Path:
         """生成临时 settings.json，挂 PreToolUse hook 指向桥接器。"""
@@ -68,9 +103,14 @@ class ClaudeProcess:
             "--include-hook-events",
             "--verbose",
             "--permission-mode", "default",
+            # builtin AskUserQuestion 工具 SDK 内 timeout 极短 (实测 < 1s),
+            # user 没机会答. 全局禁用, 强制 claude 改用我们的 MCP ask_user.
+            "--disallowed-tools", "AskUserQuestion",
         ]
         if self._settings_path:
             cmd += ["--settings", str(self._settings_path)]
+        if self._mcp_config_path:
+            cmd += ["--mcp-config", str(self._mcp_config_path)]
         if self.resume_session_id:
             cmd += ["--resume", self.resume_session_id]
         cmd += self.extra_args
@@ -82,6 +122,7 @@ class ClaudeProcess:
         if not Path(self.cwd).is_dir():
             raise FileNotFoundError(f"cwd not a directory: {self.cwd}")
         self._settings_path = self._write_hook_settings()
+        self._mcp_config_path = self._write_mcp_config()
         cmd = self._build_cmd()
         log.info("spawn claude cwd=%s cmd=%s", self.cwd, " ".join(cmd))
 
