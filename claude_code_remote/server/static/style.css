@@ -200,7 +200,9 @@ a:hover { text-decoration: underline; }
   display: flex !important;
   position: fixed;
   inset: 0;
-  z-index: 30;
+  /* 必须高于 chat-head (z=50), 否则桌面双栏布局下 chat-head 会从
+     settings overlay 上方"穿透"显示, 看起来像 settings 只覆盖左栏. */
+  z-index: 60;
   flex-direction: column;
   transform: translateX(100%);
   transition: transform 420ms cubic-bezier(0.25, 1, 0.5, 1);
@@ -2517,7 +2519,8 @@ body:not(.hub-mode) .hub-only { display: none !important; }
   display: flex !important;
   position: fixed;
   inset: 0;
-  z-index: 30;
+  /* 必须高于 chat-head (z=50), 见 #view-settings 注释. */
+  z-index: 60;
   flex-direction: column;
   transform: translateX(100%);
   transition: transform 420ms cubic-bezier(0.25, 1, 0.5, 1);
