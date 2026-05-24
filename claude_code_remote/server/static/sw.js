@@ -9,7 +9,7 @@
 // 反代前缀通过 self.registration.scope 自动获得 (注册时由 client 端按
 // document.baseURI 算好), 不需要硬编码 /remote 之类.
 
-const CACHE = "ccr-v139";   // bump 强制清掉旧 cache, PWA 重启后拿新代码
+const CACHE = "ccr-v141";   // bump 强制清掉旧 cache, PWA 重启后拿新代码
 const SCOPE_PATH = new URL(self.registration.scope).pathname;  // 末尾保证带 /
 // LLM brand icons — install 时 addAll 预 cache, 首次进 USTC/DS/etc session
 // 就不需要再走网络拉远程 CDN. 列表跟 _MODEL_BRANDS 的 slug 一致.
@@ -19,12 +19,14 @@ const _LLM_ICON_SLUGS = [
   "alibabadotcom", "claude", "anthropic",
 ];
 const _OAUTH_ICON_SLUGS = ["google", "github", "gitee", "feishu", "dingtalk", "qq"];
+const _LANDING_SCREENSHOTS = ["mobile-home", "desktop-chat", "mobile-chat"];
 const SHELL = [
   SCOPE_PATH,
   SCOPE_PATH + "icon.svg",
   SCOPE_PATH + "manifest.webmanifest",
   ..._LLM_ICON_SLUGS.map(s => SCOPE_PATH + "static/lib/llm-icons/" + s + ".svg"),
   ..._OAUTH_ICON_SLUGS.map(s => SCOPE_PATH + "static/lib/oauth-icons/" + s + ".svg"),
+  ..._LANDING_SCREENSHOTS.map(s => SCOPE_PATH + "static/lib/screenshots/" + s + ".png"),
 ];
 
 self.addEventListener("install", e => {

@@ -2732,7 +2732,7 @@ body:not(.hub-mode) .hub-only { display: none !important; }
  * Hub mode landing (未登录首页) — 醒目卖点 + OAuth icon CTA.
  * ============================================================ */
 .hub-landing {
-  max-width: 720px;
+  max-width: 880px;
   margin: 0 auto;
   padding: 4px 22px 18px;
   text-align: center;
@@ -2770,6 +2770,40 @@ body:not(.hub-mode) .hub-only { display: none !important; }
   margin: 0 auto 18px;
   max-width: 560px;
 }
+/* Landing 截图区 — 三张图横排 (左右手机 + 中央桌面 chat), 等高视觉
+   平衡. 窄屏 (520) 改成横向滚动条, 桌面截图等比缩放. */
+.hub-landing-screenshots {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 14px;
+  margin: 0 0 22px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 6px 4px 14px;
+  scrollbar-width: none;
+}
+.hub-landing-screenshots::-webkit-scrollbar { display: none; }
+.hub-landing-shot {
+  display: block;
+  border: 1px solid var(--border-soft, rgba(125,125,125,.22));
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  flex: 0 0 auto;
+  width: auto;
+}
+.hub-landing-shot.phone { height: 320px; }
+.hub-landing-shot.desktop { height: 280px; }
+@media (max-width: 760px) {
+  .hub-landing-shot.phone { height: 240px; }
+  .hub-landing-shot.desktop { height: 200px; }
+}
+@media (max-width: 480px) {
+  .hub-landing-shot.phone { height: 200px; }
+  .hub-landing-shot.desktop { height: 170px; }
+}
+
 .hub-landing-features {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
