@@ -2736,6 +2736,10 @@ body:not(.hub-mode) .hub-only { display: none !important; }
   margin: 0 auto;
   padding: 4px 22px 18px;
   text-align: center;
+  /* 父 (.center-wrap) 是 flex container, flex item 默认 min-width:auto
+     被内部 children (screenshots 的 flex items) 撑大. 强制 min-width: 0
+     让 hub-landing 接受 narrow viewport (手机) 时 fit 进 parent. */
+  min-width: 0;
 }
 .hub-landing-eyebrow {
   display: inline-block;
@@ -2790,6 +2794,9 @@ body:not(.hub-mode) .hub-only { display: none !important; }
   overflow-x: auto;
   width: 100%;
   max-width: 100%;
+  /* 同 .hub-landing: flex item 默认 min-width:auto 撑大父. 强制 0
+     让 overflow-x: auto 真正生效, 子 children 横滚不溢出. */
+  min-width: 0;
   padding: 6px 4px 14px;
   scroll-snap-type: x mandatory;
   /* 容器开头一张图大约能完整居中, 但还是给 padding 防 first/last 贴边 */
