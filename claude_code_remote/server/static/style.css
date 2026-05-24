@@ -256,6 +256,11 @@ a:hover { text-decoration: underline; }
   overflow-y: auto;
   min-height: 0;
 }
+/* login view (hub landing) 顶部空白减半 — 8vh → 4vh, max 80px → 40px;
+   PWA 仍至少留 safe-area 高度让出 notch. */
+#view-login > .center-wrap {
+  padding-top: max(clamp(12px, 4vh, 40px), env(safe-area-inset-top, 0px));
+}
 .card {
   width: 100%;
   max-width: 480px;
@@ -2716,7 +2721,7 @@ body:not(.hub-mode) .hub-only { display: none !important; }
 .hub-landing {
   max-width: 720px;
   margin: 0 auto;
-  padding: 28px 22px 36px;
+  padding: 10px 22px 32px;
   text-align: center;
 }
 .hub-landing-eyebrow {
@@ -2754,7 +2759,7 @@ body:not(.hub-mode) .hub-only { display: none !important; }
 }
 .hub-landing-features {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin: 0 0 30px;
   text-align: left;
