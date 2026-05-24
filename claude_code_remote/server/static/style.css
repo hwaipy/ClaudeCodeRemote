@@ -2507,6 +2507,12 @@ body:not(.hub-mode) .session-card .app-chip { display: none; }
   font-style: italic;
 }
 .chat-head .app-chip[hidden] { display: none; }
+/* 窄屏: 隐藏 chat-head 上的 server chip. 手机端 chat-head 顶栏空间紧,
+   server name 已经在 home-card 上 visible, 不重复显示. 桌面双栏空间够,
+   保留 chip 帮助辨识当前 session 来自哪台 server. */
+@media (max-width: 899px) {
+  .chat-head .app-chip { display: none; }
+}
 
 /* Spawn modal app selector — 仅 hub mode 显示 */
 body:not(.hub-mode) #spawn-app-row { display: none; }
