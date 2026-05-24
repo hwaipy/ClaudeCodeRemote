@@ -269,6 +269,10 @@ a:hover { text-decoration: underline; }
    The .center-wrap becomes a flex column for home so the footer can
    margin-top:auto its way to the bottom of the scroll area. Tighter
    bottom padding pushes the footer almost to the viewport edge. */
+/* iOS PWA 17+ 在 home view 上的边缘水平 swipe 走系统手势, JS 拦不住.
+   pan-y 必须打在 #view-home 本身, 不能只在 .center-wrap (effective
+   touch-action 算法在 iOS 上对祖先继承不可靠, 显式声明更稳). */
+#view-home { touch-action: pan-y; }
 #view-home > .center-wrap {
   flex-direction: column;
   align-items: stretch;
@@ -283,8 +287,35 @@ a:hover { text-decoration: underline; }
   padding-top: 0 !important;
   /* Hide the scrollbar on the session list — scrolling still works. */
   scrollbar-width: none;            /* Firefox */
+  /* iOS PWA 17+ 的边缘水平 swipe 在 scroll 容器里走 system 手势
+     (cancelable=false), JS preventDefault 拦不住. pan-y 在元素级别
+     声明 "只接受垂直 pan", 浏览器从 touchstart 就拒绝触发 swipe-back. */
+  touch-action: pan-y;
 }
 #view-home > .center-wrap::-webkit-scrollbar { display: none; }   /* WebKit */
+
+/* iOS 18 PWA 边缘 swipe-back 实际是 pagehide→BFCache→pageshow 的
+   navigation gesture, 不走 history.back. JS preventDefault 拦不住
+   (touchstart cancelable=false), touch-action: pan-y 也不管 (iOS 把
+   nav gesture 跟 pan 分开处理). 唯一拦住的办法: 在屏幕最左 22px 加
+   一层透明 shield, touch-action: none — 让 hit target 不是 scroll
+   container, iOS 在这个区域就不触发系统手势.
+   home / chat / settings / apps / help 都装 — 只 login 不装 (那里
+   让浏览器正常退, 用户可能想离开网站). chat 等 view 的 swipe-back 起
+   手区从 22px 之后开始, JS 仍能接管. */
+#ccr-edge-shield {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 22px;
+  background: transparent;
+  z-index: 9998;
+  touch-action: none;
+  display: none;
+  pointer-events: auto;
+}
+body.stage-app #ccr-edge-shield { display: block; }
 #view-home .card {
   background: transparent;
   border: 0;
@@ -2410,9 +2441,6 @@ body.is-pwa.has-session:has(#chat-input:focus) .chat-foot {
 /* Login view 切换显示: 默认 local, body.hub-mode 时翻转. */
 body:not(.hub-mode) .login-hub { display: none; }
 body.hub-mode .login-local { display: none; }
-/* Hub mode 去掉账号密码登录, 只保留 OAuth icons + Help link. */
-body.hub-mode .login-hub:not(.login-oauth):not(.login-footer) { display: none; }
-body.hub-mode #login-go { display: none; }
 
 /* Session card 上的 app chip — 仅 hub mode 显示. 跟 kebab (⋯, top:4 right:4
    width:26 height:26) 同 top + 同 height = 中心对齐. abs 定位在 kebab 左侧. */
@@ -2682,26 +2710,6 @@ body:not(.hub-mode) .hub-only { display: none !important; }
   flex-direction: column;
   gap: 6px;
 }
-.login-oauth-sep {
-  text-align: center;
-  font-size: 11px;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 1.4px;
-  margin: 8px 0 4px;
-  position: relative;
-}
-.login-oauth-sep::before,
-.login-oauth-sep::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  width: 38%;
-  height: 1px;
-  background: var(--border-soft);
-}
-.login-oauth-sep::before { left: 0; }
-.login-oauth-sep::after  { right: 0; }
 /* ============================================================
  * Hub mode landing (未登录首页) — 醒目卖点 + OAuth icon CTA.
  * ============================================================ */
@@ -2802,8 +2810,9 @@ body:not(.hub-mode) .hub-only { display: none !important; }
   .hub-landing { padding: 22px 16px 28px; }
 }
 
-/* Home view brand — 放在 home-top 内部第一个 child, 共享 home-top 的
-   safe-area-inset-top padding (notch 让位). flex 1 让 icons 自然推到右侧. */
+/* Home view brand — home-top 内部 first child, 共享 home-top 的
+   safe-area-inset-top padding. 移动端 flex:1 让出 icons, 字号 13 nowrap
+   + ellipsis. 桌面端 (>= 720px) 通过下面 @media 翻成独占整行的大标题. */
 .home-brand {
   flex: 1 1 auto;
   min-width: 0;
@@ -2818,6 +2827,23 @@ body:not(.hub-mode) .hub-only { display: none !important; }
 }
 /* search-open 时整行 icons 都缩到 0, brand 也得让位 */
 .home-top.search-open .home-brand { display: none; }
+
+/* 桌面端: brand 占满 home-top 第一行, icons 落到第二行. 大字 + 居中. */
+@media (min-width: 720px) {
+  .home-top { flex-wrap: wrap; }
+  .home-brand {
+    flex: 0 0 100%;
+    order: -1;
+    font-size: clamp(20px, 2.2vw, 26px);
+    letter-spacing: 0.4px;
+    font-weight: 700;
+    text-align: center;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    padding: 2px 8px 6px;
+  }
+}
 
 .login-oauth-row {
   display: flex;

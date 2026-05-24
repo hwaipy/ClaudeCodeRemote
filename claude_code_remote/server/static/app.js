@@ -1,6 +1,8 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
+const __CCR_APP_VER = "v122";
+
 const $ = (id) => document.getElementById(id);
 
 const state = {
@@ -379,10 +381,6 @@ function renderOAuthButtons() {
   box.innerHTML = "";
   const list = state.oauthProviders || [];
   if (!list.length) return;
-  const sep = document.createElement("div");
-  sep.className = "login-oauth-sep";
-  sep.textContent = "or";
-  box.appendChild(sep);
   const row = document.createElement("div");
   row.className = "login-oauth-row";
   for (const p of list) {
@@ -471,6 +469,7 @@ $("logout").addEventListener("click", async (e) => {
 });
 
 const _hardReloadEl = $("hard-reload");
+if (_hardReloadEl) _hardReloadEl.textContent = __CCR_APP_VER;
 if (_hardReloadEl) _hardReloadEl.addEventListener("click", async (e) => {
   e.preventDefault();
   try {
@@ -565,9 +564,6 @@ $("modal-confirm").addEventListener("click", () => {
     const target = $(_browseTargetId);
     if (target) target.value = display;
     if (_browseTargetId === "spawn-cwd") syncPresetChips();
-    if (_browseTargetId === "settings-default-cwd") {
-      localStorage.setItem("ccr.defaultCwd", display);
-    }
   }
   closeBrowse();
 });
@@ -1371,9 +1367,7 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
   function open() {
     modal.removeAttribute("hidden");
     if (!$("spawn-cwd").value) {
-      $("spawn-cwd").value = abbreviateHome(
-        localStorage.getItem("ccr.defaultCwd") || state.cwd || ""
-      );
+      $("spawn-cwd").value = abbreviateHome(state.cwd || "");
     }
     syncPresetChips();
     _setSpawnPermMode(
@@ -1406,9 +1400,7 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
   const view = $("view-settings");
   const openBtn = $("settings-btn");
   const backBtn = $("settings-back");
-  const cwdInput = $("settings-default-cwd");
   const permRow = $("settings-default-perm");
-  const browseBtn = $("settings-browse-btn");
   if (!view || !openBtn) return;
 
   function applyPermActive(mode) {
@@ -1418,7 +1410,6 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
     });
   }
   function loadFromStorage() {
-    cwdInput.value = localStorage.getItem("ccr.defaultCwd") || "";
     applyPermActive(localStorage.getItem("ccr.defaultPermMode") || "manual");
   }
   function isOpen() { return view.classList.contains("active"); }
@@ -1437,11 +1428,6 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
     if (e.key === "Escape" && isOpen()) close();
   });
 
-  cwdInput.addEventListener("input", () => {
-    const v = cwdInput.value.trim();
-    if (v) localStorage.setItem("ccr.defaultCwd", v);
-    else localStorage.removeItem("ccr.defaultCwd");
-  });
   permRow.querySelectorAll(".spawn-perm-btn").forEach((b) => {
     b.addEventListener("click", () => {
       const mode = b.dataset.mode;
@@ -1449,7 +1435,6 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
       localStorage.setItem("ccr.defaultPermMode", mode);
     });
   });
-  browseBtn.addEventListener("click", () => openBrowse("settings-default-cwd"));
 })();
 
 // ---------- Session list sort toggle ----------
@@ -2467,12 +2452,15 @@ function installSwipeBack(viewId, opts) {
       if (Math.abs(dy) > SLOP && Math.abs(dy) > Math.abs(dx)) { armed = false; return; }
       if (Math.abs(dx) <= SLOP) return;
       dragging = true;
-      applyTransition("none");
+      if (!opts.silent) applyTransition("none");
     }
-    // 一旦确认是右滑返回手势，吃掉所有 touchmove
+    // 一旦确认是右滑返回手势，吃掉所有 touchmove (silent 模式也吃,
+    // 这才是阻止 iOS 系统 swipe-back 的关键).
     if (e.cancelable) e.preventDefault();
-    const tx = Math.max(0, dx);
-    applyTransform(`translateX(${tx}px)`);
+    if (!opts.silent) {
+      const tx = Math.max(0, dx);
+      applyTransform(`translateX(${tx}px)`);
+    }
     lastX = t.clientX;
     lastT = e.timeStamp;
   }, { passive: false });
@@ -2482,11 +2470,16 @@ function installSwipeBack(viewId, opts) {
     armed = false;
     if (!dragging) return;
     dragging = false;
+    // silent 模式: 手势已经被 touchmove 吃掉, 视觉上没动过, 直接收工.
+    if (opts.silent) return;
     const t = (e.changedTouches && e.changedTouches[0]) || { clientX: lastX, timeStamp: lastT };
     const dx = t.clientX - startX;
     const dt = Math.max(1, (e.timeStamp || lastT) - lastT);
     const v = (t.clientX - lastX) / dt;  // px/ms，最后一段速度
-    const commit = dx > width * COMMIT_FRAC || v > COMMIT_VELOCITY;
+    // bounceOnly view (例如 home — 已是栈底, 没有上一层可退): 永远回弹,
+    // 但 touchmove 已经 preventDefault 吃掉手势, 不让 iOS 走系统 swipe-back.
+    const commit = !opts.bounceOnly &&
+                   (dx > width * COMMIT_FRAC || v > COMMIT_VELOCITY);
     if (commit) {
       endTransition(`translateX(${width}px)`, () => {
         onCommit && onCommit();
@@ -2502,6 +2495,15 @@ function installSwipeBack(viewId, opts) {
     armed = false; dragging = false;
   }, { passive: true });
 }
+
+// view-home 是栈底 view, 没有"上一层"可退. silent swipe-back: touchmove
+// preventDefault 吃掉手势 (阻止 iOS PWA 系统右滑触发 history.back),
+// 但视觉上完全不响应 — 用户右滑像没发生过.
+installSwipeBack("view-home", {
+  narrowOnly: true,
+  silent: true,
+  commit: () => {},
+});
 
 installSwipeBack("view-chat", {
   narrowOnly: true,
@@ -2542,10 +2544,18 @@ installSwipeBack("view-help", {
 //   3) 各种 popup menu (chat-menu / model-menu / perm-menu)
 //   4) 都没 → 啥都不做 (浏览器已被 anchor 兜底)
 (function setupBackInterception() {
-  const ANCHOR = { _ccrAnchor: true };
-  // 启动时先建一层 anchor; 然后任何 popstate 后我们自己再 push 一层
-  // 保持栈深度恒等.
-  try { history.pushState(ANCHOR, "", location.href); } catch (_) {}
+  const ANCHOR_BASE = { _ccrAnchor: "base" };
+  const ANCHOR = { _ccrAnchor: "top" };
+  // iOS PWA standalone 模式启动时, history 栈底那个 entry 有可能是
+  // about:blank (start_url 加载前的占位). 用户右滑就直接退到空白页.
+  // 用 replaceState 把启动 entry 改写成自己 (URL 强制 = 当前页), 再
+  // pushState 多层 ANCHOR — 给浏览器一个 buffer, 即便 anchor 被吃掉,
+  // 栈底也还是自己; 即便 iOS 视觉过渡比 JS pushState 快, 多 push 几层
+  // 也能确保用户连续右滑也不会捅穿.
+  try { history.replaceState(ANCHOR_BASE, "", location.href); } catch (_) {}
+  for (let i = 0; i < 5; i++) {
+    try { history.pushState(ANCHOR, "", location.href); } catch (_) {}
+  }
 
   function closeOneLayer() {
     // 优先: 任何 overlay view 处于 active
@@ -2593,12 +2603,13 @@ installSwipeBack("view-help", {
   }
 
   window.addEventListener("popstate", (e) => {
-    // 只关心 PWA 接管语境 — login view 时让浏览器正常退 (用户可能想离开网站)
+    // 先把 anchor 推回去 — 缩短 "栈深度 -1" 的 gap, 避免用户在 ~100ms
+    // 内连滑两下时第二下退到栈底 (即使有 ANCHOR_BASE 兜底也少绕一层).
+    try { history.pushState(ANCHOR, "", location.href); } catch (_) {}
+    // login view 时不接管 (用户可能想离开网站 — 但因为 ANCHOR_BASE 在
+    // 栈底, 实际效果是再多滑一下才能退出, 不会瞬间 blank).
     const inLogin = document.body.classList.contains("stage-login");
     if (!inLogin) closeOneLayer();
-    // 重新 push anchor — 不论刚才有没有真关 view, 都把栈深度复位.
-    // 这样下次 back gesture 仍能被我们截获.
-    try { history.pushState(ANCHOR, "", location.href); } catch (_) {}
   });
 })();
 
@@ -5425,6 +5436,156 @@ if ("serviceWorker" in navigator) {
 }
 // M-Hub-4: probe /api/me 决定 hub mode + login flow. local mode 老路径不变.
 (async function boot() {
+  // 左边缘 transparent shield — 拦住 iOS PWA 系统右滑, 同时把 swipe-back
+  // 手势转给当前 active overlay view (chat/settings/apps/help). home 上没
+  // overlay = silent (吃手势但视觉不响应, 防"右滑出空白页 + reload" bug).
+  try {
+    const shield = document.createElement("div");
+    shield.id = "ccr-edge-shield";
+    shield.setAttribute("aria-hidden", "true");
+    document.body.appendChild(shield);
+
+    const SLOP = 8;
+    const COMMIT_FRAC = 0.35;
+    const COMMIT_VELOCITY = 0.5;
+    let armed = false, dragging = false;
+    let startX = 0, startY = 0, lastX = 0, lastT = 0;
+    let tgt = null;   // {view, followEls, commit, bounceOnly, width}
+
+    // 跟 setupBackInterception 的 closeOneLayer 同优先级.
+    // home 没 overlay 时返回 {view:null, bounceOnly:true} — silent.
+    function pickTarget() {
+      const help = $("view-help");
+      if (help && help.classList.contains("active")) return {
+        view: help, followEls: [],
+        commit: () => {
+          help.classList.remove("active");
+          if (location.hash === "#help") {
+            try { history.replaceState(null, "",
+              location.pathname + location.search); } catch (_) {}
+          }
+        },
+      };
+      const apps = $("view-apps");
+      if (apps && apps.classList.contains("active")) return {
+        view: apps, followEls: [],
+        commit: () => apps.classList.remove("active"),
+      };
+      const settings = $("view-settings");
+      if (settings && settings.classList.contains("active")) return {
+        view: settings, followEls: [],
+        commit: () => settings.classList.remove("active"),
+      };
+      if (document.body.classList.contains("has-session")) {
+        const chat = $("view-chat");
+        const head = $("chat-head");
+        return {
+          view: chat, followEls: head ? [head] : [],
+          commit: () => { const b = $("chat-back"); if (b) b.click(); },
+        };
+      }
+      return { view: null, followEls: [], bounceOnly: true };
+    }
+
+    function applyTransform(v) {
+      if (!tgt.view) return;
+      tgt.view.style.transform = v;
+      for (const el of tgt.followEls) el.style.transform = v;
+    }
+    function applyTransition(v) {
+      if (!tgt.view) return;
+      tgt.view.style.transition = v;
+      for (const el of tgt.followEls) el.style.transition = v;
+    }
+    function endTransition(targetX, onEnd) {
+      applyTransition("transform 260ms cubic-bezier(0.25, 1, 0.5, 1)");
+      const finished = tgt;
+      let done = false;
+      const fire = () => {
+        if (done) return;
+        done = true;
+        finished.view.removeEventListener("transitionend", fire);
+        finished.view.style.transition = "";
+        for (const el of finished.followEls) el.style.transition = "";
+        onEnd && onEnd();
+      };
+      finished.view.addEventListener("transitionend", fire);
+      setTimeout(fire, 320);
+      applyTransform(targetX);
+    }
+
+    shield.addEventListener("touchstart", (e) => {
+      if (e.cancelable) e.preventDefault();
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      armed = true; dragging = false;
+      startX = lastX = t.clientX;
+      startY = t.clientY;
+      lastT = e.timeStamp;
+      tgt = pickTarget();
+      if (tgt.view) tgt.width = tgt.view.offsetWidth || window.innerWidth;
+    }, { passive: false });
+
+    shield.addEventListener("touchmove", (e) => {
+      if (e.cancelable) e.preventDefault();
+      if (!armed || !tgt) return;
+      const t = e.touches[0];
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+      if (!dragging) {
+        if (Math.abs(dy) > SLOP && Math.abs(dy) > Math.abs(dx)) {
+          armed = false; return;
+        }
+        if (Math.abs(dx) <= SLOP) return;
+        dragging = true;
+        if (tgt.view && !tgt.bounceOnly) applyTransition("none");
+      }
+      if (tgt.view && !tgt.bounceOnly) {
+        applyTransform(`translateX(${Math.max(0, dx)}px)`);
+      }
+      lastX = t.clientX;
+      lastT = e.timeStamp;
+    }, { passive: false });
+
+    function release(e) {
+      if (!armed) { tgt = null; return; }
+      armed = false;
+      if (!dragging || !tgt.view || tgt.bounceOnly) { tgt = null; return; }
+      dragging = false;
+      const t = (e.changedTouches && e.changedTouches[0]) ||
+                { clientX: lastX, timeStamp: lastT };
+      const dx = t.clientX - startX;
+      const dt = Math.max(1, (e.timeStamp || lastT) - lastT);
+      const v = (t.clientX - lastX) / dt;
+      const commit = dx > tgt.width * COMMIT_FRAC || v > COMMIT_VELOCITY;
+      const finished = tgt;
+      if (commit) {
+        endTransition(`translateX(${tgt.width}px)`, () => {
+          finished.commit && finished.commit();
+          finished.view.style.transform = "";
+          for (const el of finished.followEls) el.style.transform = "";
+        });
+      } else {
+        endTransition("translateX(0)", () => {
+          finished.view.style.transform = "";
+          for (const el of finished.followEls) el.style.transform = "";
+        });
+      }
+      tgt = null;
+    }
+    shield.addEventListener("touchend", release, { passive: false });
+    shield.addEventListener("touchcancel", (e) => {
+      if (tgt && tgt.view && dragging) {
+        const finished = tgt;
+        endTransition("translateX(0)", () => {
+          finished.view.style.transform = "";
+          for (const el of finished.followEls) el.style.transform = "";
+        });
+      }
+      armed = false; dragging = false; tgt = null;
+    }, { passive: false });
+  } catch (_) {}
+
   let me = null;
   try { me = await api("/api/me"); } catch (_) {}
   if (me && me.mode === "hub") {

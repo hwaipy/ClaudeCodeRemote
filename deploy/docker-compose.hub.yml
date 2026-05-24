@@ -46,14 +46,18 @@ services:
       # NO_PROXY 旁路: localhost / 同 docker network / 国内 LLM gateway.
       HTTP_PROXY: "http://mihomo:7890"
       HTTPS_PROXY: "http://mihomo:7890"
-      NO_PROXY: "localhost,127.0.0.1,mihomo,ccr-mihomo,api.kimi.com,api.moonshot.cn,api.llm.ustc.edu.cn,gitee.com"
+      NO_PROXY: "localhost,127.0.0.1,mihomo,ccr-mihomo,api.kimi.com,api.moonshot.cn,api.llm.ustc.edu.cn,gitee.com,passport.feishu.cn,open.feishu.cn,login.dingtalk.com,api.dingtalk.com"
       # OAuth — provider 的 client_id/secret 留空时该 provider 不启用 (前端
       # 不显示按钮). 配好任一个就出现对应"Sign in with X"按钮.
-      CCR_HUB_OAUTH_GOOGLE_CLIENT_ID:     "${CCR_HUB_OAUTH_GOOGLE_CLIENT_ID:-}"
-      CCR_HUB_OAUTH_GOOGLE_CLIENT_SECRET: "${CCR_HUB_OAUTH_GOOGLE_CLIENT_SECRET:-}"
-      CCR_HUB_OAUTH_GITHUB_CLIENT_ID:     "${CCR_HUB_OAUTH_GITHUB_CLIENT_ID:-}"
-      CCR_HUB_OAUTH_GITHUB_CLIENT_SECRET: "${CCR_HUB_OAUTH_GITHUB_CLIENT_SECRET:-}"
-      CCR_HUB_OAUTH_GITEE_CLIENT_ID:      "${CCR_HUB_OAUTH_GITEE_CLIENT_ID:-}"
-      CCR_HUB_OAUTH_GITEE_CLIENT_SECRET:  "${CCR_HUB_OAUTH_GITEE_CLIENT_SECRET:-}"
+      CCR_HUB_OAUTH_GOOGLE_CLIENT_ID:       "${CCR_HUB_OAUTH_GOOGLE_CLIENT_ID:-}"
+      CCR_HUB_OAUTH_GOOGLE_CLIENT_SECRET:   "${CCR_HUB_OAUTH_GOOGLE_CLIENT_SECRET:-}"
+      CCR_HUB_OAUTH_GITHUB_CLIENT_ID:       "${CCR_HUB_OAUTH_GITHUB_CLIENT_ID:-}"
+      CCR_HUB_OAUTH_GITHUB_CLIENT_SECRET:   "${CCR_HUB_OAUTH_GITHUB_CLIENT_SECRET:-}"
+      CCR_HUB_OAUTH_GITEE_CLIENT_ID:        "${CCR_HUB_OAUTH_GITEE_CLIENT_ID:-}"
+      CCR_HUB_OAUTH_GITEE_CLIENT_SECRET:    "${CCR_HUB_OAUTH_GITEE_CLIENT_SECRET:-}"
+      CCR_HUB_OAUTH_FEISHU_CLIENT_ID:       "${CCR_HUB_OAUTH_FEISHU_CLIENT_ID:-}"
+      CCR_HUB_OAUTH_FEISHU_CLIENT_SECRET:   "${CCR_HUB_OAUTH_FEISHU_CLIENT_SECRET:-}"
+      CCR_HUB_OAUTH_DINGTALK_CLIENT_ID:     "${CCR_HUB_OAUTH_DINGTALK_CLIENT_ID:-}"
+      CCR_HUB_OAUTH_DINGTALK_CLIENT_SECRET: "${CCR_HUB_OAUTH_DINGTALK_CLIENT_SECRET:-}"
     volumes:
       - ./data:/data

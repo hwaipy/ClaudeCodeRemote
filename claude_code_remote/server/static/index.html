@@ -26,55 +26,54 @@
     <!-- Hub mode landing: 醒目卖点 + OAuth CTA. CSS body.hub-mode 才显示. -->
     <div class="hub-landing login-hub">
       <div class="hub-landing-hero">
-        <div class="hub-landing-eyebrow">Vibing everything · 一个面板搞定你所有 AI 编程任务</div>
+        <div class="hub-landing-eyebrow">Vibing everything · 让 AI 跟着你, 不掉链子</div>
         <h1 class="hub-landing-title">
           <span class="grad">Vibing</span> everything,<br>
           everywhere
         </h1>
         <p class="hub-landing-sub">
-          家里的 Linux、公司 Mac、云上的 VPS、Docker 沙箱 …… 全部反向接到这里。
-          手机 / 平板 / 桌面浏览器随便开,统一界面跟 Claude 聊天、批准工具、看 diff,
-          <strong>关掉网页进度不丢,session 永远续上</strong>。
+          在家电脑上开了个头, 出门改用手机, 路上想到事儿打开平板再补两句 ——
+          你跟 AI 之间的一切对话和进度, <strong>永远接得上</strong>。
         </p>
         <div class="hub-landing-features">
           <div class="hub-landing-feat">
             <div class="hub-landing-feat-icon">⚡</div>
             <div class="hub-landing-feat-text">
-              <strong>多机统一面板</strong><br>
-              所有 server 的 session 合并展示
+              <strong>设备之间随便切</strong><br>
+              电脑、手机、平板, 想在哪儿用就在哪儿用
             </div>
           </div>
           <div class="hub-landing-feat">
-            <div class="hub-landing-feat-icon">🔌</div>
+            <div class="hub-landing-feat-icon">🪄</div>
             <div class="hub-landing-feat-text">
-              <strong>任意模型</strong><br>
-              Anthropic / DeepSeek / Kimi / Qwen…自带网关
+              <strong>一个面板 所有 AI</strong><br>
+              不用为不同的助手装一堆 app
             </div>
           </div>
           <div class="hub-landing-feat">
             <div class="hub-landing-feat-icon">📱</div>
             <div class="hub-landing-feat-text">
-              <strong>PWA 离线就绪</strong><br>
-              加到主屏当 app 用,IndexedDB 缓存
+              <strong>像 app 一样顺手</strong><br>
+              一次加到主屏, 之后秒开就用
             </div>
           </div>
           <div class="hub-landing-feat">
             <div class="hub-landing-feat-icon">🔐</div>
             <div class="hub-landing-feat-text">
-              <strong>你的代码不出你机器</strong><br>
-              server 跑在你这边,Hub 只转发
+              <strong>只属于你自己</strong><br>
+              内容存在你家机器上, 不经过第三方
             </div>
           </div>
         </div>
       </div>
 
       <div class="hub-landing-cta">
-        <div class="hub-landing-cta-label">⬇ 一键登录,30 秒接上你第一台机器</div>
+        <div class="hub-landing-cta-label">⬇ 一键登录, 立刻开始用</div>
         <!-- OAuth icon row — JS 按 oauth_providers 渲染 -->
         <div class="login-oauth" id="login-oauth"></div>
         <div class="err" id="login-err"></div>
         <div class="hub-landing-cta-help">
-          没机器接?<a href="#help" id="login-help-link">看接入指南 →</a>
+          没用过?<a href="#help" id="login-help-link">看 30 秒上手 →</a>
         </div>
       </div>
     </div>
@@ -97,10 +96,15 @@
     <div class="card">
       <div class="home-top">
         <div class="home-brand" aria-label="Vibing everything"><span class="grad">Vibing</span> everything</div>
-        <button class="icon-btn" id="settings-btn" type="button" title="Settings" aria-label="Settings">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        <button class="icon-btn" id="new-btn" type="button" title="New session" aria-label="New session">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
+        <button class="icon-btn" id="new-btn-quick" type="button" title="Quick new (no setup)" aria-label="Quick new session" hidden>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M13 2 4 13h7l-1 9 9-11h-7l1-9z"/>
           </svg>
         </button>
         <!-- hub mode only: 云服务器/App 管理 -->
@@ -112,15 +116,10 @@
             <line x1="7" y1="17" x2="7.01"  y2="17"></line>
           </svg>
         </button>
-        <button class="icon-btn" id="new-btn-quick" type="button" title="Quick new (no setup)" aria-label="Quick new session" hidden>
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M13 2 4 13h7l-1 9 9-11h-7l1-9z"/>
-          </svg>
-        </button>
-        <button class="icon-btn" id="new-btn" type="button" title="New session" aria-label="New session">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-            <line x1="12" y1="5" x2="12" y2="19"></line>
-            <line x1="5" y1="12" x2="19" y2="12"></line>
+        <button class="icon-btn" id="settings-btn" type="button" title="Settings" aria-label="Settings">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
           </svg>
         </button>
         <div id="search-bar" class="search-bar" role="search">
@@ -197,11 +196,6 @@
     </div>
   </div>
   <div class="settings-body">
-    <label for="settings-default-cwd">Default working directory</label>
-    <div class="path-row">
-      <input id="settings-default-cwd" type="text" placeholder="/abs/path">
-      <button type="button" class="btn btn-secondary path-browse" id="settings-browse-btn">Browse…</button>
-    </div>
     <label>Default permission</label>
     <div class="spawn-perm" id="settings-default-perm">
       <button type="button" class="spawn-perm-btn active" data-mode="manual">Ask</button>

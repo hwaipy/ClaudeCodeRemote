@@ -1,4 +1,4 @@
-"""Hub 第三方 OAuth2 登录 — Google / GitHub / Gitee (国内替代阿里云).
+"""Hub 第三方 OAuth2 登录 — Google / GitHub / Gitee / 飞书 / 钉钉.
 
 挂在 /api/hub/auth/<provider>/{start,callback}. 启用前提:env 里给该 provider
 设了 CLIENT_ID + CLIENT_SECRET, 否则该 provider 整段 disabled (前端不显示按钮).
@@ -52,13 +52,24 @@ def _consume_state(state: str, provider: str) -> bool:
 # ---------- Provider registry ----------
 
 class _Provider:
-    """一个 OAuth2 provider 的配置 + userinfo 解析."""
+    """一个 OAuth2 provider 的配置 + userinfo 解析.
+
+    钉钉不走标准 OAuth2 字段:
+      - token endpoint 要 JSON body 而不是 form (token_json=True)
+      - 字段名是 camelCase (clientId/clientSecret/grantType), 通过
+        build_token_body 自定义
+      - userinfo 用 x-acs-dingtalk-access-token header 而不是 Bearer
+        (userinfo_auth='x_acs_dingtalk')
+    """
     def __init__(self, key: str, label: str, color: str,
                  client_id_env: str, client_secret_env: str,
                  authorize_url: str, token_url: str, userinfo_url: str,
                  scope: str,
                  parse_user: Callable[[dict], tuple[str, str | None, str | None]],
-                 userinfo_headers: dict | None = None) -> None:
+                 userinfo_headers: dict | None = None,
+                 token_json: bool = False,
+                 userinfo_auth: str = "bearer",
+                 build_token_body: Callable[[str, str, str, str], dict] | None = None) -> None:
         self.key = key
         self.label = label
         self.color = color
@@ -68,12 +79,37 @@ class _Provider:
         self.scope = scope
         self.parse_user = parse_user
         self.userinfo_headers = userinfo_headers or {}
+        self.token_json = token_json
+        self.userinfo_auth = userinfo_auth
+        self.build_token_body = build_token_body or _standard_token_body
         self.client_id = os.environ.get(client_id_env, "").strip()
         self.client_secret = os.environ.get(client_secret_env, "").strip()
 
     @property
     def enabled(self) -> bool:
         return bool(self.client_id and self.client_secret)
+
+
+def _standard_token_body(code: str, redirect_uri: str,
+                         client_id: str, client_secret: str) -> dict:
+    return {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }
+
+
+def _dingtalk_token_body(code: str, redirect_uri: str,
+                         client_id: str, client_secret: str) -> dict:
+    # 钉钉 token endpoint 字段名是 camelCase; redirect_uri 不需要带.
+    return {
+        "clientId": client_id,
+        "clientSecret": client_secret,
+        "code": code,
+        "grantType": "authorization_code",
+    }
 
 
 def _parse_google(j: dict) -> tuple[str, str | None, str | None]:
@@ -93,6 +129,27 @@ def _parse_gitee(j: dict) -> tuple[str, str | None, str | None]:
     sub = str(j["id"])
     email = j.get("email") or f"{j['login']}@gitee.users.noreply"
     display = j.get("name") or j.get("login")
+    return sub, email, display
+
+
+def _parse_feishu(j: dict) -> tuple[str, str | None, str | None]:
+    # 飞书 /suite/passport/oauth/userinfo 返 OIDC 风格: sub / name / email /
+    # picture / open_id / union_id. sub 优先, 没就 union_id, 再没就 open_id.
+    sub = str(j.get("sub") or j.get("union_id") or j.get("open_id") or "")
+    email = j.get("email")
+    display = j.get("name") or email
+    return sub, email, display
+
+
+def _parse_dingtalk(j: dict) -> tuple[str, str | None, str | None]:
+    # 钉钉 /v1.0/contact/users/me 返 {nick, avatarUrl, mobile, openId,
+    # unionId, email}. unionId 跨企业稳定, 优先用; email 大概率为空, 用
+    # mobile@dingtalk.user 兜底.
+    sub = str(j.get("unionId") or j.get("openId") or "")
+    email = j.get("email") or (
+        f"{j.get('mobile') or sub}@dingtalk.user" if sub else None
+    )
+    display = j.get("nick")
     return sub, email, display
 
 
@@ -127,6 +184,29 @@ PROVIDERS: dict[str, _Provider] = {
         userinfo_url="https://gitee.com/api/v5/user",
         scope="user_info emails",
         parse_user=_parse_gitee,
+    ),
+    "feishu": _Provider(
+        key="feishu", label="Feishu", color="#00D6B9",
+        client_id_env="CCR_HUB_OAUTH_FEISHU_CLIENT_ID",
+        client_secret_env="CCR_HUB_OAUTH_FEISHU_CLIENT_SECRET",
+        authorize_url="https://passport.feishu.cn/suite/passport/oauth/authorize",
+        token_url="https://passport.feishu.cn/suite/passport/oauth/token",
+        userinfo_url="https://passport.feishu.cn/suite/passport/oauth/userinfo",
+        scope="openid profile email",
+        parse_user=_parse_feishu,
+    ),
+    "dingtalk": _Provider(
+        key="dingtalk", label="DingTalk", color="#1677FF",
+        client_id_env="CCR_HUB_OAUTH_DINGTALK_CLIENT_ID",
+        client_secret_env="CCR_HUB_OAUTH_DINGTALK_CLIENT_SECRET",
+        authorize_url="https://login.dingtalk.com/oauth2/auth",
+        token_url="https://api.dingtalk.com/v1.0/oauth2/userAccessToken",
+        userinfo_url="https://api.dingtalk.com/v1.0/contact/users/me",
+        scope="openid",
+        parse_user=_parse_dingtalk,
+        token_json=True,
+        userinfo_auth="x_acs_dingtalk",
+        build_token_body=_dingtalk_token_body,
     ),
 }
 
@@ -188,20 +268,18 @@ async def oauth_callback(provider: str, request: Request):
         raise HTTPException(status_code=400, detail="bad_state")
 
     # 换 access_token
+    token_body = p.build_token_body(
+        code, _callback_url(provider), p.client_id, p.client_secret,
+    )
     async with httpx.AsyncClient(timeout=10) as client:
         r = None
         try:
-            r = await client.post(
-                p.token_url,
-                data={
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "redirect_uri": _callback_url(provider),
-                    "client_id": p.client_id,
-                    "client_secret": p.client_secret,
-                },
-                headers={"Accept": "application/json"},
-            )
+            post_kwargs = {"headers": {"Accept": "application/json"}}
+            if p.token_json:
+                post_kwargs["json"] = token_body
+            else:
+                post_kwargs["data"] = token_body
+            r = await client.post(p.token_url, **post_kwargs)
             r.raise_for_status()
             tok = r.json()
         except Exception as e:  # noqa: BLE001
@@ -217,7 +295,8 @@ async def oauth_callback(provider: str, request: Request):
                 status_code=502,
                 detail=f"token_exchange_failed type={type(e).__name__} msg={e!s} body={body_preview!r}",
             )
-        access_token = tok.get("access_token")
+        # 钉钉 返 accessToken (camelCase), 其它 access_token (snake_case)
+        access_token = tok.get("access_token") or tok.get("accessToken")
         if not access_token:
             log.warning("[%s] no access_token; tok=%r", provider, tok)
             raise HTTPException(
@@ -227,10 +306,16 @@ async def oauth_callback(provider: str, request: Request):
 
         # 拉 userinfo
         try:
-            hdrs = {
-                "Authorization": f"Bearer {access_token}",
-                **p.userinfo_headers,
-            }
+            if p.userinfo_auth == "x_acs_dingtalk":
+                hdrs = {
+                    "x-acs-dingtalk-access-token": access_token,
+                    **p.userinfo_headers,
+                }
+            else:
+                hdrs = {
+                    "Authorization": f"Bearer {access_token}",
+                    **p.userinfo_headers,
+                }
             ur = await client.get(p.userinfo_url, headers=hdrs)
             ur.raise_for_status()
             user_json = ur.json()
