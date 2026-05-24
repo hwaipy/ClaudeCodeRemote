@@ -69,7 +69,8 @@ class _Provider:
                  userinfo_headers: dict | None = None,
                  token_json: bool = False,
                  userinfo_auth: str = "bearer",
-                 build_token_body: Callable[[str, str, str, str], dict] | None = None) -> None:
+                 build_token_body: Callable[[str, str, str, str], dict] | None = None,
+                 fetch_user_info: Callable | None = None) -> None:
         self.key = key
         self.label = label
         self.color = color
@@ -82,6 +83,10 @@ class _Provider:
         self.token_json = token_json
         self.userinfo_auth = userinfo_auth
         self.build_token_body = build_token_body or _standard_token_body
+        # QQ 这种"先 GET /me 拿 openid 再 GET /user_info"的多步 user info
+        # 流程没法用单一 userinfo_url 表达, 让 provider 自定义整个 fetch.
+        # 签名: async (httpx.AsyncClient, access_token: str, provider) -> dict
+        self.fetch_user_info = fetch_user_info
         self.client_id = os.environ.get(client_id_env, "").strip()
         self.client_secret = os.environ.get(client_secret_env, "").strip()
 
@@ -112,6 +117,46 @@ def _dingtalk_token_body(code: str, redirect_uri: str,
     }
 
 
+def _qq_token_body(code: str, redirect_uri: str,
+                   client_id: str, client_secret: str) -> dict:
+    # QQ 互联 token endpoint 默认返 form-urlencoded; 加 fmt=json 才返 JSON.
+    return {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "fmt": "json",
+    }
+
+
+async def _fetch_qq_user_info(client: "httpx.AsyncClient",
+                              access_token: str, p: "_Provider") -> dict:
+    # QQ 两步:
+    # 1) GET /oauth2.0/me?access_token=...&fmt=json → {client_id, openid}
+    # 2) GET /user/get_user_info?access_token+oauth_consumer_key+openid →
+    #    {ret, msg, nickname, figureurl, ...}  (无 email — 拼兜底)
+    me = await client.get("https://graph.qq.com/oauth2.0/me",
+                          params={"access_token": access_token,
+                                  "fmt": "json"})
+    me.raise_for_status()
+    me_data = me.json()
+    openid = me_data.get("openid")
+    if not openid:
+        raise RuntimeError(f"qq no openid in /me response: {me_data}")
+    r = await client.get("https://graph.qq.com/user/get_user_info",
+                         params={"access_token": access_token,
+                                 "oauth_consumer_key": p.client_id,
+                                 "openid": openid})
+    r.raise_for_status()
+    j = r.json()
+    if j.get("ret", 0) != 0:
+        raise RuntimeError(f"qq user_info ret!=0: {j}")
+    # parse_user 用这个 openid 当 sub, 塞回 dict
+    j["openid"] = openid
+    return j
+
+
 def _parse_google(j: dict) -> tuple[str, str | None, str | None]:
     return str(j["sub"]), j.get("email"), j.get("name") or j.get("email")
 
@@ -138,6 +183,14 @@ def _parse_feishu(j: dict) -> tuple[str, str | None, str | None]:
     sub = str(j.get("sub") or j.get("union_id") or j.get("open_id") or "")
     email = j.get("email")
     display = j.get("name") or email
+    return sub, email, display
+
+
+def _parse_qq(j: dict) -> tuple[str, str | None, str | None]:
+    # QQ user info 不返 email. openid 当 sub, 拼兜底 email.
+    sub = str(j.get("openid") or "")
+    email = f"qq-{sub[:16]}@qq.users.noreply" if sub else None
+    display = j.get("nickname") or (sub[:8] if sub else "QQ user")
     return sub, email, display
 
 
@@ -184,6 +237,18 @@ PROVIDERS: dict[str, _Provider] = {
         userinfo_url="https://gitee.com/api/v5/user",
         scope="user_info emails",
         parse_user=_parse_gitee,
+    ),
+    "qq": _Provider(
+        key="qq", label="QQ", color="#12B7F5",
+        client_id_env="CCR_HUB_OAUTH_QQ_CLIENT_ID",
+        client_secret_env="CCR_HUB_OAUTH_QQ_CLIENT_SECRET",
+        authorize_url="https://graph.qq.com/oauth2.0/authorize",
+        token_url="https://graph.qq.com/oauth2.0/token",
+        userinfo_url="",   # 走 fetch_user_info (两步), userinfo_url 不用
+        scope="get_user_info",
+        parse_user=_parse_qq,
+        build_token_body=_qq_token_body,
+        fetch_user_info=_fetch_qq_user_info,
     ),
     "feishu": _Provider(
         key="feishu", label="Feishu", color="#00D6B9",
@@ -304,21 +369,25 @@ async def oauth_callback(provider: str, request: Request):
                 detail=f"no_access_token: {tok}",
             )
 
-        # 拉 userinfo
+        # 拉 userinfo. QQ 这种多步流程走 provider 自定义 fetch_user_info,
+        # 其它 provider 走默认 GET userinfo_url + Authorization.
         try:
-            if p.userinfo_auth == "x_acs_dingtalk":
-                hdrs = {
-                    "x-acs-dingtalk-access-token": access_token,
-                    **p.userinfo_headers,
-                }
+            if p.fetch_user_info is not None:
+                user_json = await p.fetch_user_info(client, access_token, p)
             else:
-                hdrs = {
-                    "Authorization": f"Bearer {access_token}",
-                    **p.userinfo_headers,
-                }
-            ur = await client.get(p.userinfo_url, headers=hdrs)
-            ur.raise_for_status()
-            user_json = ur.json()
+                if p.userinfo_auth == "x_acs_dingtalk":
+                    hdrs = {
+                        "x-acs-dingtalk-access-token": access_token,
+                        **p.userinfo_headers,
+                    }
+                else:
+                    hdrs = {
+                        "Authorization": f"Bearer {access_token}",
+                        **p.userinfo_headers,
+                    }
+                ur = await client.get(p.userinfo_url, headers=hdrs)
+                ur.raise_for_status()
+                user_json = ur.json()
         except Exception as e:  # noqa: BLE001
             log.warning("[%s] userinfo failed: %s", provider, e)
             raise HTTPException(status_code=502, detail=f"userinfo_failed: {e}")
