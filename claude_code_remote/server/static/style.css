@@ -2767,8 +2767,16 @@ body:not(.hub-mode) .hub-only { display: none !important; }
   font-size: 15px;
   line-height: 1.5;
   color: var(--text-muted, #4a5158);
+  margin: 0 auto 12px;
+  max-width: 560px;
+}
+.hub-landing-tagline {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-dim, #6a7178);
   margin: 0 auto 18px;
   max-width: 560px;
+  opacity: 0.85;
 }
 /* Landing 截图区 — 横向滚动 carousel. 三张图横排 (左右手机 + 中央桌面 chat),
    宽度超出 hub-landing max-width 720 时 user 滑动查看. scroll-snap 让滑到
