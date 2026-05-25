@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v151";
+const __CCR_APP_VER = "v152";
 
 const $ = (id) => document.getElementById(id);
 
@@ -1282,7 +1282,15 @@ $("spawn-go").addEventListener("click", async () => {
       body: JSON.stringify(body),
     });
     state.cwd = cwd;
-    localStorage.setItem("ccr.cwd", cwd);
+    // 每个 server 各存自己 last cwd (per-app key); 老的全局 ccr.cwd 不再写,
+    // 但保留 read 兼容 (没存过 per-app 时 fallback 到 "~").
+    if (state.hubMode) {
+      const sel = $("spawn-app");
+      const appId = sel ? sel.value : "";
+      if (window.__saveCwdForApp) window.__saveCwdForApp(appId, cwd);
+    } else {
+      localStorage.setItem("ccr.cwd", cwd);
+    }
     localStorage.setItem("ccr.spawnModel", model);
     pushRecentCwd(cwd);
     $("spawn-name").value = "";
@@ -1342,6 +1350,18 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
   const closeX    = $("new-modal-close");
   const cancelBtn = $("new-modal-cancel");
 
+  // 每个 server 各自维护 last working directory: ccr.cwd.<app_id>.
+  // 切 server 时自动改 spawn-cwd input. 没存过的 app 默认 "~".
+  function _cwdKeyForApp(appId) {
+    return appId ? `ccr.cwd.${appId}` : "ccr.cwd";
+  }
+  function _loadCwdForApp(appId) {
+    return localStorage.getItem(_cwdKeyForApp(appId)) || "~";
+  }
+  function _saveCwdForApp(appId, cwd) {
+    if (cwd) localStorage.setItem(_cwdKeyForApp(appId), cwd);
+  }
+
   function _fillAppSelect() {
     if (!state.hubMode) return;
     const sel = $("spawn-app");
@@ -1362,20 +1382,28 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
       opt.disabled = true;
       sel.appendChild(opt);
     }
+    // 切 server 时自动更新 cwd input 到该 server 的 last cwd
+    sel.onchange = () => {
+      $("spawn-cwd").value = _loadCwdForApp(sel.value);
+      syncPresetChips();
+    };
   }
 
   function open() {
     modal.removeAttribute("hidden");
-    if (!$("spawn-cwd").value) {
-      $("spawn-cwd").value = abbreviateHome(state.cwd || "");
-    }
+    _fillAppSelect();   // 先填 app select, 才能拿 selected app_id
+    // 每次打开 modal 都按当前选中 server 重设 cwd input — 不再用全局 state.cwd
+    const sel = $("spawn-app");
+    const appId = state.hubMode && sel ? sel.value : "";
+    $("spawn-cwd").value = _loadCwdForApp(appId);
     syncPresetChips();
     _setSpawnPermMode(
       localStorage.getItem("ccr.defaultPermMode") || "manual"
     );
-    _fillAppSelect();
     setTimeout(() => $("spawn-name").focus(), 0);
   }
+  // 把 save helper 暴露给外面 spawn-go click handler 用 (跨 IIFE)
+  window.__saveCwdForApp = _saveCwdForApp;
   function close() {
     modal.setAttribute("hidden", "");
     $("spawn-err").classList.remove("show");
