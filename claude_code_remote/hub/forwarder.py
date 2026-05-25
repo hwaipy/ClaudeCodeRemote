@@ -98,6 +98,18 @@ async def _resolve_target(request, user_id: str):
         o = await _pick_app_for_sid(user_id, sid)
         if o is not None:
             return o, body
+
+    # /api/ls 和 /api/mkdir 在 new-session modal 里浏览/创目录用 — 必须
+    # 路由到用户在 spawn-app select 里选的 server (不是第一个 online),
+    # 否则你选 USTCClaw 但 path browser 显示 UbuntuClaw 的目录, 错位严重.
+    # 前端调用时把 app_id 加到 query (?app_id=app-xxx).
+    if path in ("/api/ls", "/api/mkdir"):
+        req_app_id = (request.query_params.get("app_id") or "").strip()
+        if req_app_id:
+            for o in registry.online_apps():
+                if o.user_id == user_id and o.app_id == req_app_id:
+                    return o, body
+            # 用户明确指定 app 不 online — fallback first online 避免完全 broken
     return await _pick_app_for_user(user_id), body
 
 

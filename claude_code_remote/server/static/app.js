@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v152";
+const __CCR_APP_VER = "v153";
 
 const $ = (id) => document.getElementById(id);
 
@@ -519,11 +519,21 @@ $("spawn-cwd").addEventListener("input", syncPresetChips);
 
 // ---------- 目录浏览 modal ----------
 const _browse = { curPath: "" };
+// hub mode: ls/mkdir 必须按用户当前在 spawn-app select 里选的 server
+// 路由, 否则 path browser 串台. local mode 返空.
+function _browseTargetAppId() {
+  if (!state.hubMode) return "";
+  const sel = $("spawn-app");
+  return (sel && sel.value) || "";
+}
 async function browseLoad(path) {
   const list = $("modal-list");
   list.innerHTML = '<div class="modal-empty">Loading…</div>';
   try {
-    const j = await api(`api/ls?path=${encodeURIComponent(path || "")}`);
+    const appId = _browseTargetAppId();
+    const qs = [`path=${encodeURIComponent(path || "")}`];
+    if (appId) qs.push(`app_id=${encodeURIComponent(appId)}`);
+    const j = await api(`api/ls?${qs.join("&")}`);
     _browse.curPath = j.path;
     $("modal-crumb").textContent = abbreviateHome(j.path);
     const rows = [];
@@ -576,7 +586,11 @@ $("modal-newdir").addEventListener("click", async () => {
   const name = (prompt(`Create new folder in:\n${parent}\n\nName:`) || "").trim();
   if (!name) return;
   try {
-    const r = await api("api/mkdir", {
+    const appId = _browseTargetAppId();
+    const url = appId
+      ? `api/mkdir?app_id=${encodeURIComponent(appId)}`
+      : "api/mkdir";
+    const r = await api(url, {
       method: "POST",
       body: JSON.stringify({ parent, name }),
     });
