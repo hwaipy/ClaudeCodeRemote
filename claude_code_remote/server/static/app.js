@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v150";
+const __CCR_APP_VER = "v151";
 
 const $ = (id) => document.getElementById(id);
 
@@ -1685,20 +1685,30 @@ ANTHROPIC_API_KEY=                    # optional, blank = mock`;
         const moved = items.splice(dragState.myIdx, 1)[0];
         items.splice(dragState.currentIdx, 0, moved);
         const orderedIds = items.map((itm) => itm.row.dataset.appId);
-        // 清 inline
-        items.forEach((itm) => { itm.row.style.transform = ""; itm.row.style.transition = ""; });
-        row.classList.remove("dragging");
-        document.body.classList.remove("apps-reordering");
+        const noChange = dragState.myIdx === dragState.currentIdx;
+        // 关键: 立即在 DOM 层 reorder, 不等 server 回. 跟 inline transform
+        // 清空同步发生, 让 row 从"跟手 translated 位置"平滑 snap 到"新 DOM 位置".
+        // 不再等 reload — 视觉 100% 由本地 state 驱动, server 失败才 reload 校准.
+        items.forEach((itm) => listEl.appendChild(itm.row));
+        // 让 the dragged row 平滑 settle 到新位置 (它现在的 transform 是 dy,
+        // 新 DOM idx 是 currentIdx, 清 transform 后差距由 200ms transition 化解).
+        row.style.transition = "transform 200ms cubic-bezier(0.25, 1, 0.5, 1)";
+        row.style.transform = "";
+        items.forEach((itm) => {
+          if (itm.row !== row) itm.row.style.transform = "";
+        });
+        setTimeout(() => {
+          row.style.transition = "";
+          row.classList.remove("dragging");
+          document.body.classList.remove("apps-reordering");
+        }, 220);
         dragState = null;
-        // 没动顺序就不发 API
-        const cur = Array.from(listEl.querySelectorAll(".app-row")).map((r) => r.dataset.appId);
-        const same = cur.length === orderedIds.length
-          && cur.every((id, i) => id === orderedIds[i]);
-        if (same) return;
+        if (noChange) return;
+        // background 持久化, 失败 reload 校准 (用户视觉已经是 final state)
         api("/api/hub/apps/reorder", {
           method: "PUT",
           body: JSON.stringify({ ordered_ids: orderedIds }),
-        }).then(() => reload()).catch((e) => {
+        }).catch((e) => {
           alert("reorder failed: " + (e.message || e));
           reload();
         });
