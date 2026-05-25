@@ -2558,6 +2558,28 @@ body:not(.hub-mode) .hub-only { display: none !important; }
   background: var(--bg-card, #fff);
   border: 1px solid var(--border-soft, rgba(125,125,125,.18));
   border-radius: 8px;
+  /* iOS-style long-press drag reorder: 非 drag 时 transform 顺滑切换 */
+  transition: transform 200ms cubic-bezier(0.25, 1, 0.5, 1);
+  touch-action: pan-y;     /* 默认允许 v scroll, drag 时 JS preventDefault */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.app-row.dragging {
+  /* 被长按拖动的那张: lift up + shadow + 锁住 transition 让跟手丝滑 */
+  transition: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  z-index: 10;
+  position: relative;
+  cursor: grabbing;
+  opacity: 0.95;
+}
+body.apps-reordering {
+  /* 拖拽期间锁住页面滚动, 防 native scroll 跟 JS drag 撞车 */
+  overflow: hidden;
+  touch-action: none;
+}
+body.apps-reordering .app-row {
+  touch-action: none;
 }
 .app-row .state-dot {
   flex: 0 0 auto;

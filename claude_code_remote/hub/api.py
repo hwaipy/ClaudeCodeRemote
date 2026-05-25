@@ -103,6 +103,29 @@ async def list_apps(ccr_sess: str | None = Cookie(None)):
     return out
 
 
+class ReorderAppsReq(BaseModel):
+    ordered_ids: list[str]
+
+
+@router.put("/apps/reorder")
+async def reorder_apps(
+    body: ReorderAppsReq, ccr_sess: str | None = Cookie(None),
+):
+    """按 body.ordered_ids 数组顺序重写当前 user 的 apps.sort_order.
+
+    body.ordered_ids 必须是 user 当前所有 app_id 的 permutation. 多机同步
+    走 hub db 持久化 — 任何设备 GET /api/hub/apps 都按新顺序返回.
+    """
+    user_id = await _require_user(ccr_sess)
+    rows = await hub_db.list_apps_for_user(user_id)
+    owned = {r["id"] for r in rows}
+    target = list(dict.fromkeys(body.ordered_ids))   # dedupe, keep order
+    if not (set(target) <= owned):
+        raise HTTPException(400, detail="ordered_ids contains non-owned apps")
+    n = await hub_db.reorder_apps_for_user(user_id, target)
+    return {"updated": n}
+
+
 @router.delete("/apps/{app_id}")
 async def delete_app(app_id: str, ccr_sess: str | None = Cookie(None)):
     user_id = await _require_user(ccr_sess)

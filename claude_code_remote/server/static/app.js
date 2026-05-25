@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v149";
+const __CCR_APP_VER = "v150";
 
 const $ = (id) => document.getElementById(id);
 
@@ -1575,6 +1575,7 @@ ANTHROPIC_API_KEY=                    # optional, blank = mock`;
     for (const a of apps) {
       const row = document.createElement("div");
       row.className = "app-row " + (a.online ? "online" : "offline");
+      row.dataset.appId = a.id;
       const authoredAgo = a.created_at ? _fmtDuration(now - a.created_at) : "?";
       // online: 显示当前 session 持续时长 ("Connected for X"). offline: 不显示.
       let connectedHTML = "";
@@ -1609,6 +1610,104 @@ ANTHROPIC_API_KEY=                    # optional, blank = mock`;
       });
       listEl.appendChild(row);
     }
+    _attachDragReorder();
+  }
+
+  // iOS-style long-press drag reorder. 长按 500ms 后进 drag 状态,
+  // 跟手 translateY, 中点检测自动 swap, 释放时 PUT /api/hub/apps/reorder
+  // 持久化 (多设备同步 — 任何登录设备拉 /api/hub/apps 都按新顺序).
+  function _attachDragReorder() {
+    const LONG_PRESS_MS = 500;
+    const MOVE_CANCEL_PX = 8;
+    listEl.querySelectorAll(".app-row").forEach((row) => {
+      let pressTimer = null;
+      let dragState = null;
+      let startX = 0, startY = 0;
+      let pid = null;
+      const onDown = (e) => {
+        if (e.target.closest(".app-revoke")) return;
+        if (e.button !== undefined && e.button !== 0) return;
+        startX = e.clientX; startY = e.clientY; pid = e.pointerId;
+        pressTimer = setTimeout(() => { pressTimer = null; _startDrag(e); }, LONG_PRESS_MS);
+      };
+      const onMove = (e) => {
+        if (pressTimer) {
+          if (Math.abs(e.clientX - startX) > MOVE_CANCEL_PX
+              || Math.abs(e.clientY - startY) > MOVE_CANCEL_PX) {
+            clearTimeout(pressTimer); pressTimer = null;
+          }
+          return;
+        }
+        if (dragState) _moveDrag(e);
+      };
+      const onUp = (e) => {
+        if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+        if (dragState) _endDrag(e);
+      };
+      function _startDrag(e) {
+        const all = Array.from(listEl.querySelectorAll(".app-row"));
+        const myIdx = all.indexOf(row);
+        if (myIdx < 0) return;
+        dragState = {
+          myIdx, currentIdx: myIdx, startY: e.clientY,
+          items: all.map((r) => {
+            const rc = r.getBoundingClientRect();
+            return { row: r, h: rc.height };
+          }),
+        };
+        row.classList.add("dragging");
+        document.body.classList.add("apps-reordering");
+        try { row.setPointerCapture(pid); } catch (_) {}
+        if (navigator.vibrate) navigator.vibrate(15);
+      }
+      function _moveDrag(e) {
+        const dy = e.clientY - dragState.startY;
+        row.style.transform = `translateY(${dy}px) scale(1.03)`;
+        const myH = dragState.items[dragState.myIdx].h;
+        // 算新 idx: dy / myH 四舍五入然后 clamp
+        const shift = Math.round(dy / myH);
+        let newIdx = dragState.myIdx + shift;
+        newIdx = Math.max(0, Math.min(dragState.items.length - 1, newIdx));
+        if (newIdx !== dragState.currentIdx) {
+          dragState.items.forEach((itm, i) => {
+            if (i === dragState.myIdx) return;
+            let t = 0;
+            if (dragState.myIdx < newIdx && i > dragState.myIdx && i <= newIdx) t = -myH;
+            else if (dragState.myIdx > newIdx && i >= newIdx && i < dragState.myIdx) t = myH;
+            itm.row.style.transform = t ? `translateY(${t}px)` : "";
+          });
+          dragState.currentIdx = newIdx;
+        }
+      }
+      function _endDrag(_e) {
+        // 算 final order
+        const items = dragState.items;
+        const moved = items.splice(dragState.myIdx, 1)[0];
+        items.splice(dragState.currentIdx, 0, moved);
+        const orderedIds = items.map((itm) => itm.row.dataset.appId);
+        // 清 inline
+        items.forEach((itm) => { itm.row.style.transform = ""; itm.row.style.transition = ""; });
+        row.classList.remove("dragging");
+        document.body.classList.remove("apps-reordering");
+        dragState = null;
+        // 没动顺序就不发 API
+        const cur = Array.from(listEl.querySelectorAll(".app-row")).map((r) => r.dataset.appId);
+        const same = cur.length === orderedIds.length
+          && cur.every((id, i) => id === orderedIds[i]);
+        if (same) return;
+        api("/api/hub/apps/reorder", {
+          method: "PUT",
+          body: JSON.stringify({ ordered_ids: orderedIds }),
+        }).then(() => reload()).catch((e) => {
+          alert("reorder failed: " + (e.message || e));
+          reload();
+        });
+      }
+      row.addEventListener("pointerdown", onDown);
+      row.addEventListener("pointermove", onMove);
+      row.addEventListener("pointerup", onUp);
+      row.addEventListener("pointercancel", onUp);
+    });
   }
   function open() {
     if (isOpen()) return;

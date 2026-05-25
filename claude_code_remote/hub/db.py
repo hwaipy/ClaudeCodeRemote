@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS apps (
   capabilities_json     TEXT NOT NULL DEFAULT '[]',
   revoked_at            REAL,
   total_online_seconds  INTEGER NOT NULL DEFAULT 0,
+  sort_order            INTEGER NOT NULL DEFAULT 0,
   created_at            REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_apps_user  ON apps(user_id);
@@ -180,6 +181,7 @@ async def init(path: str | Path) -> None:
             "ALTER TABLE sessions_cache ADD COLUMN needs_action_detail TEXT",
             "ALTER TABLE apps ADD COLUMN total_online_seconds INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE sessions_cache ADD COLUMN cur_model TEXT",
+            "ALTER TABLE apps ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
         ):
             try:
                 c.execute(ddl)
@@ -379,10 +381,11 @@ def _ensure_seed_app_sync(
         )
         return row["id"]
     app_id = "app-" + secrets.token_hex(8)
+    order = _next_sort_order_sync(user_id)
     c.execute(
-        "INSERT INTO apps(id, user_id, name, device_token_hash, created_at) "
-        "VALUES(?,?,?,?,?)",
-        (app_id, user_id, name, tok_hash, time.time()),
+        "INSERT INTO apps(id, user_id, name, device_token_hash, created_at, sort_order) "
+        "VALUES(?,?,?,?,?,?)",
+        (app_id, user_id, name, tok_hash, time.time(), order),
     )
     return app_id
 
@@ -410,13 +413,38 @@ async def list_apps_for_user(user_id: str) -> list[dict]:
     def _q():
         rows = _get_conn().execute(
             "SELECT id, user_id, name, last_seen_at, revoked_at, created_at, "
-            "total_online_seconds FROM apps "
+            "total_online_seconds, sort_order FROM apps "
             "WHERE user_id=? AND revoked_at IS NULL "
-            "ORDER BY created_at DESC",
+            "ORDER BY sort_order ASC, created_at ASC",
             (user_id,),
         ).fetchall()
         return [dict(r) for r in rows]
     return await asyncio.to_thread(_q)
+
+
+def _next_sort_order_sync(user_id: str) -> int:
+    """新建 app 时的 sort_order: 现有 max + 1 (插到列表末尾)."""
+    row = _get_conn().execute(
+        "SELECT COALESCE(MAX(sort_order), -1) AS m FROM apps "
+        "WHERE user_id=? AND revoked_at IS NULL",
+        (user_id,),
+    ).fetchone()
+    return int(row["m"]) + 1
+
+
+async def reorder_apps_for_user(user_id: str, ordered_ids: list[str]) -> int:
+    """按 ordered_ids 数组顺序重写 sort_order. 返成功更新数 (= ordered_ids 长度)."""
+    def _w():
+        c = _get_conn()
+        n = 0
+        for idx, app_id in enumerate(ordered_ids):
+            cur = c.execute(
+                "UPDATE apps SET sort_order=? WHERE id=? AND user_id=?",
+                (idx, app_id, user_id),
+            )
+            n += cur.rowcount
+        return n
+    return await asyncio.to_thread(_w)
 
 
 async def touch_app_seen(app_id: str) -> None:
@@ -455,10 +483,11 @@ async def revoke_app(app_id: str) -> bool:
 def _create_app_sync(user_id: str, name: str, tok_hash: str) -> str:
     c = _get_conn()
     app_id = "app-" + secrets.token_hex(8)
+    order = _next_sort_order_sync(user_id)
     c.execute(
-        "INSERT INTO apps(id, user_id, name, device_token_hash, created_at) "
-        "VALUES(?,?,?,?,?)",
-        (app_id, user_id, name, tok_hash, time.time()),
+        "INSERT INTO apps(id, user_id, name, device_token_hash, created_at, sort_order) "
+        "VALUES(?,?,?,?,?,?)",
+        (app_id, user_id, name, tok_hash, time.time(), order),
     )
     return app_id
 
