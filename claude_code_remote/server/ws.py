@@ -60,16 +60,39 @@ def _via_hub(ws: WebSocket) -> bool:
 
 @router.websocket("/ws-global")
 async def ws_global(ws: WebSocket) -> None:
-    """全局活动流：前端主页订阅，server 推送所有 sess 的状态变化。"""
+    """全局活动流：前端主页订阅，server 推送所有 sess 的状态变化.
+
+    长空闲时 hub 中间的 nginx (proxy_read_timeout 900s) 会 idle close ws,
+    部分代理 silent-close (浏览器看不到 close 事件, ws 假活), 后续 session
+    activity 推过来全部丢失 — 表现就是 "home 卡片不刷新". 加 30s 一次
+    keepalive frame, 让链路永远有 traffic, nginx 永不 idle close;
+    任何中间环节真断, send 会 fail, 浏览器立即收到 close 触发 reconnect.
+    """
+    import asyncio as _asyncio
     if not _via_hub(ws):
         token = ws.query_params.get("token")
         if not check_ws_token(token):
             await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="invalid token")
             return
     await ws.accept()
-    try:
+
+    async def push_events() -> None:
         async for msg in manager.global_subscribe():
             await ws.send_json(msg)
+
+    async def keepalive() -> None:
+        while True:
+            await _asyncio.sleep(30)
+            await ws.send_json({"type": "_keepalive"})
+
+    pusher = _asyncio.create_task(push_events())
+    pinger = _asyncio.create_task(keepalive())
+    try:
+        done, pending = await _asyncio.wait(
+            [pusher, pinger], return_when=_asyncio.FIRST_COMPLETED,
+        )
+        for t in pending:
+            t.cancel()
     except WebSocketDisconnect:
         pass
     except Exception:
