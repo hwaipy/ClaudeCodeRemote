@@ -1112,7 +1112,12 @@ function enterHome() {
     // hub mode: 必须等 HTTP /api/sessions 填满 sessionsById 后再连 ws-global.
     // 否则 ws delta 先到 (没 app_name/app_id 字段) 渲一次, HTTP 完成又 clear+set
     // 重渲一次 — 用户视觉表现就是 "绿色 badge 一闪而过".
-    hubFetchSessions().finally(connectGlobalWS);
+    hubFetchSessions().finally(() => {
+      connectGlobalWS();
+      // sessions 拿全后判一下要不要弹 step3 "一切就绪" 引导
+      // (server 已上线但还没 session → 第一次提示如何创建 session)
+      _maybeShowReadyHint();
+    });
   } else {
     connectGlobalWS();
   }
@@ -1877,6 +1882,35 @@ ANTHROPIC_API_KEY=                    # optional, blank = mock`;
 // /api/me, 看到 apps.some(online) 自动关闭弹窗 (home 已经在背后, 不切换).
 let _onboardPollTimer = null;
 let _onboardActive = false;
+// Page-session 范围的 flag: step3 一旦展示过 (任何路径), 这次不再 auto-pop.
+// 用户刷新页面 (新 page session) 重置 — 如果还是没 session, 还会再弹一次.
+let _readyHintShownThisSession = false;
+
+// Step3 单独入口: hub mode + 已有 online server + 无 session 时, enterHome
+// 后弹这个 "现在点 ➕ 新建 session" 引导.
+function enterOnboardingStep3() {
+  _onboardActive = true;
+  _readyHintShownThisSession = true;
+  const modal = $("modal-onboarding");
+  if (!modal) return;
+  const step1 = $("onboard-step1");
+  const step2 = $("onboard-step2");
+  const step3 = $("onboard-step3");
+  if (step1) step1.hidden = true;
+  if (step2) step2.hidden = true;
+  if (step3) step3.hidden = false;
+  modal.removeAttribute("hidden");
+}
+
+function _maybeShowReadyHint() {
+  if (_onboardActive) return;
+  if (_readyHintShownThisSession) return;
+  if (!state.hubMode) return;
+  const apps = state.apps || [];
+  const hasOnlineApp = apps.some(a => a.online);
+  const noSessions = state.sessionsById.size === 0;
+  if (hasOnlineApp && noSessions) enterOnboardingStep3();
+}
 
 function enterOnboarding() {
   _onboardActive = true;
@@ -1889,6 +1923,7 @@ function enterOnboarding() {
   if (step2) step2.hidden = true;
   if (step3) step3.hidden = true;
   modal.removeAttribute("hidden");
+  _readyHintShownThisSession = true;   // 这次 page session 不再 auto-pop step3
   const nameEl = $("onboard-name");
   if (nameEl) {
     if (!nameEl.value) nameEl.value = "MyFirstServer";
