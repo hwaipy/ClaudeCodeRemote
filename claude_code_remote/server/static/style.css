@@ -3050,9 +3050,18 @@ body.apps-reordering .app-row {
  * modal-bg / .modal 基础样式复用; 只覆盖 head + body 的内部留白和
  * onboard-* 内部组件视觉.
  * ============================================================ */
+/* modal-bg 默认 padding 16px, 在 iOS PWA 上 status bar 会吃掉顶部 padding
+   导致 modal 顶到屏幕边. 用 safe-area-inset + 至少 24px 保证顶/底始终
+   有可见的背景间距. */
+#modal-onboarding.modal-bg {
+  padding-top: max(24px, calc(env(safe-area-inset-top) + 8px));
+  padding-bottom: max(24px, calc(env(safe-area-inset-bottom) + 8px));
+}
 #modal-onboarding .modal.onboard-modal {
   max-width: 520px;
-  max-height: 88vh;
+  /* 不再 override max-height — 走 .modal 基础的 80vh, 配合上面的
+     safe-area padding, 上下都能看到背后的 home. body 内部 overflow-y
+     auto 内容多了滚. */
 }
 .onboard-head {
   padding: 10px 12px 10px 18px;
@@ -3128,10 +3137,14 @@ body.apps-reordering .app-row {
   font-size: 14px;
   font-weight: 600;
 }
+/* prompt 是多行 (8-15 行), 横排放复制按钮会让右边大片空白浪费.
+   竖排 — 按钮在顶部 (右对齐), 文本占满下面整宽. */
 .onboard-promptbox {
-  align-items: flex-start;
-  padding: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 8px 12px 12px;
   margin: 4px 0 10px;
+  gap: 6px;
 }
 .onboard-promptbox .copybox-text {
   font-size: 12px;
@@ -3139,11 +3152,14 @@ body.apps-reordering .app-row {
   max-height: 280px;
   overflow-y: auto;
   white-space: pre-wrap;
+  order: 2;
 }
 .onboard-promptbox .btn {
-  align-self: flex-start;
-  padding: 6px 14px;
+  order: 1;
+  align-self: flex-end;
+  padding: 4px 12px;
   font-size: 12px;
+  min-width: 64px;
 }
 .onboard-token-hint {
   font-size: 11.5px;
