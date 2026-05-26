@@ -420,7 +420,7 @@ $("login-go").addEventListener("click", async () => {
     }
     try {
       await hubLogin(email, pw);
-      enterHome();
+      enterHomeOrOnboarding();
     } catch (e) {
       $("login-err").textContent = "Sign in failed: " + (e.message || e);
       $("login-err").classList.add("show");
@@ -1080,6 +1080,16 @@ function showToast(text, sessId) {
     t.classList.remove("show");
     setTimeout(() => t.remove(), 350);
   }, 4000);
+}
+
+// Hub mode 登录后入口: 用户名下没 server → 走 onboarding 引导;
+// 否则正常进 home. local mode 不调这里, 直接 enterHome.
+function enterHomeOrOnboarding() {
+  if (state.hubMode && (state.apps || []).length === 0) {
+    enterOnboarding();
+    return;
+  }
+  enterHome();
 }
 
 function enterHome() {
@@ -1846,6 +1856,178 @@ ANTHROPIC_API_KEY=                    # optional, blank = mock`;
   }
   tokenCopyBtn.addEventListener("click", () => copyText(tokenEl.textContent, tokenCopyBtn));
   envCopyBtn.addEventListener("click", () => copyText(envEl.textContent, envCopyBtn));
+})();
+
+// ---------- 新用户首次接入 (#view-onboarding) ----------
+// hub mode + state.apps 空时, 取代 view-home. Step1 输入 server 名 →
+// POST /api/hub/pair → /api/hub/pair/redeem 拿 device token → Step2 展示
+// 一段"扔给 Claude Code"的完整 prompt + 一键复制. 后台每 4s GET /api/me
+// 检查 server 是否上线, 上线后自动 enterHome.
+let _onboardPollTimer = null;
+let _onboardActive = false;
+
+function enterOnboarding() {
+  _onboardActive = true;
+  showView("onboarding");
+  const step1 = $("onboard-step1");
+  const step2 = $("onboard-step2");
+  if (step1) step1.hidden = false;
+  if (step2) step2.hidden = true;
+  const nameEl = $("onboard-name");
+  if (nameEl) {
+    if (!nameEl.value) nameEl.value = "My First Server";
+    setTimeout(() => { try { nameEl.focus(); nameEl.select(); } catch (_) {} }, 50);
+  }
+  // 切到 onboarding 时一定要停掉可能还在跑的轮询
+  _stopOnboardPoll();
+}
+
+function _stopOnboardPoll() {
+  if (_onboardPollTimer) {
+    clearInterval(_onboardPollTimer);
+    _onboardPollTimer = null;
+  }
+}
+
+function _startOnboardPoll() {
+  _stopOnboardPoll();
+  _onboardPollTimer = setInterval(async () => {
+    // 不在 onboarding 视图就停 (用户去了 help 等)
+    if (!_onboardActive) { _stopOnboardPoll(); return; }
+    try {
+      const me = await api("/api/me");
+      const apps = me.apps || [];
+      // 关键: 看的是 "至少有一个 server 已 online", 不是 "apps 非空".
+      // 因为 redeem 完了 apps 立即就有一条 (offline), 那时用户还在读 prompt;
+      // 真要进 home 必须等 server 真连上 hub.
+      const anyOnline = apps.some(a => a.online);
+      if (anyOnline) {
+        state.apps = apps;
+        _stopOnboardPoll();
+        _onboardActive = false;
+        enterHome();
+      }
+    } catch (_) {
+      // 静默 — 网络抖动不应中断引导
+    }
+  }, 4000);
+}
+
+(function setupOnboarding() {
+  const view = $("view-onboarding");
+  if (!view) return;
+  const step1 = $("onboard-step1");
+  const step2 = $("onboard-step2");
+  const nameEl = $("onboard-name");
+  const errEl = $("onboard-err");
+  const goBtn = $("onboard-go");
+  const promptEl = $("onboard-prompt");
+  const promptCopyBtn = $("onboard-prompt-copy");
+  const tokenPreviewEl = $("onboard-token-preview");
+  const backLink = $("onboard-back-link");
+  const logoutLink = $("onboard-logout");
+
+  function _buildPrompt(host, token, appName) {
+    // wss URL + 完整指令, Claude Code 拿到一段就能直接执行.
+    const wsUrl = "wss://" + host;
+    return (
+`请帮我把 ClaudeCodeRemote (CCR) 装到当前这台机器上, 然后作为
+"${appName}" 接入下面这个 hub:
+
+  CCR_HUB_URL=${wsUrl}
+  CCR_HUB_DEVICE_TOKEN=${token}
+  CCR_HUB_APP_NAME=${appName}
+
+完整步骤:
+1. git clone https://github.com/hwaipy/ClaudeCodeRemote.git ~/ccr
+2. cd ~/ccr && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+3. mkdir -p ~/.config/ccr && cat > ~/.config/ccr/env <<'EOF'
+   CCR_TOKEN=$(openssl rand -hex 16)
+   CCR_HUB_URL=${wsUrl}
+   CCR_HUB_DEVICE_TOKEN=${token}
+   CCR_HUB_APP_NAME=${appName}
+   EOF
+4. 部署 systemd user service (参考 deploy/ccr.service.example),
+   systemctl --user enable --now ccr.service, 看 journalctl 出现
+   "hub_client connected" 即成功. 用户在浏览器会自动看到这台机器上线.
+
+完成后告诉我 "已上线".`);
+  }
+
+  nameEl?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") goBtn.click();
+  });
+
+  goBtn?.addEventListener("click", async () => {
+    if (errEl) errEl.classList.remove("show");
+    let name = (nameEl.value || "").trim();
+    if (!name) name = "My First Server";
+    goBtn.disabled = true;
+    const oldTxt = goBtn.textContent;
+    goBtn.textContent = "生成中…";
+    try {
+      const pair = await api("/api/hub/pair", { method: "POST" });
+      const red = await api("/api/hub/pair/redeem", {
+        method: "POST",
+        body: JSON.stringify({ code: pair.code, app_name: name }),
+      });
+      const token = red.device_token;
+      const appName = red.app_name || name;
+      const host = location.host;
+      const promptText = _buildPrompt(host, token, appName);
+      if (promptEl) promptEl.textContent = promptText;
+      if (tokenPreviewEl) tokenPreviewEl.textContent = token;
+      step1.hidden = true;
+      step2.hidden = false;
+      _startOnboardPoll();
+    } catch (e) {
+      if (errEl) {
+        errEl.textContent = "生成失败: " + (e.message || e);
+        errEl.classList.add("show");
+      }
+    } finally {
+      goBtn.disabled = false;
+      goBtn.textContent = oldTxt;
+    }
+  });
+
+  promptCopyBtn?.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(promptEl.textContent || "");
+      const old = promptCopyBtn.textContent;
+      promptCopyBtn.textContent = "已复制";
+      setTimeout(() => { promptCopyBtn.textContent = old; }, 1200);
+    } catch (e) {
+      alert("复制失败, 请手动选中文本 Ctrl-C");
+    }
+  });
+
+  backLink?.addEventListener("click", (e) => {
+    e.preventDefault();
+    _stopOnboardPoll();
+    step2.hidden = true;
+    step1.hidden = false;
+    setTimeout(() => { try { nameEl.focus(); nameEl.select(); } catch (_) {} }, 50);
+  });
+
+  logoutLink?.addEventListener("click", (e) => {
+    e.preventDefault();
+    _stopOnboardPoll();
+    _onboardActive = false;
+    // 复用全局 sign out 链接的逻辑
+    const lo = $("logout");
+    if (lo) lo.click();
+  });
+
+  // 切到别的 view (help 等) 时, _onboardActive 仍为 true 但 view 不可见.
+  // pageshow/visibilitychange 时如果回到 onboarding 视图但没有轮询, 重新启动.
+  // 这里简化: hashchange 离开 #help 回来时, 如果 step2 显示中, 续上轮询.
+  window.addEventListener("hashchange", () => {
+    if (!_onboardActive) return;
+    if (location.hash !== "#help" && !step2.hidden && !_onboardPollTimer) {
+      _startOnboardPoll();
+    }
+  });
 })();
 
 // ---------- Session list search ----------
@@ -5756,7 +5938,7 @@ if ("serviceWorker" in navigator) {
     document.body.classList.add("hub-mode");
     renderOAuthButtons();
     if (state.userId) {
-      enterHome();
+      enterHomeOrOnboarding();
     } else {
       showView("login");
     }

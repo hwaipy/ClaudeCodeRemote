@@ -3045,3 +3045,151 @@ body.apps-reordering .app-row {
   margin-top: 16px;
 }
 
+/* ============================================================
+ * 新用户首次接入 (#view-onboarding) — 替代 view-home 当 apps 空时.
+ * 跟 hub-landing 同色系 (grad 标题 + soft accent borders) 但
+ * 走单卡 + 输入 + prompt-copybox 的简洁布局.
+ * ============================================================ */
+.onboard-card {
+  max-width: 540px;
+  margin: 24px auto;
+  padding: 26px 24px 22px;
+  background: var(--bg-card, #ffffff);
+  border: 1px solid var(--border-soft, rgba(125,125,125,.18));
+  border-radius: 14px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.05);
+}
+.onboard-brand {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  text-align: center;
+  margin-bottom: 6px;
+}
+.onboard-title {
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
+  margin: 4px 0 8px;
+  color: var(--text);
+}
+.onboard-sub {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted, #59636e);
+  text-align: center;
+  margin: 0 auto 18px;
+  max-width: 440px;
+}
+#view-onboarding label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted, #59636e);
+  margin: 10px 0 6px;
+}
+#view-onboarding input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 1px solid var(--border, rgba(125,125,125,.30));
+  border-radius: 8px;
+  background: var(--bg-input, #ffffff);
+  color: var(--text);
+}
+#view-onboarding input[type="text"]:focus {
+  outline: 2px solid rgba(56,139,253,0.35);
+  outline-offset: -1px;
+  border-color: rgba(56,139,253,0.55);
+}
+#view-onboarding .err {
+  color: #cf222e;
+  font-size: 12px;
+  min-height: 0;
+  margin: 6px 0;
+  display: none;
+}
+#view-onboarding .err.show { display: block; }
+#view-onboarding .btn-block {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  margin-top: 14px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.onboard-promptbox {
+  align-items: flex-start;
+  padding: 12px;
+  margin: 4px 0 10px;
+}
+.onboard-promptbox .copybox-text {
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 280px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+.onboard-promptbox .btn {
+  align-self: flex-start;
+  padding: 6px 14px;
+  font-size: 12px;
+}
+.onboard-token-hint {
+  font-size: 11.5px;
+  color: var(--text-muted, #59636e);
+  line-height: 1.55;
+  margin-bottom: 14px;
+}
+.onboard-token-hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  background: var(--bg-elev, #f6f8fa);
+  padding: 1px 5px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+.onboard-waiting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+  padding: 10px 12px;
+  background: linear-gradient(135deg,
+                              rgba(31,136,61,0.10),
+                              rgba(31,136,61,0.03));
+  border: 1px solid rgba(31,136,61,0.25);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 14px;
+}
+.onboard-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #1f883d;
+  box-shadow: 0 0 0 0 rgba(31,136,61,0.6);
+  animation: onboard-pulse 1.6s ease-out infinite;
+}
+@keyframes onboard-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(31,136,61,0.55); }
+  70%  { box-shadow: 0 0 0 8px rgba(31,136,61,0); }
+  100% { box-shadow: 0 0 0 0 rgba(31,136,61,0); }
+}
+.onboard-foot {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted, #59636e);
+  margin-top: 4px;
+}
+.onboard-foot a {
+  color: var(--accent, #2563eb);
+  text-decoration: none;
+}
+.onboard-foot a:hover { text-decoration: underline; }
+.onboard-foot .sep {
+  margin: 0 6px;
+  opacity: 0.5;
+}
+
