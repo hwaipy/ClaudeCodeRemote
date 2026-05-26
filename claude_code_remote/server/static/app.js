@@ -1948,46 +1948,15 @@ function _startOnboardPoll() {
   function _buildPrompt(host, token, appName) {
     const wsUrl = "wss://" + host;
     return (
-`请帮我把 ClaudeCodeRemote (CCR) 装到当前这台机器上, 然后作为
-"${appName}" 接入下面这个 hub:
+`pip install claude-code-remote, 用下面 env 起 systemd user service 接入 hub:
 
+  CCR_TOKEN=$(openssl rand -hex 16)
   CCR_HUB_URL=${wsUrl}
   CCR_HUB_DEVICE_TOKEN=${token}
   CCR_HUB_APP_NAME=${appName}
 
-完整步骤:
-1. 装到独立 venv (避免污染系统 Python):
-   python3 -m venv ~/.venv/ccr
-   ~/.venv/ccr/bin/pip install git+https://github.com/hwaipy/ClaudeCodeRemote.git
-
-2. 写 env:
-   mkdir -p ~/.config/ccr && cat > ~/.config/ccr/env <<'EOF'
-   CCR_TOKEN=$(openssl rand -hex 16)
-   CCR_HUB_URL=${wsUrl}
-   CCR_HUB_DEVICE_TOKEN=${token}
-   CCR_HUB_APP_NAME=${appName}
-   EOF
-
-3. 创 systemd user service 跑起来 — 写到
-   ~/.config/systemd/user/ccr.service, 内容:
-
-   [Unit]
-   Description=ClaudeCodeRemote server (${appName})
-   After=network-online.target
-   [Service]
-   Type=simple
-   EnvironmentFile=%h/.config/ccr/env
-   ExecStart=%h/.venv/ccr/bin/python -m uvicorn claude_code_remote.server.main:app --host 127.0.0.1 --port 1881
-   Restart=on-failure
-   RestartSec=3
-   [Install]
-   WantedBy=default.target
-
-4. systemctl --user daemon-reload && systemctl --user enable --now ccr.service
-   journalctl --user -u ccr.service -f
-   看到 "hub_client connected" 即成功, 浏览器会自动看到这台机器上线.
-
-完成后告诉我 "已上线".`);
+ExecStart: python -m uvicorn claude_code_remote.server.main:app
+看到 "hub_client connected" 即成功, 告诉我.`);
   }
 
   nameEl?.addEventListener("keydown", (e) => {
