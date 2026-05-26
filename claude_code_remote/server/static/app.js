@@ -1082,12 +1082,24 @@ function showToast(text, sessId) {
   }, 4000);
 }
 
-// Hub mode 登录后入口: 永远先进 home; 如果用户名下没 server, 额外把
-// onboarding modal 叠在上面 (view-home 在背后还能看见). local mode
+// Hub mode 登录后入口: 永远先进 home; 如果用户还没真正完成 server 接入,
+// 额外把 onboarding modal 叠在上面 (view-home 在背后还能看见). local mode
 // 直接进 home, 不调 modal.
+//
+// "还没完成接入" = apps 中没有任何一条曾 online 过 (apps.length===0, 或者
+// redeem 完但 server 从没连进来 — total_online_seconds===0 且当前 offline).
+// 这样: 用户 redeem 后 ✕ 关掉, 刷新还会再弹 (server 一旦上线过就不弹了,
+// 哪怕 当时是 offline).
+function _needsOnboarding() {
+  if (!state.hubMode) return false;
+  const apps = state.apps || [];
+  if (apps.length === 0) return true;
+  return !apps.some(a => a.online || (a.total_online_seconds || 0) > 0);
+}
+
 function enterHomeOrOnboarding() {
   enterHome();
-  if (state.hubMode && (state.apps || []).length === 0) {
+  if (_needsOnboarding()) {
     enterOnboarding();
   }
 }
