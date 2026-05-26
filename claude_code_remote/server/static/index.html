@@ -721,6 +721,25 @@ docker compose logs -f ccr-app-local</code>
           <a href="#" id="onboard-back-link">名字写错了？返回上一步</a>
         </div>
       </div>
+
+      <!-- Step 3: 成功态 — server 真上线后展示 -->
+      <div id="onboard-step3" hidden>
+        <div class="onboard-brand">一切就绪 <span class="onboard-sparkle">✨</span></div>
+        <p class="onboard-sub">
+          你刚才接入的 server 已经成功上线啦.
+        </p>
+        <div class="onboard-success-cue">
+          <span class="onboard-success-text">现在点顶部</span>
+          <span class="onboard-success-plus" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+          </span>
+          <span class="onboard-success-text">按钮新建一个 session, 就可以开始对话啦.</span>
+        </div>
+        <button class="btn btn-primary btn-block" id="onboard-done" type="button">好的</button>
+      </div>
     </div>
   </div>
 </div>

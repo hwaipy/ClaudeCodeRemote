@@ -1884,8 +1884,10 @@ function enterOnboarding() {
   if (!modal) return;
   const step1 = $("onboard-step1");
   const step2 = $("onboard-step2");
+  const step3 = $("onboard-step3");
   if (step1) step1.hidden = false;
   if (step2) step2.hidden = true;
+  if (step3) step3.hidden = true;
   modal.removeAttribute("hidden");
   const nameEl = $("onboard-name");
   if (nameEl) {
@@ -1921,8 +1923,13 @@ function _startOnboardPoll() {
       const anyOnline = apps.some(a => a.online);
       if (anyOnline) {
         state.apps = apps;
-        exitOnboarding();
+        _stopOnboardPoll();
+        // 不直接关弹窗 — 切到 step3 "一切就绪" 成功态, 引导用户用 + 按钮
         // home 已经在背后, 但需要刷新一次让 session list / app selector 更新.
+        const step2 = $("onboard-step2");
+        const step3 = $("onboard-step3");
+        if (step2) step2.hidden = true;
+        if (step3) step3.hidden = false;
         hubFetchSessions();
       }
     } catch (_) {
@@ -2044,6 +2051,7 @@ PyPI:
   });
 
   closeBtn?.addEventListener("click", () => { exitOnboarding(); });
+  $("onboard-done")?.addEventListener("click", () => { exitOnboarding(); });
 
   // 点 modal 外的背景区域 (modal-bg) 关闭. 但点 modal 内部不关.
   modal.addEventListener("click", (e) => {

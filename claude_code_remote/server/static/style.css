@@ -3218,3 +3218,48 @@ body.apps-reordering .app-row {
   opacity: 0.5;
 }
 
+/* Step 3 成功态: 居中放大版 + icon (圆形绿底 + 大十字), 跟 #new-btn 同图. */
+.onboard-sparkle {
+  display: inline-block;
+  animation: onboard-sparkle-pop 800ms ease-out 200ms backwards;
+}
+@keyframes onboard-sparkle-pop {
+  0%   { transform: scale(0.4) rotate(-30deg); opacity: 0; }
+  60%  { transform: scale(1.25) rotate(8deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+.onboard-success-cue {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin: 12px auto 18px;
+  max-width: 360px;
+}
+.onboard-success-cue .onboard-success-text {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text);
+  text-align: center;
+}
+.onboard-success-plus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  background: rgba(31,136,61,0.12);
+  color: #1f883d;
+  border: 2px solid rgba(31,136,61,0.55);
+  margin: 4px 0;
+  animation: onboard-plus-bounce 1.6s ease-in-out 600ms infinite;
+}
+.onboard-success-plus svg {
+  width: 30px; height: 30px;
+  stroke-width: 2.6;
+}
+@keyframes onboard-plus-bounce {
+  0%, 100% { transform: translateY(0); box-shadow: 0 0 0 0 rgba(31,136,61,0); }
+  50%      { transform: translateY(-4px); box-shadow: 0 0 0 8px rgba(31,136,61,0.10); }
+}
+
