@@ -1453,7 +1453,14 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
   // once we're on our way to chat view.
   window.__closeNewModal = close;
 
-  btn.addEventListener("click", open);
+  btn.addEventListener("click", () => {
+    // 如果 onboarding step3 coachmark 正显示, 顺手 dismiss — 用户已经
+    // 跟着箭头点了真实 + 按钮, coachmark 任务完成
+    if (typeof _onboardActive !== "undefined" && _onboardActive) {
+      try { exitOnboarding(); } catch (_) {}
+    }
+    open();
+  });
   closeX.addEventListener("click", close);
   cancelBtn.addEventListener("click", close);
   modal.addEventListener("click", (e) => {
@@ -1887,7 +1894,8 @@ let _onboardActive = false;
 let _readyHintShownThisSession = false;
 
 // Step3 单独入口: hub mode + 已有 online server + 无 session 时, enterHome
-// 后弹这个 "现在点 ➕ 新建 session" 引导.
+// 后弹这个 "现在点 ➕ 新建 session" 引导. coachmark 风格 — backdrop 几乎
+// 透明, 浮层箭头指真实 #new-btn, 用户点按钮直接开 new-session modal.
 function enterOnboardingStep3() {
   _onboardActive = true;
   _readyHintShownThisSession = true;
@@ -1899,7 +1907,32 @@ function enterOnboardingStep3() {
   if (step1) step1.hidden = true;
   if (step2) step2.hidden = true;
   if (step3) step3.hidden = false;
+  modal.classList.add("step3-mode");
   modal.removeAttribute("hidden");
+  // 下一帧再算 coach-arrow 位置 — modal 刚显示 layout 可能还没稳
+  requestAnimationFrame(_positionCoachArrow);
+  window.addEventListener("resize", _positionCoachArrow);
+}
+
+function _positionCoachArrow() {
+  if (!_onboardActive) return;
+  const arrow = $("onboard-coach-arrow");
+  const btn = $("new-btn");
+  if (!arrow || !btn) return;
+  const rect = btn.getBoundingClientRect();
+  // 箭头放按钮正下方, 水平居中对齐按钮
+  arrow.hidden = false;
+  // 算好宽度再 center
+  const w = arrow.getBoundingClientRect().width || 80;
+  arrow.style.left = (rect.left + rect.width / 2 - w / 2) + "px";
+  arrow.style.top = (rect.bottom + 8) + "px";
+  btn.classList.add("new-btn-coach-pulse");
+}
+
+function _hideCoachArrow() {
+  $("onboard-coach-arrow")?.setAttribute("hidden", "");
+  $("new-btn")?.classList.remove("new-btn-coach-pulse");
+  window.removeEventListener("resize", _positionCoachArrow);
 }
 
 function _maybeShowReadyHint() {
@@ -1935,8 +1968,12 @@ function enterOnboarding() {
 function exitOnboarding() {
   _onboardActive = false;
   _stopOnboardPoll();
+  _hideCoachArrow();
   const modal = $("modal-onboarding");
-  if (modal) modal.setAttribute("hidden", "");
+  if (modal) {
+    modal.setAttribute("hidden", "");
+    modal.classList.remove("step3-mode");
+  }
 }
 
 function _stopOnboardPoll() {
@@ -1959,12 +1996,17 @@ function _startOnboardPoll() {
       if (anyOnline) {
         state.apps = apps;
         _stopOnboardPoll();
-        // 不直接关弹窗 — 切到 step3 "一切就绪" 成功态, 引导用户用 + 按钮
-        // home 已经在背后, 但需要刷新一次让 session list / app selector 更新.
+        // 不直接关弹窗 — 切到 step3 "一切就绪" 成功态, 引导用户用 + 按钮.
+        // 切的同时 modal 进 coachmark 模式 (淡化背景, 浮层箭头指 #new-btn).
+        const modal = $("modal-onboarding");
         const step2 = $("onboard-step2");
         const step3 = $("onboard-step3");
         if (step2) step2.hidden = true;
         if (step3) step3.hidden = false;
+        if (modal) modal.classList.add("step3-mode");
+        _readyHintShownThisSession = true;
+        requestAnimationFrame(_positionCoachArrow);
+        window.addEventListener("resize", _positionCoachArrow);
         hubFetchSessions();
       }
     } catch (_) {

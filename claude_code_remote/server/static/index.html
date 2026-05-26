@@ -722,26 +722,27 @@ docker compose logs -f ccr-app-local</code>
         </div>
       </div>
 
-      <!-- Step 3: 成功态 — server 真上线后展示 -->
+      <!-- Step 3: 成功态 — server 真上线后展示 (coachmark 风格, 半透明
+           背景 + 箭头指向真实 #new-btn) -->
       <div id="onboard-step3" hidden>
         <div class="onboard-brand">一切就绪 <span class="onboard-sparkle">✨</span></div>
         <p class="onboard-sub">
-          你刚才接入的 server 已经成功上线啦.
+          顺着上面的箭头, 点一下 <strong>＋</strong> 按钮新建一个 session,
+          就可以开始对话啦.
         </p>
-        <div class="onboard-success-cue">
-          <span class="onboard-success-text">现在点顶部</span>
-          <span class="onboard-success-plus" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
-          </span>
-          <span class="onboard-success-text">按钮新建一个 session, 就可以开始对话啦.</span>
-        </div>
-        <button class="btn btn-primary btn-block" id="onboard-done" type="button">好的</button>
+        <button class="btn btn-secondary btn-block" id="onboard-done" type="button">稍后再说</button>
       </div>
     </div>
   </div>
+</div>
+
+<!-- Step3 coachmark: 浮在页面上的箭头, JS 算 #new-btn 位置后定位 -->
+<div class="onboard-coach-arrow" id="onboard-coach-arrow" hidden aria-hidden="true">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="12" y1="19" x2="12" y2="5"></line>
+    <polyline points="5 12 12 5 19 12"></polyline>
+  </svg>
+  <span>点这里</span>
 </div>
 
 <!-- New session modal -->

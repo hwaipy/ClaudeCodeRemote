@@ -3218,7 +3218,8 @@ body.apps-reordering .app-row {
   opacity: 0.5;
 }
 
-/* Step 3 成功态: 居中放大版 + icon (圆形绿底 + 大十字), 跟 #new-btn 同图. */
+/* Step 3 成功态: coachmark 风格 — 背景几乎不虚化, 箭头浮层指向真实
+   #new-btn, 用户点 ➕ 直接开 new-session modal (顺手 dismiss step3). */
 .onboard-sparkle {
   display: inline-block;
   animation: onboard-sparkle-pop 800ms ease-out 200ms backwards;
@@ -3228,38 +3229,64 @@ body.apps-reordering .app-row {
   60%  { transform: scale(1.25) rotate(8deg); opacity: 1; }
   100% { transform: scale(1) rotate(0); opacity: 1; }
 }
-.onboard-success-cue {
+
+/* step3 模式: 弱化 backdrop, 让背景的主 UI 清晰可见; modal 推到底部
+   不挡新建按钮; backdrop pointer-events: none 让点击穿透到底层
+   (#new-btn 等), 但 .modal 仍 interactive. */
+#modal-onboarding.step3-mode {
+  background: rgba(0,0,0,0.08);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  pointer-events: none;
+  align-items: flex-end;
+}
+#modal-onboarding.step3-mode .modal {
+  pointer-events: auto;
+  max-width: 460px;
+  max-height: 55vh;
+  margin-bottom: 8px;
+}
+/* step3 modal 简化 — head 不要那种 "欢迎" 横条, 直接就是 step3 卡 */
+#modal-onboarding.step3-mode .modal-head { display: none; }
+#modal-onboarding.step3-mode .onboard-body { padding: 16px 22px 18px; }
+
+/* 浮层箭头指向真实 #new-btn — JS 算位置后塞 top/left. */
+.onboard-coach-arrow {
+  position: fixed;
+  z-index: 202;
+  pointer-events: none;
+  color: #ffffff;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 12px;
-  margin: 12px auto 18px;
-  max-width: 360px;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  background: #1f883d;
+  padding: 6px 12px;
+  border-radius: 999px;
+  box-shadow: 0 6px 18px rgba(31,136,61,0.42);
+  white-space: nowrap;
 }
-.onboard-success-cue .onboard-success-text {
-  font-size: 13.5px;
-  line-height: 1.55;
-  color: var(--text);
-  text-align: center;
+.onboard-coach-arrow[hidden] { display: none; }
+.onboard-coach-arrow svg {
+  width: 18px; height: 18px;
+  animation: onboard-arrow-bob 0.9s ease-in-out infinite;
 }
-.onboard-success-plus {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 64px; height: 64px;
-  border-radius: 50%;
-  background: rgba(31,136,61,0.12);
-  color: #1f883d;
-  border: 2px solid rgba(31,136,61,0.55);
-  margin: 4px 0;
-  animation: onboard-plus-bounce 1.6s ease-in-out 600ms infinite;
+@keyframes onboard-arrow-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
 }
-.onboard-success-plus svg {
-  width: 30px; height: 30px;
-  stroke-width: 2.6;
+
+/* step3 期间 highlight 真实 #new-btn: 抬到 backdrop 之上 + pulse glow.
+   pointer-events: auto 强制保住 (modal-bg 的 none 不影响它, 但保险). */
+.new-btn-coach-pulse {
+  position: relative;
+  z-index: 202;
+  pointer-events: auto;
+  animation: onboard-new-btn-pulse 1.4s ease-in-out infinite;
 }
-@keyframes onboard-plus-bounce {
-  0%, 100% { transform: translateY(0); box-shadow: 0 0 0 0 rgba(31,136,61,0); }
-  50%      { transform: translateY(-4px); box-shadow: 0 0 0 8px rgba(31,136,61,0.10); }
+@keyframes onboard-new-btn-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(31,136,61,0.55); }
+  50%      { box-shadow: 0 0 0 10px rgba(31,136,61,0); }
 }
 
