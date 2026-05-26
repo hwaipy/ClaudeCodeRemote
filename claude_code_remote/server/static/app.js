@@ -3298,6 +3298,35 @@ function _finalizeTurnCard() {
   }
 }
 
+// 在 backlog_done 时调一次: 如果 session 不在 busy/running 状态, 任何
+// .turn-active 都应该被强制 finalize. 主要兜底数据完整性问题 — 一个
+// session 被 kill / 异常退出 时, 最后一轮的 turn_state(end) 没写到 jsonl
+// 里, 重放完 state.turnEndAt 仍 null → _ensureTurnCard 把 first_paint
+// 卡 re-activate, 没后续 end 事件 finalize. 结果: 末尾两张卡, 一张
+// finalized (上一轮) + 一张 active (这一轮假活).
+function _reconcileTurnCardsAfterBacklog() {
+  const sid = state.sessionId;
+  if (!sid) return;
+  const sess = state.sessionsById.get(sid);
+  const isActive = sess && (sess.state === "busy" || sess.state === "running");
+  if (isActive) return;   // session 真活跃, 不动 — 之后 turn_state 会管
+  const log = $("chat-log");
+  if (!log) return;
+  const stragglers = log.querySelectorAll(":scope > .turn-card.turn-active");
+  if (!stragglers.length) return;
+  stragglers.forEach(c => c.classList.remove("turn-active"));
+  // 同步 state: turnEndAt 补一个兜底, 避免后续 _refreshTurnCard 仍判
+  // shouldBeActive=true 又把它 re-activate.
+  if (state.turnStartAt && !state.turnEndAt) {
+    state.turnEndAt = state.turnStartAt;
+  }
+  // 断 MutationObserver (active 没了, 不需要再把卡推回末尾)
+  if (state._turnCardObserver) {
+    state._turnCardObserver.disconnect();
+    state._turnCardObserver = null;
+  }
+}
+
 // 渲染 server 推过来的 turn_summary event (已结束 turn 的存档). 不创建活
 // card, 直接 append 一张 finalized .turn-card 到 chatRoot() (回放期间 chatRoot
 // 是 earlierFragment, 实时是 chat-log). 这样强刷 / backlog 回放也能恢复
@@ -5070,6 +5099,9 @@ function handleEvent(evt, ts) {
       requestAnimationFrame(settle);
       // autoFill 在后台续拉更早历史 (用户上滑顺畅), 不再控制 spinner.
       autoFillInitialCards();
+      // 兜底: session 已结束 (state 非 busy/running) 时, 清掉因为
+      // turn_state(end) 缺失而残留的 .turn-active turn-card.
+      _reconcileTurnCardsAfterBacklog();
       state.pendingScrollToBottomOnBacklog = false;
       return;
     }
