@@ -3147,9 +3147,9 @@ body.apps-reordering .app-row {
   gap: 6px;
 }
 .onboard-promptbox .copybox-text {
-  font-size: 12px;
-  line-height: 1.5;
-  max-height: 280px;
+  font-size: 11px;
+  line-height: 1.35;
+  max-height: 160px;
   overflow-y: auto;
   white-space: pre-wrap;
   order: 2;
