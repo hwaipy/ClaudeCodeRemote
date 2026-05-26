@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v170";
+const __CCR_APP_VER = "v171";
 
 const $ = (id) => document.getElementById(id);
 
@@ -2485,6 +2485,11 @@ async function enterChat(id, name, cwd, sessionState) {
         console.warn("idb replay handleEvent failed:", e);
       }
     }
+    // IDB replay 跟 WS backlog 可能 race. backlog_done 时的 dedupe 在 IDB
+    // 还没跑完时就过了 — IDB 后续 events 可能再造卡. 这里 IDB 收尾再 dedupe
+    // 一次兜底.
+    _dedupeTurnCardsByKey();
+    _assertNoDupTurnCards("after-idb-replay");
     // 立即 fade-out spinner — 缓存内容已经渲, 用户可见. backlog 还会来,
     // 走 dedupe 静默合入.
     const _ld = $("chat-loading");
@@ -3135,6 +3140,26 @@ function _findTurnCardsByKey(root, key) {
   );
 }
 
+// 跨 root 搜同 key turn-card — chat-log + earlierFragment 都看. 修复
+// IDB replay (chatRoot=chat-log) + WS earlier batch (chatRoot=earlierFragment)
+// 跨 root 各建一张 dedupe miss 的问题. 返回所有找到的卡, 调用方决定接管哪张.
+function _findTurnCardsByKeyAcrossRoots(key) {
+  if (!key) return [];
+  const log = $("chat-log");
+  const cards = [];
+  if (log) {
+    log.querySelectorAll(
+      `:scope > .turn-card[data-turn-start="${key}"]`
+    ).forEach(c => cards.push(c));
+  }
+  if (state.earlierFragment) {
+    state.earlierFragment.querySelectorAll(
+      `:scope > .turn-card[data-turn-start="${key}"]`
+    ).forEach(c => cards.push(c));
+  }
+  return cards;
+}
+
 // 推断 model brand — Anthropic 系细分到 tier (opus/sonnet/haiku), 其它 LLM
 // 厂家粒度即可 (品牌 logo 区分度足够). 顺序敏感: 第一个匹配 substring 命中即返回.
 // 图标来源: simple-icons SVG 已下到 static/lib/llm-icons/<slug>.svg + SW 预 cache,
@@ -3202,10 +3227,11 @@ function _ensureTurnCard() {
   const log = $("chat-log");
   if (!log) return null;
   // 同 turn 已有 card (实时 active 或 turn_summary 早到先渲了 finalized) — 接管.
-  // 多余的同 key card 直接删, 保留一张.
+  // 多余的同 key card 直接删, 保留一张. 跨 root 搜 (chat-log + earlierFragment)
+  // 防 IDB replay vs WS earlier batch 跨 root 各建一张漏 dedupe.
   let card = null;
   if (key) {
-    const sameKey = _findTurnCardsByKey(log, key);
+    const sameKey = _findTurnCardsByKeyAcrossRoots(key);
     if (sameKey.length) {
       // 优先选 active 的, 其次 finalized; 多余删掉.
       card = sameKey.find(c => c.classList.contains("turn-active")) || sameKey[0];
@@ -3305,6 +3331,30 @@ function _finalizeTurnCard() {
   }
 }
 
+// 诊断: 检查 chat-log 是否有同 key 的 turn-card. 有就 console.error
+// 报错 (附 hint 标识触发点), 帮 production debug. 不抛, 不阻塞.
+function _assertNoDupTurnCards(hint) {
+  const log = $("chat-log");
+  if (!log) return;
+  const seen = new Map();
+  log.querySelectorAll(":scope > .turn-card").forEach(c => {
+    const k = c.dataset.turnStart || "(no-key)";
+    if (seen.has(k)) {
+      const first = seen.get(k);
+      console.error(
+        "[CCR] DUPLICATE turn-card [" + hint + "] key=" + k,
+        { first, second: c,
+          totalCards: log.querySelectorAll(":scope > .turn-card").length,
+          isHistoryReplay: state.isHistoryReplay,
+          earlierFragment: !!state.earlierFragment,
+        },
+      );
+    } else {
+      seen.set(k, c);
+    }
+  });
+}
+
 // 兜底去重: chat-log + earlierFragment prepend 完成后, 按 dataset.turnStart
 // 唯一化 — 同 key 多张卡只留一张 (优先留 active 的, 否则留先到的).
 // 防 applyTurnState (live path) 跟 _renderTurnSummary (replay path) 对
@@ -3376,10 +3426,11 @@ function _renderTurnSummary(evt) {
     : 0;
   const key = startMs ? String(startMs) : "";
   // 幂等: 同 turn 已有 card (无论实时建的 active 还是别处先渲的 finalized) —
-  // 接管最末一张, 多余的删, 然后 finalize + 刷新数据. 跟事件到达顺序无关.
+  // 接管最末一张, 多余的删, 然后 finalize + 刷新数据. 跨 root 搜 (chat-log
+  // + earlierFragment) 防 IDB replay vs WS earlier batch 漏 dedupe.
   let card = null;
   if (key) {
-    const sameKey = _findTurnCardsByKey(root, key);
+    const sameKey = _findTurnCardsByKeyAcrossRoots(key);
     if (sameKey.length) {
       card = sameKey[sameKey.length - 1];
       sameKey.forEach(c => { if (c !== card) c.remove(); });
@@ -5148,7 +5199,9 @@ function handleEvent(evt, ts) {
       autoFillInitialCards();
       // 同 key 重复卡去重 (applyTurnState live path + _renderTurnSummary
       // replay path 可能给同一 turn 各建一张, 跨 root 漏 dedupe).
+      _assertNoDupTurnCards("backlog-done-before-dedupe");
       _dedupeTurnCardsByKey();
+      _assertNoDupTurnCards("backlog-done-after-dedupe");
       // 兜底: session 已结束 (state 非 busy/running) 时, 清掉因为
       // turn_state(end) 缺失而残留的 .turn-active turn-card.
       _reconcileTurnCardsAfterBacklog();
