@@ -3298,6 +3298,33 @@ function _finalizeTurnCard() {
   }
 }
 
+// 兜底去重: chat-log + earlierFragment prepend 完成后, 按 dataset.turnStart
+// 唯一化 — 同 key 多张卡只留一张 (优先留 active 的, 否则留先到的).
+// 防 applyTurnState (live path) 跟 _renderTurnSummary (replay path) 对
+// 同一 turn 双写 / 跨 root 漏 dedupe.
+function _dedupeTurnCardsByKey() {
+  const log = $("chat-log");
+  if (!log) return;
+  const seen = new Map();   // key → card to keep
+  log.querySelectorAll(":scope > .turn-card").forEach(c => {
+    const k = c.dataset.turnStart;
+    if (!k) return;
+    if (seen.has(k)) {
+      const first = seen.get(k);
+      const firstActive = first.classList.contains("turn-active");
+      const cActive = c.classList.contains("turn-active");
+      if (cActive && !firstActive) {
+        first.remove();
+        seen.set(k, c);
+      } else {
+        c.remove();
+      }
+    } else {
+      seen.set(k, c);
+    }
+  });
+}
+
 // 在 backlog_done 时调一次: 如果 session 不在 busy/running 状态, 任何
 // .turn-active 都应该被强制 finalize. 主要兜底数据完整性问题 — 一个
 // session 被 kill / 异常退出 时, 最后一轮的 turn_state(end) 没写到 jsonl
@@ -5099,6 +5126,9 @@ function handleEvent(evt, ts) {
       requestAnimationFrame(settle);
       // autoFill 在后台续拉更早历史 (用户上滑顺畅), 不再控制 spinner.
       autoFillInitialCards();
+      // 同 key 重复卡去重 (applyTurnState live path + _renderTurnSummary
+      // replay path 可能给同一 turn 各建一张, 跨 root 漏 dedupe).
+      _dedupeTurnCardsByKey();
       // 兜底: session 已结束 (state 非 busy/running) 时, 清掉因为
       // turn_state(end) 缺失而残留的 .turn-active turn-card.
       _reconcileTurnCardsAfterBacklog();
@@ -5343,7 +5373,12 @@ function applyTurnState(evt) {
   if (typeof evt.input_total === "number") state.lastInputTotal = evt.input_total;
   // Turn card 生命周期: 进行中 (started_at 有, ended_at 无) → ensure;
   // 结束边沿 (prev no end → now has end) → finalize.
-  if (state.turnStartAt && !state.turnEndAt) {
+  // ★ replay 期间 (isHistoryReplay=true) 不通过这里建卡 — 历史 turn 由
+  // turn_summary 走 _renderTurnSummary 进 earlierFragment, 最后 turn 的
+  // 卡由 first_paint snapshot 走 _refreshTurnCard 在 chat-log 建好.
+  // 否则 applyTurnState 会为每个老 turn 在 chat-log 末尾再造一张卡,
+  // 跟 turn_summary 的卡叠在一起出现"末尾连续两张相同 token-card".
+  if (state.turnStartAt && !state.turnEndAt && !state.isHistoryReplay) {
     _ensureTurnCard();
   }
   if (!prevEndAt && state.turnEndAt) {
