@@ -1948,15 +1948,43 @@ function _startOnboardPoll() {
   function _buildPrompt(host, token, appName) {
     const wsUrl = "wss://" + host;
     return (
-`pip install claude-code-remote, 用下面 env 起 systemd user service 接入 hub:
+`请帮我在这台机器上装好 ClaudeCodeRemote (CCR) 的 server 端, 让它接入
+我现有的 hub.
+
+背景: CCR 是自建的 Claude Code 远程控制台. 架构是
+  PWA  ↔  Hub (FastAPI 中心, 鉴权 + 聚合)  ↔  反向 WS tunnel
+       ↔  CCR server (× N, 每台机器跑一份)  ↔  claude CLI 子进程
+每台机器跑一份 CCR server 进程, 主动连出 Hub (不需要在这台机器上开
+公网入站口); server 本地用 stream-json 协议起 claude CLI 子进程,
+Hub 把 PWA 的请求 (聊天 / 工具批准 / diff / 通知) 转过来, 我就能在
+手机或任何浏览器上跟 Claude 聊这台机器上的项目.
+
+你现在要做的: 把 CCR server 装到这台机器上, 用下面的 device token
+鉴权接入我的 Hub, 然后长期跑 (systemd user service 守护). 我在 PWA
+上看到这台机器上线就成功了.
+
+env 接入参数 (写到 EnvironmentFile, 比如 ~/.config/ccr/env):
 
   CCR_TOKEN=$(openssl rand -hex 16)
   CCR_HUB_URL=${wsUrl}
   CCR_HUB_DEVICE_TOKEN=${token}
   CCR_HUB_APP_NAME=${appName}
 
-ExecStart: python -m uvicorn claude_code_remote.server.main:app
-看到 "hub_client connected" 即成功, 告诉我.`);
+安装 + 启动:
+- pip install claude-code-remote (建议独立 venv, 比如 ~/.venv/ccr)
+- systemd user service, ExecStart 走:
+    python -m uvicorn claude_code_remote.server.main:app
+- systemctl --user enable --now ccr.service
+- journalctl --user -u ccr -f 看到 "hub_client connected" 即成功.
+  (顺手 sudo loginctl enable-linger $USER, 注销后也跑)
+
+项目完整信息 (架构图 / REQUIREMENTS / 部署 example / 源码):
+  https://github.com/hwaipy/ClaudeCodeRemote
+PyPI:
+  https://pypi.org/project/claude-code-remote/
+不确定的细节优先去 README + deploy/ccr.service.example 对照, 别瞎猜.
+
+完成后告诉我 "已上线".`);
   }
 
   nameEl?.addEventListener("keydown", (e) => {
