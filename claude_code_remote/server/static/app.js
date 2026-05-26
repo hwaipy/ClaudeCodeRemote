@@ -1082,14 +1082,14 @@ function showToast(text, sessId) {
   }, 4000);
 }
 
-// Hub mode 登录后入口: 用户名下没 server → 走 onboarding 引导;
-// 否则正常进 home. local mode 不调这里, 直接 enterHome.
+// Hub mode 登录后入口: 永远先进 home; 如果用户名下没 server, 额外把
+// onboarding modal 叠在上面 (view-home 在背后还能看见). local mode
+// 直接进 home, 不调 modal.
 function enterHomeOrOnboarding() {
+  enterHome();
   if (state.hubMode && (state.apps || []).length === 0) {
     enterOnboarding();
-    return;
   }
-  enterHome();
 }
 
 function enterHome() {
@@ -1858,28 +1858,36 @@ ANTHROPIC_API_KEY=                    # optional, blank = mock`;
   envCopyBtn.addEventListener("click", () => copyText(envEl.textContent, envCopyBtn));
 })();
 
-// ---------- 新用户首次接入 (#view-onboarding) ----------
-// hub mode + state.apps 空时, 取代 view-home. Step1 输入 server 名 →
-// POST /api/hub/pair → /api/hub/pair/redeem 拿 device token → Step2 展示
-// 一段"扔给 Claude Code"的完整 prompt + 一键复制. 后台每 4s GET /api/me
-// 检查 server 是否上线, 上线后自动 enterHome.
+// ---------- 新用户首次接入 (#modal-onboarding) ----------
+// hub mode + state.apps 空时, modal 叠在 view-home 之上 (home 在背后正常).
+// Step1 输入 server 名 → POST /api/hub/pair → /redeem 拿 device token →
+// Step2 展示"扔给 Claude Code"的完整 prompt + 一键复制. 后台每 4s GET
+// /api/me, 看到 apps.some(online) 自动关闭弹窗 (home 已经在背后, 不切换).
 let _onboardPollTimer = null;
 let _onboardActive = false;
 
 function enterOnboarding() {
   _onboardActive = true;
-  showView("onboarding");
+  const modal = $("modal-onboarding");
+  if (!modal) return;
   const step1 = $("onboard-step1");
   const step2 = $("onboard-step2");
   if (step1) step1.hidden = false;
   if (step2) step2.hidden = true;
+  modal.removeAttribute("hidden");
   const nameEl = $("onboard-name");
   if (nameEl) {
     if (!nameEl.value) nameEl.value = "My First Server";
     setTimeout(() => { try { nameEl.focus(); nameEl.select(); } catch (_) {} }, 50);
   }
-  // 切到 onboarding 时一定要停掉可能还在跑的轮询
   _stopOnboardPoll();
+}
+
+function exitOnboarding() {
+  _onboardActive = false;
+  _stopOnboardPoll();
+  const modal = $("modal-onboarding");
+  if (modal) modal.setAttribute("hidden", "");
 }
 
 function _stopOnboardPoll() {
@@ -1892,20 +1900,18 @@ function _stopOnboardPoll() {
 function _startOnboardPoll() {
   _stopOnboardPoll();
   _onboardPollTimer = setInterval(async () => {
-    // 不在 onboarding 视图就停 (用户去了 help 等)
     if (!_onboardActive) { _stopOnboardPoll(); return; }
     try {
       const me = await api("/api/me");
       const apps = me.apps || [];
-      // 关键: 看的是 "至少有一个 server 已 online", 不是 "apps 非空".
-      // 因为 redeem 完了 apps 立即就有一条 (offline), 那时用户还在读 prompt;
-      // 真要进 home 必须等 server 真连上 hub.
+      // 关键: "至少一个 server 已 online", 不是 "apps 非空".
+      // redeem 完了 apps 立即就有一条 (offline), 那时用户还在读 prompt.
       const anyOnline = apps.some(a => a.online);
       if (anyOnline) {
         state.apps = apps;
-        _stopOnboardPoll();
-        _onboardActive = false;
-        enterHome();
+        exitOnboarding();
+        // home 已经在背后, 但需要刷新一次让 session list / app selector 更新.
+        hubFetchSessions();
       }
     } catch (_) {
       // 静默 — 网络抖动不应中断引导
@@ -1914,21 +1920,20 @@ function _startOnboardPoll() {
 }
 
 (function setupOnboarding() {
-  const view = $("view-onboarding");
-  if (!view) return;
+  const modal = $("modal-onboarding");
+  if (!modal) return;
   const step1 = $("onboard-step1");
   const step2 = $("onboard-step2");
   const nameEl = $("onboard-name");
   const errEl = $("onboard-err");
   const goBtn = $("onboard-go");
+  const closeBtn = $("onboard-close");
   const promptEl = $("onboard-prompt");
   const promptCopyBtn = $("onboard-prompt-copy");
   const tokenPreviewEl = $("onboard-token-preview");
   const backLink = $("onboard-back-link");
-  const logoutLink = $("onboard-logout");
 
   function _buildPrompt(host, token, appName) {
-    // wss URL + 完整指令, Claude Code 拿到一段就能直接执行.
     const wsUrl = "wss://" + host;
     return (
 `请帮我把 ClaudeCodeRemote (CCR) 装到当前这台机器上, 然后作为
@@ -2010,24 +2015,21 @@ function _startOnboardPoll() {
     setTimeout(() => { try { nameEl.focus(); nameEl.select(); } catch (_) {} }, 50);
   });
 
-  logoutLink?.addEventListener("click", (e) => {
-    e.preventDefault();
-    _stopOnboardPoll();
-    _onboardActive = false;
-    // 复用全局 sign out 链接的逻辑
-    const lo = $("logout");
-    if (lo) lo.click();
+  closeBtn?.addEventListener("click", () => { exitOnboarding(); });
+
+  // 点 modal 外的背景区域 (modal-bg) 关闭. 但点 modal 内部不关.
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) exitOnboarding();
   });
 
-  // 切到别的 view (help 等) 时, _onboardActive 仍为 true 但 view 不可见.
-  // pageshow/visibilitychange 时如果回到 onboarding 视图但没有轮询, 重新启动.
-  // 这里简化: hashchange 离开 #help 回来时, 如果 step2 显示中, 续上轮询.
-  window.addEventListener("hashchange", () => {
-    if (!_onboardActive) return;
-    if (location.hash !== "#help" && !step2.hidden && !_onboardPollTimer) {
-      _startOnboardPoll();
-    }
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && _onboardActive) exitOnboarding();
   });
+
+  // help 视图 z-index (35) 低于 modal (200), 用户从 onboarding 点 #help
+  // 链接, help slide-in 会被 modal 挡住 — 直接关 modal, 让 help 接管.
+  const helpLink = $("onboard-help-link");
+  helpLink?.addEventListener("click", () => { exitOnboarding(); });
 })();
 
 // ---------- Session list search ----------

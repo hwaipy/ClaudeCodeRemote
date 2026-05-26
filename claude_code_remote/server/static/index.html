@@ -94,58 +94,6 @@
   </div>
 </div>
 
-<!-- 新用户首次接入引导 (hub mode + state.apps 空 时替代 view-home) -->
-<div class="view" id="view-onboarding">
-  <div class="center-wrap">
-    <div class="onboard-card">
-      <!-- Step 1: 起名字 -->
-      <div id="onboard-step1">
-        <div class="onboard-brand"><span class="grad">Vibing</span> everything</div>
-        <h2 class="onboard-title">现在让我们来增加第一个 server 吧</h2>
-        <p class="onboard-sub">
-          给它起个友好的名字, 后面所有 session 会标这个名字, 方便跨设备找回.
-        </p>
-        <label for="onboard-name">Server 名</label>
-        <input id="onboard-name" type="text" value="My First Server" autocomplete="off">
-        <div class="err" id="onboard-err"></div>
-        <button class="btn btn-primary btn-block" id="onboard-go" type="button">生成接入指令</button>
-        <div class="onboard-foot">
-          <a href="#help" id="onboard-help-link">已经在用了？看完整接入指南</a>
-          <span class="sep">·</span>
-          <a href="#" id="onboard-logout">换个账号登录</a>
-        </div>
-      </div>
-
-      <!-- Step 2: token + prompt -->
-      <div id="onboard-step2" hidden>
-        <div class="onboard-brand"><span class="grad">Server</span> 已就绪</div>
-        <p class="onboard-sub">
-          把下面这段话原样丢给你的 <strong>server 那台机器上</strong>的 Claude Code,
-          它会自动帮你完成剩下的安装 + 接入. 完成后这页会自己跳走.
-        </p>
-        <label>Claude Code Prompt (一键复制)</label>
-        <div class="copybox onboard-promptbox">
-          <code class="copybox-text" id="onboard-prompt"></code>
-          <button class="btn btn-primary" id="onboard-prompt-copy" type="button">复制</button>
-        </div>
-        <div class="onboard-token-hint">
-          这条 prompt 已经包含了 device token (<code id="onboard-token-preview"></code>),
-          关闭这页就拿不回了 — 但 server 一旦接入, token 就用过了, 后续不需要.
-        </div>
-        <div class="onboard-waiting">
-          <span class="onboard-dot"></span>
-          <span id="onboard-waiting-text">等待 server 连上来...</span>
-        </div>
-        <div class="onboard-foot">
-          <a href="#" id="onboard-back-link">名字写错了？返回上一步</a>
-          <span class="sep">·</span>
-          <a href="#help" id="onboard-help-link-2">看接入指南</a>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- 会话列表 / 新建 -->
 <div class="view" id="view-home">
   <div class="center-wrap">
@@ -721,6 +669,58 @@ docker compose logs -f ccr-app-local</code>
             <rect class="block" x="9" y="9" width="10" height="10" rx="1.5" fill="currentColor"/>
           </svg>
         </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 新用户首次接入引导 — hub mode + apps 空时叠在 view-home 之上 -->
+<div class="modal-bg" id="modal-onboarding" hidden>
+  <div class="modal onboard-modal">
+    <div class="modal-head onboard-head">
+      <div class="onboard-head-title">欢迎使用 Vibing everything</div>
+      <button class="modal-x" id="onboard-close" type="button" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <div class="modal-body onboard-body">
+      <!-- Step 1: 起名字 -->
+      <div id="onboard-step1">
+        <div class="onboard-brand"><span class="grad">Vibing</span> everything</div>
+        <h2 class="onboard-title">现在让我们来增加第一个 server 吧</h2>
+        <p class="onboard-sub">
+          给它起个友好的名字, 后面所有 session 会标这个名字, 方便跨设备找回.
+        </p>
+        <label for="onboard-name">Server 名</label>
+        <input id="onboard-name" type="text" value="My First Server" autocomplete="off">
+        <div class="err" id="onboard-err"></div>
+        <button class="btn btn-primary btn-block" id="onboard-go" type="button">生成接入指令</button>
+        <div class="onboard-foot">
+          <a href="#help" id="onboard-help-link">已经在用了？看完整接入指南</a>
+        </div>
+      </div>
+
+      <!-- Step 2: token + prompt -->
+      <div id="onboard-step2" hidden>
+        <div class="onboard-brand"><span class="grad">Server</span> 已就绪</div>
+        <p class="onboard-sub">
+          把下面这段话原样丢给你 <strong>server 那台机器上</strong>的 Claude Code,
+          它会自动帮你完成剩下的安装 + 接入. 完成后这个弹窗会自动关闭.
+        </p>
+        <label>Claude Code Prompt (一键复制)</label>
+        <div class="copybox onboard-promptbox">
+          <code class="copybox-text" id="onboard-prompt"></code>
+          <button class="btn btn-primary" id="onboard-prompt-copy" type="button">复制</button>
+        </div>
+        <div class="onboard-token-hint">
+          已包含 device token (<code id="onboard-token-preview"></code>) —
+          关闭这页就拿不回; server 一旦接入 token 就用过了, 后续不需要.
+        </div>
+        <div class="onboard-waiting">
+          <span class="onboard-dot"></span>
+          <span id="onboard-waiting-text">等待 server 连上来...</span>
+        </div>
+        <div class="onboard-foot">
+          <a href="#" id="onboard-back-link">名字写错了？返回上一步</a>
+        </div>
       </div>
     </div>
   </div>
