@@ -1,0 +1,38 @@
+name: Publish to PyPI
+
+# 打 v* tag 即触发发版 (例如 git tag v0.1.0 && git push origin v0.1.0).
+# 日常 push main 不发, 安全.
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write    # PyPI Trusted Publishing 走 OIDC, 不用 token
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # setuptools-scm 需要看到完整 tag 历史
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build
+        run: pip install build
+
+      - name: Build sdist + wheel
+        run: python -m build
+
+      - name: Sanity check artifacts
+        run: |
+          ls -la dist/
+          pip install twine
+          twine check dist/*
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
