@@ -9,7 +9,9 @@
 // 反代前缀通过 self.registration.scope 自动获得 (注册时由 client 端按
 // document.baseURI 算好), 不需要硬编码 /remote 之类.
 
-const CACHE = "ccr-v169";   // bump 强制清掉旧 cache, PWA 重启后拿新代码
+const CACHE = "ccr-v170";   // bump 强制清掉旧 cache, PWA 重启后拿新代码.
+                            // ⚠ 必须跟 app.js 顶上的 __CCR_APP_VER 同步 bump,
+                            // 否则 footer 显示版本不准, 用户看不出新代码到了没.
 const SCOPE_PATH = new URL(self.registration.scope).pathname;  // 末尾保证带 /
 // LLM brand icons — install 时 addAll 预 cache, 首次进 USTC/DS/etc session
 // 就不需要再走网络拉远程 CDN. 列表跟 _MODEL_BRANDS 的 slug 一致.
