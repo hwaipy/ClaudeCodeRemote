@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-code-remote"
+version = "0.1.0"
+description = "Self-hosted web console for the Claude Code CLI: multi-machine Hub + PWA, drives the stream-json subprocess."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Hwaipy" }]
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "python-multipart>=0.0.9",
+  "httpx>=0.27",
+  "mcp>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/hwaipy/ClaudeCodeRemote"
+
+[tool.setuptools.packages.find]
+include = ["claude_code_remote*"]
+
+# server/static/* 跟 hub /static 共用一份, 必须打进 wheel — 否则 pip install
+# 后, 容器 / 远端机器拿不到 index.html / app.js / 图标等.
+[tool.setuptools.package-data]
+"claude_code_remote.server" = [
+  "static/*",
+  "static/lib/*",
+  "static/lib/katex/*",
+  "static/lib/katex/contrib/*",
+  "static/lib/katex/fonts/*",
+  "static/lib/llm-icons/*",
+  "static/lib/oauth-icons/*",
+  "static/lib/screenshots/*",
+]
