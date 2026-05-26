@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v171";
+const __CCR_APP_VER = "v172";
 
 const $ = (id) => document.getElementById(id);
 
@@ -2313,6 +2313,13 @@ async function enterChat(id, name, cwd, sessionState) {
     state._turnCardObserver = null;
   }
   state._turnCard = null;
+  // 重置 dup 诊断: 上 session 的 dup 报告跟新 session 不相关; banner 也清.
+  _dupDiagBuffer.length = 0;
+  _hideDupDiagBanner();
+  if (_turnCardMutationObserver) {
+    _turnCardMutationObserver.disconnect();
+    _turnCardMutationObserver = null;
+  }
   // 切 session 前先把当前 session 的 DOM/state 缓存起来
   if (state.sessionId && state.sessionId !== id) {
     saveCurrentSessionCache();
@@ -2376,6 +2383,8 @@ async function enterChat(id, name, cwd, sessionState) {
   if (cached) {
     state.sessionCache.delete(id);   // LRU：拿出来用，离开时再放回
     restoreSessionCache(cached);
+    _installTurnCardMutationDiag();
+    _assertNoDupTurnCards("cache-restore");
     // cwd 显示用最新 home 数据（一般不变，但兜底）. 用 abbreviateHome 保留 ~,
     // 由 CSS .meta-cwd dir=rtl 处理截断 — 不能预截 (会丢 ~).
     state.cwdShort = abbreviateHome(cwd || "");
@@ -2439,6 +2448,8 @@ async function enterChat(id, name, cwd, sessionState) {
   $("chat-log").innerHTML = "";
   state.currentToolGroup = null;
   state.earlierFragment = null;
+  // dup 诊断 observer — chat-log 任何 .turn-card 增改都立即扫一次.
+  _installTurnCardMutationDiag();
   // 进 chat 先显示 spinner 遮挡 chat-log. 后台 backlog + autoFill 渲到
   // chat-log (用户看不见, overlay 盖着). autoFill 满 2 屏后 hide overlay,
   // 用户一次看到完整 2 屏内容.
@@ -3332,7 +3343,89 @@ function _finalizeTurnCard() {
 }
 
 // 诊断: 检查 chat-log 是否有同 key 的 turn-card. 有就 console.error
-// 报错 (附 hint 标识触发点), 帮 production debug. 不抛, 不阻塞.
+// + 在 UI 顶部弹个可点的红色 banner (累计计数 + 一键 copy 完整 JSON
+// 到剪贴板). 不抛, 不阻塞. _dupDiagBuffer 在 enterChat 清零.
+const _dupDiagBuffer = [];
+let _dupDiagBannerEl = null;
+
+function _cardSnap(c, log) {
+  return {
+    idx: Array.from(log.children).indexOf(c),
+    key: c.dataset.turnStart || null,
+    active: c.classList.contains("turn-active"),
+    tokens: c.querySelector(".turn-card-tokens")?.textContent || "",
+    time: c.querySelector(".turn-card-time")?.textContent || "",
+    iconTier: c.querySelector(".turn-card-icon")?.dataset.tier || "",
+  };
+}
+
+function _showDupDiagBanner() {
+  if (!_dupDiagBannerEl) {
+    const el = document.createElement("div");
+    el.id = "dup-diag-banner";
+    el.style.cssText =
+      "position:fixed;top:12px;right:12px;z-index:9999;"
+      + "background:#cf222e;color:#fff;padding:8px 14px;border-radius:8px;"
+      + "font:600 13px ui-monospace,SFMono-Regular,Menlo,monospace;"
+      + "box-shadow:0 6px 18px rgba(0,0,0,0.25);cursor:pointer;"
+      + "max-width:380px;line-height:1.4;";
+    el.title = "Click to copy full diagnostic JSON to clipboard";
+    el.addEventListener("click", _copyDupDiag);
+    document.body.appendChild(el);
+    _dupDiagBannerEl = el;
+  }
+  _dupDiagBannerEl.textContent =
+    "🐛 turn-card dup × " + _dupDiagBuffer.length + " (click to copy diag)";
+}
+
+function _hideDupDiagBanner() {
+  if (_dupDiagBannerEl) {
+    _dupDiagBannerEl.remove();
+    _dupDiagBannerEl = null;
+  }
+}
+
+async function _copyDupDiag() {
+  const log = $("chat-log");
+  const sid = state.sessionId;
+  const sess = sid ? state.sessionsById.get(sid) : null;
+  const data = {
+    ts: new Date().toISOString(),
+    appVer: typeof __CCR_APP_VER !== "undefined" ? __CCR_APP_VER : "?",
+    sessionId: sid,
+    sessionState: sess && sess.state || "?",
+    appOnline: sess && sess.app_online,
+    appId: sess && sess.app_id,
+    isHistoryReplay: state.isHistoryReplay,
+    earlierFragmentSet: !!state.earlierFragment,
+    maxSeq: state.maxSeq,
+    dedupeBoundary: state.dedupeBoundary,
+    cacheHit: state.cacheHit,
+    turnStartAt: state.turnStartAt,
+    turnEndAt: state.turnEndAt,
+    currentMsgModel: state.currentMsgModel,
+    dupEvents: _dupDiagBuffer,
+    currentCards: log
+      ? Array.from(log.querySelectorAll(":scope > .turn-card"))
+          .map(c => _cardSnap(c, log))
+      : [],
+  };
+  const json = JSON.stringify(data, null, 2);
+  try {
+    await navigator.clipboard.writeText(json);
+    if (_dupDiagBannerEl) {
+      _dupDiagBannerEl.textContent = "✓ copied — paste to dev";
+      setTimeout(() => {
+        if (_dupDiagBannerEl) _showDupDiagBanner();
+      }, 2000);
+    }
+  } catch (e) {
+    console.error("[CCR] copy diag failed", e);
+    console.log("[CCR] diag JSON:\n" + json);
+    alert("Clipboard copy failed. Full JSON dumped to console.");
+  }
+}
+
 function _assertNoDupTurnCards(hint) {
   const log = $("chat-log");
   if (!log) return;
@@ -3341,18 +3434,46 @@ function _assertNoDupTurnCards(hint) {
     const k = c.dataset.turnStart || "(no-key)";
     if (seen.has(k)) {
       const first = seen.get(k);
-      console.error(
-        "[CCR] DUPLICATE turn-card [" + hint + "] key=" + k,
-        { first, second: c,
-          totalCards: log.querySelectorAll(":scope > .turn-card").length,
-          isHistoryReplay: state.isHistoryReplay,
-          earlierFragment: !!state.earlierFragment,
-        },
-      );
+      const info = {
+        hint,
+        key: k,
+        first: _cardSnap(first, log),
+        second: _cardSnap(c, log),
+        totalCards: log.querySelectorAll(":scope > .turn-card").length,
+        isHistoryReplay: state.isHistoryReplay,
+        earlierFragmentSet: !!state.earlierFragment,
+        turnStartAt: state.turnStartAt,
+        turnEndAt: state.turnEndAt,
+      };
+      console.error("[CCR] DUPLICATE turn-card", info);
+      _dupDiagBuffer.push(info);
+      _showDupDiagBanner();
     } else {
       seen.set(k, c);
     }
   });
+}
+
+// Live observer: chat-log 任何 .turn-card 增减都立即扫一次. 配合
+// MutationObserver, dup 出现的那一刻就被捕获 — hint 记成 "live-mutation".
+let _turnCardMutationObserver = null;
+function _installTurnCardMutationDiag() {
+  if (_turnCardMutationObserver) return;
+  const log = $("chat-log");
+  if (!log) return;
+  _turnCardMutationObserver = new MutationObserver((mutations) => {
+    let touched = false;
+    for (const m of mutations) {
+      for (const n of m.addedNodes) {
+        if (n.nodeType === 1 && n.classList && n.classList.contains("turn-card")) {
+          touched = true; break;
+        }
+      }
+      if (touched) break;
+    }
+    if (touched) _assertNoDupTurnCards("live-mutation");
+  });
+  _turnCardMutationObserver.observe(log, { childList: true });
 }
 
 // 兜底去重: chat-log + earlierFragment prepend 完成后, 按 dataset.turnStart
