@@ -3239,11 +3239,18 @@ function _ensureTurnCard() {
 }
 
 function _refreshTurnCard() {
-  // 自动兜底:
+  // 自动兜底 (仅 live 模式):
   //   turnStartAt 有 + turnEndAt 无 (进行中) → ensure active card
-  //   turnStartAt 有 + turnEndAt 有 (已结束) + 没 card → ensure 一张然后立即
-  //     finalize, 表达上一轮 final 值. 强刷进 chat 时用户能立即看到.
-  if (state.turnStartAt) {
+  //   turnStartAt 有 + turnEndAt 有 (已结束) + 没 card → 接管 / 新建 finalized
+  //
+  // ★ replay 期间 (isHistoryReplay=true) 跳过结构调整 — 历史 turn 由
+  //   turn_summary 走 _renderTurnSummary 进 earlierFragment 建卡;
+  //   最新 turn 的 snapshot 卡由 first_paint handler 直接调
+  //   _renderTurnSummary / _ensureTurnCard 建. 否则 replay 期间每轮
+  //   applyTurnState → refreshConvStatus 又调过来, 给每个老 turn 在 chat-log
+  //   末尾再造一张, 跟 earlierFragment 里同 key 的卡叠在一起 (现象: 末尾
+  //   多张相同 turn-card).
+  if (!state.isHistoryReplay && state.turnStartAt) {
     const shouldBeActive = !state.turnEndAt;
     const cardOk = state._turnCard && state._turnCard.isConnected;
     if (shouldBeActive) {
@@ -5057,6 +5064,19 @@ function handleEvent(evt, ts) {
         state.contextLimit = oneM ? 1_000_000 : 200_000;
         if (state.lastInputTotal > state.contextLimit) state.contextLimit = 1_000_000;
         refreshChatMeta();
+        // 显式 bootstrap 末轮 turn-card. _refreshTurnCard 期间 (replay)
+        // 不自动建卡, 这里手动调一次: 已结束走 _renderTurnSummary 建 finalized,
+        // 进行中走 _ensureTurnCard 建 active.
+        if (tst.turn_ended_at) {
+          _renderTurnSummary({
+            turn_started_at: tst.turn_started_at,
+            turn_ended_at: tst.turn_ended_at,
+            output_tokens: tst.output_tokens || 0,
+            model: tst.model || "",
+          });
+        } else {
+          _ensureTurnCard();
+        }
         refreshConvStatus();
       }
       hideThinkingPlaceholder();
