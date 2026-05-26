@@ -1889,7 +1889,7 @@ function enterOnboarding() {
   modal.removeAttribute("hidden");
   const nameEl = $("onboard-name");
   if (nameEl) {
-    if (!nameEl.value) nameEl.value = "My First Server";
+    if (!nameEl.value) nameEl.value = "MyFirstServer";
     setTimeout(() => { try { nameEl.focus(); nameEl.select(); } catch (_) {} }, 50);
   }
   _stopOnboardPoll();
@@ -1978,7 +1978,7 @@ function _startOnboardPoll() {
   goBtn?.addEventListener("click", async () => {
     if (errEl) errEl.classList.remove("show");
     let name = (nameEl.value || "").trim();
-    if (!name) name = "My First Server";
+    if (!name) name = "MyFirstServer";
     goBtn.disabled = true;
     const oldTxt = goBtn.textContent;
     goBtn.textContent = "生成中…";
