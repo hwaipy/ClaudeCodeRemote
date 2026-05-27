@@ -68,6 +68,37 @@ def test_file_endpoint_400_for_relative(base_url, test_token):
         api_delete_session(base_url, test_token, sid)
 
 
+def test_file_endpoint_handles_non_ascii_filename(base_url, test_token):
+    """中文文件名也能下 — starlette 走 latin-1 编码 Content-Disposition,
+    必须让 FileResponse 自己用 RFC 5987 处理 filename*."""
+    sid = api_spawn(base_url, test_token, "/tmp", "file-dl-cn")
+    try:
+        tdir = tempfile.mkdtemp()
+        try:
+            cn_name = "测试文档V3.pdf"
+            p = os.path.join(tdir, cn_name)
+            with open(p, "wb") as f:
+                f.write(b"hello CJK download")
+            r = httpx.get(
+                f"{base_url}/api/sessions/{sid}/file",
+                params={"path": p},
+                headers={"Authorization": f"Bearer {test_token}"},
+                timeout=5,
+            )
+            assert r.status_code == 200, r.text
+            assert r.content == b"hello CJK download"
+            cd = r.headers.get("content-disposition", "")
+            # RFC 5987: filename*=UTF-8''<percent-encoded> 字段必须出现
+            assert "filename*" in cd, (
+                f"non-ascii filename should use RFC 5987 filename*: got {cd!r}"
+            )
+        finally:
+            import shutil
+            shutil.rmtree(tdir, ignore_errors=True)
+    finally:
+        api_delete_session(base_url, test_token, sid)
+
+
 def test_file_endpoint_400_for_directory(base_url, test_token):
     sid = api_spawn(base_url, test_token, "/tmp", "file-dl-dir")
     try:

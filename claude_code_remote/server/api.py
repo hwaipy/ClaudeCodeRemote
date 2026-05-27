@@ -275,13 +275,14 @@ async def session_file(session_id: str, path: str = "") -> Any:
         raise HTTPException(404, f"file not found: {p}")
     if not p.is_file():
         raise HTTPException(400, f"not a file: {p}")
-    # Content-Disposition 强制下载 (浏览器不 inline 显示, 文本/json 也走下载流).
+    # 用 FileResponse 的 filename= 参数, starlette 内部按 RFC 5987 处理
+    # 非 ASCII 文件名 (filename* 字段). 手动 Content-Disposition 走 latin-1
+    # 会爆中文 — 别覆盖.
     return FileResponse(
         str(p),
         filename=p.name,
-        headers={
-            "Content-Disposition": f'attachment; filename="{p.name}"',
-        },
+        media_type="application/octet-stream",   # 强制 attachment 行为
+        content_disposition_type="attachment",
     )
 
 
