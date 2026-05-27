@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v172";
+const __CCR_APP_VER = "v173";
 
 const $ = (id) => document.getElementById(id);
 
@@ -4779,6 +4779,9 @@ function renderToolArgs(entry) {
     entry.summaryEl.textContent = s;
   }
   if (entry.group) refreshToolGroup(entry.group);
+  // tool input 含 file_path 时, 在 tool-head 右侧加个 ⬇ 下载按钮.
+  // Edit / Write / Read / MultiEdit / NotebookEdit 都覆盖.
+  _ensureToolDownloadBtn(entry);
   // Edit 走 DOM diff 视图；其它走纯文本 formatToolInput
   if (entry.name === "Edit"
       && entry.finalInput && typeof entry.finalInput === "object"
@@ -4819,6 +4822,81 @@ function unifiedDiff(oldText, newText) {
   while (i < m) { ops.push({ op: "-", text: a[i] }); i++; }
   while (j < n) { ops.push({ op: "+", text: b[j] }); j++; }
   return ops;
+}
+
+// 给 tool-head 加 ⬇ 下载按钮 — input.file_path 存在就加. 已加过的不重复.
+// 点 button → fetch /api/sessions/<sid>/file?path=... → blob → 触发下载.
+// 走 fetch + blob 是为了同时兼容 hub mode (cookies) + local mode (bearer).
+function _ensureToolDownloadBtn(entry) {
+  if (!entry || !entry.card) return;
+  const inp = entry.finalInput;
+  if (!inp || typeof inp !== "object") return;
+  const fp = inp.file_path;
+  if (!fp || typeof fp !== "string") return;
+  const head = entry.card.querySelector(".tool-head");
+  if (!head) return;
+  if (head.querySelector(".tool-download")) return;   // 已加过
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "tool-download";
+  const fname = fp.split("/").pop() || "file";
+  btn.title = "下载 " + fname;
+  btn.setAttribute("aria-label", "下载文件");
+  btn.innerHTML =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" '
+    + 'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+    + 'stroke-linejoin="round" aria-hidden="true">'
+    + '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>'
+    + '<polyline points="7 10 12 15 17 10"/>'
+    + '<line x1="12" y1="15" x2="12" y2="3"/></svg>';
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();    // 防触发 head 的 collapse toggle
+    _downloadSessionFile(fp, btn);
+  });
+  // 插在 .tool-status 之前 (右侧位置), 跟 status 圆点同行右对齐
+  const status = head.querySelector(".tool-status");
+  if (status) head.insertBefore(btn, status);
+  else head.appendChild(btn);
+}
+
+async function _downloadSessionFile(filePath, btnEl) {
+  const sid = state.sessionId;
+  if (!sid) return;
+  const url = "api/sessions/" + encodeURIComponent(sid)
+    + "/file?path=" + encodeURIComponent(filePath);
+  const headers = {};
+  if (!state.hubMode && state.token) {
+    headers["Authorization"] = "Bearer " + state.token;
+  }
+  if (btnEl) btnEl.classList.add("downloading");
+  try {
+    const res = await fetch(apiPath(url), {
+      headers,
+      credentials: state.hubMode ? "include" : "same-origin",
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const j = await res.json();
+        if (j && j.detail) detail = j.detail;
+      } catch (_) {}
+      alert("下载失败 (" + res.status + "): " + detail);
+      return;
+    }
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filePath.split("/").pop() || "file";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+  } catch (e) {
+    alert("下载失败: " + (e.message || e));
+  } finally {
+    if (btnEl) btnEl.classList.remove("downloading");
+  }
 }
 
 function renderEditDiff(entry) {

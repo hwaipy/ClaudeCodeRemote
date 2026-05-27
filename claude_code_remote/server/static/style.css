@@ -2071,6 +2071,30 @@ body.is-pwa.has-session:has(#chat-input:focus) .chat-foot {
   border-radius: 50%;
   background: transparent;
 }
+/* ⬇ 下载按钮 — input.file_path 的 tool-card 上才出现, 紧挨 status 圆点左侧.
+   visible always (折叠 / 展开 都在), click 触发文件下载. */
+.tool-head .tool-download {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  padding: 4px 6px;
+  margin: -2px 4px 0 0;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.tool-head .tool-download:hover {
+  color: var(--accent, #0969da);
+  background: var(--bg-elev, rgba(125,125,125,.10));
+}
+.tool-head .tool-download.downloading {
+  opacity: 0.6;
+  pointer-events: none;
+}
 .tool-status.pending {
   background: var(--accent);
   animation: tool-pulse 1.2s ease-in-out infinite;

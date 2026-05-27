@@ -251,6 +251,40 @@ async def session_ctx(session_id: str) -> dict[str, Any]:
     return {"available": True, **usage}
 
 
+@router.get("/sessions/{session_id}/file")
+async def session_file(session_id: str, path: str = "") -> Any:
+    """下载 session 工作目录下的文件 — 给前端 tool-card 上的下载按钮用.
+
+    安全模型: token-protected (require_token), 路径必须绝对存在且
+    是普通文件. 不限制文件位置 — server 跑哪儿就能拿哪儿 (跟 claude
+    CLI Read/Write 工具一样的边界). 不解析 symlink target, 但 resolve
+    会 follow, 这点跟 ls/mkdir 一致.
+    """
+    from fastapi.responses import FileResponse
+    sess = await manager.get(session_id)
+    if not sess:
+        raise HTTPException(404, "session not found")
+    raw = (path or "").strip()
+    if not raw:
+        raise HTTPException(400, "path required")
+    expanded = os.path.expanduser(raw)
+    if not os.path.isabs(expanded):
+        raise HTTPException(400, "absolute path required")
+    p = Path(expanded).resolve()
+    if not p.exists():
+        raise HTTPException(404, f"file not found: {p}")
+    if not p.is_file():
+        raise HTTPException(400, f"not a file: {p}")
+    # Content-Disposition 强制下载 (浏览器不 inline 显示, 文本/json 也走下载流).
+    return FileResponse(
+        str(p),
+        filename=p.name,
+        headers={
+            "Content-Disposition": f'attachment; filename="{p.name}"',
+        },
+    )
+
+
 @router.get("/sessions/{session_id}/tool/{tool_use_id}")
 async def get_tool_payload(session_id: str, tool_use_id: str) -> dict[str, Any]:
     """前端展开折叠卡时按需拉工具调用内容。
