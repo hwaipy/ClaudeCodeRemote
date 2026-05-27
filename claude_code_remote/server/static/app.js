@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v175";
+const __CCR_APP_VER = "v176";
 
 const $ = (id) => document.getElementById(id);
 
@@ -1526,6 +1526,53 @@ function _cleanupTmpSessionIfLeaving(nextSid) {
   });
 })();
 
+// 给 server 那台机器上的 Claude Code 用的 "装一下 CCR server 接进来" prompt.
+// 共享给两条路径: (1) 新用户 onboarding step2, (2) 已登录用户在 Cloud
+// Servers 页面 click + 新建 server 的 token 卡. 含完整背景 + 架构图 +
+// env 参数 (token 已 embed) + pip 安装 + systemd ExecStart + journalctl
+// 验证 + GitHub / PyPI 链接.
+function ccrBuildServerSetupPrompt(host, token, appName) {
+  const wsUrl = "wss://" + host;
+  return (
+`请帮我在这台机器上装好 ClaudeCodeRemote (CCR) 的 server 端, 让它接入
+我现有的 hub.
+
+背景: CCR 是自建的 Claude Code 远程控制台. 架构是
+  PWA  ↔  Hub (FastAPI 中心, 鉴权 + 聚合)  ↔  反向 WS tunnel
+       ↔  CCR server (× N, 每台机器跑一份)  ↔  claude CLI 子进程
+每台机器跑一份 CCR server 进程, 主动连出 Hub (不需要在这台机器上开
+公网入站口); server 本地用 stream-json 协议起 claude CLI 子进程,
+Hub 把 PWA 的请求 (聊天 / 工具批准 / diff / 通知) 转过来, 我就能在
+手机或任何浏览器上跟 Claude 聊这台机器上的项目.
+
+你现在要做的: 把 CCR server 装到这台机器上, 用下面的 device token
+鉴权接入我的 Hub, 然后长期跑 (systemd user service 守护). 我在 PWA
+上看到这台机器上线就成功了.
+
+env 接入参数 (写到 EnvironmentFile, 比如 ~/.config/ccr/env):
+
+  CCR_TOKEN=$(openssl rand -hex 16)
+  CCR_HUB_URL=${wsUrl}
+  CCR_HUB_DEVICE_TOKEN=${token}
+  CCR_HUB_APP_NAME=${appName}
+
+安装 + 启动:
+- pip install claude-code-remote (建议独立 venv, 比如 ~/.venv/ccr)
+- systemd user service, ExecStart 走:
+    python -m uvicorn claude_code_remote.server.main:app
+- systemctl --user enable --now ccr.service
+- journalctl --user -u ccr -f 看到 "hub_client connected" 即成功.
+  (顺手 sudo loginctl enable-linger $USER, 注销后也跑)
+
+项目完整信息 (架构图 / REQUIREMENTS / 部署 example / 源码):
+  https://github.com/hwaipy/ClaudeCodeRemote
+PyPI:
+  https://pypi.org/project/claude-code-remote/
+不确定的细节优先去 README + deploy/ccr.service.example 对照, 别瞎猜.
+
+完成后告诉我 "已上线".`);
+}
+
 // ---------- Help view (无需登录可见) ----------
 (function setupHelp() {
   const view = $("view-help");
@@ -1622,6 +1669,8 @@ ANTHROPIC_API_KEY=                    # optional, blank = mock`;
   const doneBtn = $("new-app-done");
   const tokenEl = $("new-app-token");
   const envEl = $("new-app-env");
+  const promptEl = $("new-app-prompt");
+  const promptCopyBtn = $("new-app-prompt-copy");
   const tokenCopyBtn = $("new-app-token-copy");
   const envCopyBtn = $("new-app-env-copy");
   if (!view || !openBtn) return;
@@ -1858,6 +1907,13 @@ ANTHROPIC_API_KEY=                    # optional, blank = mock`;
         `CCR_HUB_URL=wss://${location.host}\n` +
         `CCR_HUB_DEVICE_TOKEN=${red.device_token}\n` +
         `CCR_HUB_APP_NAME=${red.app_name}`;
+      // 跟 onboarding step2 同款 Claude Code prompt — 一键复制扔过去
+      // server 那边的 Claude Code 直接装 + 起 systemd, 不用人工拼步骤.
+      if (promptEl) {
+        promptEl.textContent = ccrBuildServerSetupPrompt(
+          location.host, red.device_token, red.app_name,
+        );
+      }
       step1.hidden = true;
       step2.hidden = false;
     } catch (e) {
@@ -1881,6 +1937,7 @@ ANTHROPIC_API_KEY=                    # optional, blank = mock`;
   }
   tokenCopyBtn.addEventListener("click", () => copyText(tokenEl.textContent, tokenCopyBtn));
   envCopyBtn.addEventListener("click", () => copyText(envEl.textContent, envCopyBtn));
+  promptCopyBtn?.addEventListener("click", () => copyText(promptEl.textContent, promptCopyBtn));
 })();
 
 // ---------- 新用户首次接入 (#modal-onboarding) ----------
@@ -2030,48 +2087,6 @@ function _startOnboardPoll() {
   const tokenPreviewEl = $("onboard-token-preview");
   const backLink = $("onboard-back-link");
 
-  function _buildPrompt(host, token, appName) {
-    const wsUrl = "wss://" + host;
-    return (
-`请帮我在这台机器上装好 ClaudeCodeRemote (CCR) 的 server 端, 让它接入
-我现有的 hub.
-
-背景: CCR 是自建的 Claude Code 远程控制台. 架构是
-  PWA  ↔  Hub (FastAPI 中心, 鉴权 + 聚合)  ↔  反向 WS tunnel
-       ↔  CCR server (× N, 每台机器跑一份)  ↔  claude CLI 子进程
-每台机器跑一份 CCR server 进程, 主动连出 Hub (不需要在这台机器上开
-公网入站口); server 本地用 stream-json 协议起 claude CLI 子进程,
-Hub 把 PWA 的请求 (聊天 / 工具批准 / diff / 通知) 转过来, 我就能在
-手机或任何浏览器上跟 Claude 聊这台机器上的项目.
-
-你现在要做的: 把 CCR server 装到这台机器上, 用下面的 device token
-鉴权接入我的 Hub, 然后长期跑 (systemd user service 守护). 我在 PWA
-上看到这台机器上线就成功了.
-
-env 接入参数 (写到 EnvironmentFile, 比如 ~/.config/ccr/env):
-
-  CCR_TOKEN=$(openssl rand -hex 16)
-  CCR_HUB_URL=${wsUrl}
-  CCR_HUB_DEVICE_TOKEN=${token}
-  CCR_HUB_APP_NAME=${appName}
-
-安装 + 启动:
-- pip install claude-code-remote (建议独立 venv, 比如 ~/.venv/ccr)
-- systemd user service, ExecStart 走:
-    python -m uvicorn claude_code_remote.server.main:app
-- systemctl --user enable --now ccr.service
-- journalctl --user -u ccr -f 看到 "hub_client connected" 即成功.
-  (顺手 sudo loginctl enable-linger $USER, 注销后也跑)
-
-项目完整信息 (架构图 / REQUIREMENTS / 部署 example / 源码):
-  https://github.com/hwaipy/ClaudeCodeRemote
-PyPI:
-  https://pypi.org/project/claude-code-remote/
-不确定的细节优先去 README + deploy/ccr.service.example 对照, 别瞎猜.
-
-完成后告诉我 "已上线".`);
-  }
-
   nameEl?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") goBtn.click();
   });
@@ -2092,7 +2107,7 @@ PyPI:
       const token = red.device_token;
       const appName = red.app_name || name;
       const host = location.host;
-      const promptText = _buildPrompt(host, token, appName);
+      const promptText = ccrBuildServerSetupPrompt(host, token, appName);
       if (promptEl) promptEl.textContent = promptText;
       if (tokenPreviewEl) tokenPreviewEl.textContent = token;
       step1.hidden = true;

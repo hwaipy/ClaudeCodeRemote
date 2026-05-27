@@ -247,13 +247,18 @@
       </div>
       <!-- step 2: 显示 token + 配置 hint -->
       <div id="new-app-step2" hidden>
-        <div class="hint">Done. Copy the device token below into your server's environment, then start it.</div>
-        <label>Device token (copy now — won't be shown again)</label>
+        <div class="hint">Done. 把下面这段 prompt 丢给那台 server 上的 Claude Code, 它会自动装好并接进来.</div>
+        <label>Claude Code prompt (一键复制)</label>
+        <div class="copybox onboard-promptbox">
+          <code class="copybox-text" id="new-app-prompt"></code>
+          <button class="btn btn-primary" id="new-app-prompt-copy" type="button">复制</button>
+        </div>
+        <label>Device token (作为兜底单独复制 — 也已经嵌进上面 prompt 里了)</label>
         <div class="copybox" id="new-app-token-box">
           <code class="copybox-text" id="new-app-token"></code>
           <button class="btn btn-secondary" id="new-app-token-copy" type="button">Copy</button>
         </div>
-        <label>Environment snippet</label>
+        <label>Environment snippet (手动配置用)</label>
         <div class="copybox">
           <code class="copybox-text" id="new-app-env"></code>
           <button class="btn btn-secondary" id="new-app-env-copy" type="button">Copy</button>
