@@ -57,8 +57,14 @@ def _result_size(content: Any) -> int:
 
 
 def _is_askuser_tool(name: str) -> bool:
-    """AskUserQuestion 工具不剥：前端要完整问题+选项才能渲染交互卡。"""
-    return name == "AskUserQuestion"
+    """AskUserQuestion + 我们的 MCP ask_user 不剥: 前端要完整问题+选项才能
+    渲染交互卡. mcp__ccr__share_file 同理 — 前端 share-file 卡也要完整 input
+    (path / note) 才能渲, 路径 backlog 回放后下载按钮还要用."""
+    return name in (
+        "AskUserQuestion",
+        "mcp__ccr__ask_user",
+        "mcp__ccr__share_file",
+    )
 
 
 def strip_payload_for_backlog(payload: dict[str, Any]) -> dict[str, Any]:

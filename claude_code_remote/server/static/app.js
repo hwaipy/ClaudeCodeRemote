@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v173";
+const __CCR_APP_VER = "v174";
 
 const $ = (id) => document.getElementById(id);
 
@@ -19,6 +19,7 @@ const state = {
   msgById: new Map(),         // msg_id -> {bubble, text}
   toolById: new Map(),         // tool_use_id -> {card, partialInput, finalInput, resultEl}
   askuserById: new Map(),      // tool_use_id -> {card, questions, answers, submitted}
+  shareFileById: new Map(),    // tool_use_id -> {card, populated} — mcp__ccr__share_file 卡
   activeMsgId: null,           // 当前打开的 stream message id
   blocksByIdx: new Map(),      // stream message index -> {type, msgId|toolUseId}
   // 每个 session 的 DOM + 流式状态快照：切走时缓存，切回来直接复用，免 spinner 免重渲
@@ -2229,6 +2230,7 @@ function saveCurrentSessionCache() {
     msgById:          state.msgById,
     toolById:         state.toolById,
     askuserById:      state.askuserById,
+    shareFileById:    state.shareFileById,
     blocksByIdx:      state.blocksByIdx,
     firstSeq:         state.firstSeq,
     hasMoreHistory:   state.hasMoreHistory,
@@ -2277,6 +2279,7 @@ function restoreSessionCache(cached) {
   state.msgById         = cached.msgById;
   state.toolById        = cached.toolById;
   state.askuserById     = cached.askuserById || new Map();
+  state.shareFileById   = cached.shareFileById || new Map();
   state.blocksByIdx     = cached.blocksByIdx;
   state.activeMsgId     = null;    // 离开时若有未完成 message，msgId 失效；下条 message_start 会重置
   state.firstSeq        = cached.firstSeq;
@@ -2358,6 +2361,7 @@ async function enterChat(id, name, cwd, sessionState) {
     state.msgById.clear();
     state.toolById.clear();
     state.askuserById.clear();
+    state.shareFileById.clear();
     state.firstSeq = null;
     state.hasMoreHistory = false;
     state.maxSeq = 0;
@@ -2413,6 +2417,7 @@ async function enterChat(id, name, cwd, sessionState) {
   state.msgById.clear();
   state.toolById.clear();
   state.askuserById.clear();
+  state.shareFileById.clear();
   state.activeMsgId = null;
   state.blocksByIdx.clear();
   state.firstSeq = null;
@@ -5160,6 +5165,104 @@ function markAskUserAnswered(toolUseId) {
   if (entry.statusEl) entry.statusEl.textContent = "Answered";
 }
 
+// ---------- share_file 卡 (mcp__ccr__share_file) ----------
+// Claude 调 mcp__ccr__share_file({path, note?}) → 渲一张显眼的文件卡
+// (替代普通 tool-card), 含文件名 + 大小 + 下载按钮.
+const SHAREFILE_TOOL_NAMES = new Set(["mcp__ccr__share_file"]);
+function isShareFileTool(name) { return SHAREFILE_TOOL_NAMES.has(name); }
+
+function _fmtBytes(n) {
+  if (!n || n < 0) return "0 B";
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + " MB";
+  return (n / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+}
+
+function _fileExtIcon(name) {
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  if (["pdf"].includes(ext)) return "📕";
+  if (["doc", "docx"].includes(ext)) return "📘";
+  if (["xls", "xlsx", "csv"].includes(ext)) return "📊";
+  if (["ppt", "pptx"].includes(ext)) return "📙";
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"].includes(ext)) return "🖼";
+  if (["mp4", "mkv", "mov", "webm", "avi"].includes(ext)) return "🎞";
+  if (["mp3", "wav", "flac", "ogg", "m4a"].includes(ext)) return "🎵";
+  if (["zip", "tar", "gz", "7z", "rar", "tgz"].includes(ext)) return "🗜";
+  if (["json", "yaml", "yml", "toml", "ini"].includes(ext)) return "📋";
+  if (["py", "js", "ts", "go", "rs", "java", "c", "cpp", "h", "rb"].includes(ext)) return "💻";
+  if (["md", "txt", "rst"].includes(ext)) return "📝";
+  return "📎";
+}
+
+function ensureShareFileCard(toolUseId) {
+  let entry = state.shareFileById.get(toolUseId);
+  if (entry) return entry;
+  const root = chatRoot();
+  state.currentToolGroup = null;   // 打断 tool-group 序列
+  const card = document.createElement("div");
+  card.className = "share-file-card pending";
+  card.dataset.toolUseId = toolUseId;
+  card.innerHTML =
+    '<div class="sf-icon"></div>'
+    + '<div class="sf-info">'
+    +   '<div class="sf-name">Sharing file…</div>'
+    +   '<div class="sf-meta"></div>'
+    +   '<div class="sf-note"></div>'
+    + '</div>'
+    + '<button class="sf-download btn btn-primary" type="button" disabled>'
+    +   '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" '
+    +   'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+    +   'stroke-linejoin="round" aria-hidden="true">'
+    +   '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>'
+    +   '<polyline points="7 10 12 15 17 10"/>'
+    +   '<line x1="12" y1="15" x2="12" y2="3"/></svg>'
+    +   '<span class="sf-download-text">下载</span>'
+    + '</button>';
+  root.appendChild(card);
+  chatScrollBottom();
+  entry = {
+    toolUseId,
+    card,
+    iconEl: card.querySelector(".sf-icon"),
+    nameEl: card.querySelector(".sf-name"),
+    metaEl: card.querySelector(".sf-meta"),
+    noteEl: card.querySelector(".sf-note"),
+    btn: card.querySelector(".sf-download"),
+    populated: false,
+    filePath: null,
+  };
+  state.shareFileById.set(toolUseId, entry);
+  return entry;
+}
+
+function populateShareFileCard(entry, input) {
+  if (!entry || entry.populated) return;
+  if (!input || typeof input !== "object") return;
+  const path = String(input.path || "");
+  if (!path) return;
+  const name = path.split("/").pop() || path;
+  const note = String(input.note || "");
+  entry.populated = true;
+  entry.filePath = path;
+  entry.iconEl.textContent = _fileExtIcon(name);
+  entry.nameEl.textContent = name;
+  // size 没有 (来自 tool input, claude 没塞); 显示 dir 路径.
+  const dir = path.substring(0, path.length - name.length) || "/";
+  entry.metaEl.textContent = dir;
+  if (note) {
+    entry.noteEl.textContent = note;
+    entry.noteEl.style.display = "";
+  } else {
+    entry.noteEl.style.display = "none";
+  }
+  entry.btn.disabled = false;
+  entry.btn.addEventListener("click", () => {
+    _downloadSessionFile(path, entry.btn);
+  });
+  entry.card.classList.remove("pending");
+}
+
 // ---------- 权限请求卡片 ----------
 function showPermissionRequest(evt) {
   const root = chatRoot();
@@ -5514,6 +5617,13 @@ function handleStreamEvent(ev) {
         hideThinkingPlaceholder();
         return;
       }
+      if (isShareFileTool(cb.name)) {
+        // share_file 卡: 起骨架, 等 input 完整后填 (跟 askuser 同模式)
+        ensureShareFileCard(cb.id);
+        state.blocksByIdx.set(idx, { type: "sharefile", toolUseId: cb.id });
+        hideThinkingPlaceholder();
+        return;
+      }
       const entry = ensureToolCard(cb.id, cb.name);
       const inp = cb.input || {};
       if (inp.__ccr_lazy === true) {
@@ -5601,6 +5711,11 @@ function handleAssistantMessage(msg) {
         // 最终 input 到位，渲染问题/选项；live 路径上 ensureAskUserCard 已经在 content_block_start 时建好
         const ent = ensureAskUserCard(b.id);
         populateAskUserCard(ent, b.input || {});
+        continue;
+      }
+      if (isShareFileTool(b.name)) {
+        const ent = ensureShareFileCard(b.id);
+        populateShareFileCard(ent, b.input || {});
         continue;
       }
       const entry = ensureToolCard(b.id, b.name);

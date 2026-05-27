@@ -80,13 +80,95 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["questions"],
             },
         ),
+        types.Tool(
+            name="share_file",
+            description=(
+                "Render a prominent file card in the user's CCR chat with a "
+                "download button. Use this whenever you have a file the user "
+                "should be able to grab as a deliverable — e.g. you generated "
+                "a PDF / image / archive / report, downloaded something from "
+                "the web for them, or transformed a file. The path must be "
+                "absolute and the file must exist on THIS server. Do NOT use "
+                "for intermediate / scratch files. Tool returns immediately "
+                "with file metadata; the card is rendered from your tool_use "
+                "block, not from the result."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": (
+                            "Absolute filesystem path on this server. "
+                            "Must exist and be a regular file."
+                        ),
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": (
+                            "Optional short note shown under the filename "
+                            "(e.g. 'PDF version of your docx')."
+                        ),
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
     ]
 
 
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
-    if name != "ask_user":
-        return [types.TextContent(type="text", text=f"error: unknown tool {name}")]
+    if name == "share_file":
+        return await _call_share_file(arguments)
+    if name == "ask_user":
+        return await _call_ask_user(arguments)
+    return [types.TextContent(type="text", text=f"error: unknown tool {name}")]
+
+
+async def _call_share_file(arguments: dict) -> list[types.TextContent]:
+    """share_file 不需要 backend POST — 前端从 tool_use input 直接渲卡.
+    这里只校验路径 + 返回元数据 (size etc.) 给 claude 看, 让它知道分享成功."""
+    path = (arguments.get("path") or "").strip()
+    note = arguments.get("note") or ""
+    if not path:
+        return [types.TextContent(
+            type="text",
+            text=json.dumps({"error": "path required"}, ensure_ascii=False),
+        )]
+    if not os.path.isabs(path):
+        return [types.TextContent(
+            type="text",
+            text=json.dumps({"error": "path must be absolute"},
+                            ensure_ascii=False),
+        )]
+    if not os.path.isfile(path):
+        return [types.TextContent(
+            type="text",
+            text=json.dumps({"error": f"not a file: {path}"},
+                            ensure_ascii=False),
+        )]
+    try:
+        size = os.path.getsize(path)
+    except OSError as e:
+        return [types.TextContent(
+            type="text",
+            text=json.dumps({"error": f"stat failed: {e}"},
+                            ensure_ascii=False),
+        )]
+    return [types.TextContent(
+        type="text",
+        text=json.dumps({
+            "ok": True,
+            "path": path,
+            "name": os.path.basename(path),
+            "size": size,
+            "note": note,
+        }, ensure_ascii=False),
+    )]
+
+
+async def _call_ask_user(arguments: dict) -> list[types.TextContent]:
     if not SESSION_ID:
         return [types.TextContent(type="text",
                                   text="error: CCR_MCP_SESSION_ID not configured")]
