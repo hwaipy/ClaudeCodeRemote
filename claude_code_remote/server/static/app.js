@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v174";
+const __CCR_APP_VER = "v175";
 
 const $ = (id) => document.getElementById(id);
 
@@ -3265,6 +3265,10 @@ function _ensureTurnCard() {
     card.innerHTML = `<span class="turn-card-icon"></span>`
       + `<span class="turn-card-tokens">↓0t</span>`
       + `<span class="turn-card-time">0s</span>`;
+    card.dataset.createdBy = "_ensureTurnCard";
+    card.dataset.createdAt = String(Date.now());
+    card.dataset.createdReplay = String(!!state.isHistoryReplay);
+    card.dataset.createdEarlier = String(!!state.earlierFragment);
     log.appendChild(card);
   }
   if (key) card.dataset.turnStart = key;
@@ -3361,6 +3365,12 @@ function _cardSnap(c, log) {
     tokens: c.querySelector(".turn-card-tokens")?.textContent || "",
     time: c.querySelector(".turn-card-time")?.textContent || "",
     iconTier: c.querySelector(".turn-card-icon")?.dataset.tier || "",
+    // 调试: 这张卡是谁建的 / 何时建的 / 当时 state 状态
+    createdBy: c.dataset.createdBy || "?",
+    createdAt: c.dataset.createdAt || "?",
+    createdReplay: c.dataset.createdReplay || "?",
+    createdEarlier: c.dataset.createdEarlier || "?",
+    createdRoot: c.dataset.createdRoot || "?",
   };
 }
 
@@ -3459,8 +3469,9 @@ function _assertNoDupTurnCards(hint) {
   });
 }
 
-// Live observer: chat-log 任何 .turn-card 增减都立即扫一次. 配合
-// MutationObserver, dup 出现的那一刻就被捕获 — hint 记成 "live-mutation".
+// Live observer: chat-log 任何 .turn-card 增减都立即触发. dup 出现那一刻
+// (1) 记录到 diag buffer (hint="live-mutation") (2) 立即 dedupe — 不等
+// backlog_done 才清, 不给用户肉眼可见的窗口看到两张.
 let _turnCardMutationObserver = null;
 function _installTurnCardMutationDiag() {
   if (_turnCardMutationObserver) return;
@@ -3476,7 +3487,10 @@ function _installTurnCardMutationDiag() {
       }
       if (touched) break;
     }
-    if (touched) _assertNoDupTurnCards("live-mutation");
+    if (touched) {
+      _assertNoDupTurnCards("live-mutation");
+      _dedupeTurnCardsByKey();   // ← 立即 dedupe, 不留 visible 窗口
+    }
   });
   _turnCardMutationObserver.observe(log, { childList: true });
 }
@@ -3581,6 +3595,11 @@ function _renderTurnSummary(evt) {
       `<span class="turn-card-icon">${iconHTML}</span>`
       + `<span class="turn-card-tokens">↓${_fmtTok(tok)}</span>`
       + `<span class="turn-card-time">${formatDuration(duration)}</span>`;
+    card.dataset.createdBy = "_renderTurnSummary";
+    card.dataset.createdAt = String(Date.now());
+    card.dataset.createdReplay = String(!!state.isHistoryReplay);
+    card.dataset.createdEarlier = String(!!state.earlierFragment);
+    card.dataset.createdRoot = (root === $("chat-log")) ? "chat-log" : "earlierFragment";
     root.appendChild(card);
   }
   if (key) card.dataset.turnStart = key;
