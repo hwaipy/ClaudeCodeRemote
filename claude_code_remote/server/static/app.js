@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v179";
+const __CCR_APP_VER = "v180";
 
 const $ = (id) => document.getElementById(id);
 
@@ -3497,29 +3497,49 @@ async function _copyDupDiag() {
 function _assertNoDupTurnCards(hint) {
   const log = $("chat-log");
   if (!log) return;
-  const seen = new Map();
-  log.querySelectorAll(":scope > .turn-card").forEach(c => {
+  const cards = Array.from(log.querySelectorAll(":scope > .turn-card"));
+  const byKey = new Map();      // dataset.turnStart → card
+  const byContent = new Map();  // "tokens|time" → card
+  for (const c of cards) {
     const k = c.dataset.turnStart || "(no-key)";
-    if (seen.has(k)) {
-      const first = seen.get(k);
-      const info = {
-        hint,
-        key: k,
-        first: _cardSnap(first, log),
-        second: _cardSnap(c, log),
-        totalCards: log.querySelectorAll(":scope > .turn-card").length,
-        isHistoryReplay: state.isHistoryReplay,
-        earlierFragmentSet: !!state.earlierFragment,
-        turnStartAt: state.turnStartAt,
-        turnEndAt: state.turnEndAt,
-      };
-      console.error("[CCR] DUPLICATE turn-card", info);
-      _dupDiagBuffer.push(info);
-      _showDupDiagBanner();
+    const content = (c.querySelector(".turn-card-tokens")?.textContent || "")
+      + "|" + (c.querySelector(".turn-card-time")?.textContent || "");
+    // 1) 同 key dup (老逻辑)
+    if (byKey.has(k) && k !== "(no-key)") {
+      _reportDup(hint + ":same-key", byKey.get(k), c, log);
     } else {
-      seen.set(k, c);
+      byKey.set(k, c);
     }
-  });
+    // 2) 同内容 dup (tokens+time 一样) — key 可能不同! 这是按 key dedup
+    //    根本碰不到的情况, 很可能就是一直没解决的真凶.
+    if (content !== "|" && byContent.has(content)) {
+      const prev = byContent.get(content);
+      // 同 key 的已经在上面报过了, 这里只报 key 不同的内容重复
+      if ((prev.dataset.turnStart || "") !== (c.dataset.turnStart || "")) {
+        _reportDup(hint + ":same-content-diff-key", prev, c, log);
+      }
+    } else {
+      byContent.set(content, c);
+    }
+  }
+}
+
+function _reportDup(hint, first, second, log) {
+  const info = {
+    hint,
+    firstKey: first.dataset.turnStart || "(no-key)",
+    secondKey: second.dataset.turnStart || "(no-key)",
+    first: _cardSnap(first, log),
+    second: _cardSnap(second, log),
+    totalCards: log.querySelectorAll(":scope > .turn-card").length,
+    isHistoryReplay: state.isHistoryReplay,
+    earlierFragmentSet: !!state.earlierFragment,
+    turnStartAt: state.turnStartAt,
+    turnEndAt: state.turnEndAt,
+  };
+  console.error("[CCR] DUPLICATE turn-card", info);
+  _dupDiagBuffer.push(info);
+  _showDupDiagBanner();
 }
 
 // Live observer: chat-log 任何 .turn-card 增减都立即触发. dup 出现那一刻
