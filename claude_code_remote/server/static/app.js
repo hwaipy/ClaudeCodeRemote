@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v180";
+const __CCR_APP_VER = "v181";
 
 const $ = (id) => document.getElementById(id);
 
@@ -2547,6 +2547,7 @@ async function enterChat(id, name, cwd, sessionState) {
     // 还没跑完时就过了 — IDB 后续 events 可能再造卡. 这里 IDB 收尾再 dedupe
     // 一次兜底.
     _dedupeTurnCardsByKey();
+    _dedupeAdjacentTurnCards();   // settle 点: 收掉 key 不同的相邻重复
     _assertNoDupTurnCards("after-idb-replay");
     // 立即 fade-out spinner — 缓存内容已经渲, 用户可见. backlog 还会来,
     // 走 dedupe 静默合入.
@@ -3593,6 +3594,48 @@ function _dedupeTurnCardsByKey() {
       seen.set(k, c);
     }
   });
+}
+
+// 相邻 turn-card 去重: 两张 turn-card 直接相邻 (DOM 兄弟, 中间没别的元素)
+// 本身就是异常 — 正常每轮的 turn-card 之间一定隔着该轮的消息气泡/工具卡.
+// 出现相邻 = 同一轮被两条路径各建一张, 且 key 不同 (按 key 去重碰不到).
+// 典型来源: /resume 重放上一轮消息被 server 当新轮 → _ensureTurnCard 实时
+// 建幽灵卡 (新 key), 跟 backlog 的 turn_summary 卡 (_renderTurnSummary, 真
+// key) 内容相同但 key 不同, 紧挨在末尾.
+// 保留规则: 优先留 _renderTurnSummary 建的 (真实 summary), 其次留 finalized
+// 的, 删另一张 (一般是 _ensureTurnCard 的 live 幽灵).
+// ⚠ 只在 settle 点调 (backlog_done / IDB replay 收尾) — 不能在每次
+// MutationObserver mutation 时调! backlog 重放期间 turn-card 常会"暂时
+// 相邻"(气泡还没到), 那时跑会误删真卡, 又被后续事件重建 → 删↔建死循环
+// → chat-loading 永不收 → 卡死.
+function _dedupeAdjacentTurnCards() {
+  const log = $("chat-log");
+  if (!log) return;
+  // 迭代式 (不递归): 每轮从头扫一对相邻 turn-card, 删一张, 直到没有相邻对.
+  // 上限 guard 防意外死循环.
+  for (let guard = 0; guard < 1000; guard++) {
+    const kids = log.children;
+    let removed = false;
+    for (let i = 0; i < kids.length - 1; i++) {
+      const a = kids[i], b = kids[i + 1];
+      if (!a.classList || !a.classList.contains("turn-card")) continue;
+      if (!b.classList || !b.classList.contains("turn-card")) continue;
+      const aSummary = a.dataset.createdBy === "_renderTurnSummary";
+      const bSummary = b.dataset.createdBy === "_renderTurnSummary";
+      const aActive = a.classList.contains("turn-active");
+      const bActive = b.classList.contains("turn-active");
+      let drop;
+      if (aSummary && !bSummary) drop = b;
+      else if (bSummary && !aSummary) drop = a;
+      else if (aActive && !bActive) drop = a;   // 留 finalized
+      else if (bActive && !aActive) drop = b;
+      else drop = b;                             // 都一样 → 删后一张
+      drop.remove();
+      removed = true;
+      break;   // children 变了, 重新从头扫
+    }
+    if (!removed) break;
+  }
 }
 
 // 在 backlog_done 时调一次: 如果 session 不在 busy/running 状态, 任何
@@ -5722,6 +5765,7 @@ function handleEvent(evt, ts) {
       // replay path 可能给同一 turn 各建一张, 跨 root 漏 dedupe).
       _assertNoDupTurnCards("backlog-done-before-dedupe");
       _dedupeTurnCardsByKey();
+      _dedupeAdjacentTurnCards();   // settle 点: 收掉 key 不同的相邻重复
       _assertNoDupTurnCards("backlog-done-after-dedupe");
       // 兜底: session 已结束 (state 非 busy/running) 时, 清掉因为
       // turn_state(end) 缺失而残留的 .turn-active turn-card.
