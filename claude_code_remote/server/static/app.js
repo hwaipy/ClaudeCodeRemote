@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v178";
+const __CCR_APP_VER = "v179";
 
 const $ = (id) => document.getElementById(id);
 
@@ -3298,8 +3298,15 @@ function _ensureTurnCard() {
     }
   }
   if (!card) {
-    // 退路: 无 key 时接管 DOM 末尾任何 active card (e.g. cache restore).
-    card = log.querySelector(":scope > .turn-card.turn-active");
+    // 退路: 接管 DOM 末尾的 active card (e.g. cache restore — state._turnCard
+    // ref 丢了但 DOM 还有). ★只在 key 一致或卡本身没 key 时接管★ — 否则
+    // 会偷走**另一个 turn** 的 active 卡, 把它 dataset.turnStart 覆盖成新 key,
+    // 制造身份错乱 (active A → ended B 末尾两张相同卡的根因).
+    const activeCard = log.querySelector(":scope > .turn-card.turn-active");
+    if (activeCard) {
+      const existingKey = activeCard.dataset.turnStart || "";
+      if (!key || !existingKey || existingKey === key) card = activeCard;
+    }
   }
   if (!card) {
     card = document.createElement("div");
@@ -3311,6 +3318,10 @@ function _ensureTurnCard() {
     card.dataset.createdAt = String(Date.now());
     card.dataset.createdReplay = String(!!state.isHistoryReplay);
     card.dataset.createdEarlier = String(!!state.earlierFragment);
+    // dataset.turnStart 在 append 之前设好 — 这样 MutationObserver 的
+    // dedup (childList 回调里读 dataset.turnStart) 一定能看到 key, 不会
+    // 因为"卡入 DOM 时还没 key"而漏 dedup.
+    if (key) card.dataset.turnStart = key;
     log.appendChild(card);
   }
   if (key) card.dataset.turnStart = key;
@@ -3642,6 +3653,8 @@ function _renderTurnSummary(evt) {
     card.dataset.createdReplay = String(!!state.isHistoryReplay);
     card.dataset.createdEarlier = String(!!state.earlierFragment);
     card.dataset.createdRoot = (root === $("chat-log")) ? "chat-log" : "earlierFragment";
+    // key 在 append 前设好 — MutationObserver dedup 入 DOM 即可见 key.
+    if (key) card.dataset.turnStart = key;
     root.appendChild(card);
   }
   if (key) card.dataset.turnStart = key;
