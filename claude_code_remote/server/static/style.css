@@ -2167,6 +2167,76 @@ body.is-pwa.has-session:has(#chat-input:focus) .chat-foot {
   font-size: 13px;
 }
 
+/* server-side 工具卡 — web_search / web_fetch / code_execution.
+   Anthropic API 端执行的, CCR 看不到中间进度, 只看到 "调了" → "完了".
+   样式: 紧凑, 比普通 tool-card 矮, 突出 query + 结果. */
+.server-tool-card {
+  align-self: flex-start;
+  width: min(720px, 100%);
+  background: var(--bg-elev, #f6f8fa);
+  border: 1px solid var(--border-soft, rgba(125,125,125,.22));
+  border-left: 3px solid #d4a72c;   /* 黄色: server-side 标识 */
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+.server-tool-card.done {
+  border-left-color: #1f883d;       /* 绿色: 完成 */
+}
+.server-tool-card .st-head {
+  display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap;
+}
+.server-tool-card .st-icon { font-size: 15px; }
+.server-tool-card .st-name {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 12.5px;
+}
+.server-tool-card .st-query {
+  flex: 1; min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.server-tool-card .st-status {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.server-tool-card.pending .st-status {
+  color: #9a6700;
+  animation: st-pulse 1.4s ease-in-out infinite;
+}
+.server-tool-card.done .st-status { color: #1f883d; }
+@keyframes st-pulse {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 1; }
+}
+.server-tool-card .st-results {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.server-tool-card .st-result {
+  font-size: 12.5px;
+  color: var(--accent, #2563eb);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.server-tool-card .st-result:hover { text-decoration: underline; }
+.server-tool-card .st-result-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
 /* share_file 卡 — claude 调 mcp__ccr__share_file 时渲. 显眼文件分享 affordance,
    不混进 tool-group, 单独一行. */
 .share-file-card {

@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v176";
+const __CCR_APP_VER = "v177";
 
 const $ = (id) => document.getElementById(id);
 
@@ -20,6 +20,7 @@ const state = {
   toolById: new Map(),         // tool_use_id -> {card, partialInput, finalInput, resultEl}
   askuserById: new Map(),      // tool_use_id -> {card, questions, answers, submitted}
   shareFileById: new Map(),    // tool_use_id -> {card, populated} — mcp__ccr__share_file 卡
+  serverToolById: new Map(),   // server_tool_use_id -> {card, name, partialInput, finalInput, done} — server-side tool (web_search / web_fetch) 卡
   activeMsgId: null,           // 当前打开的 stream message id
   blocksByIdx: new Map(),      // stream message index -> {type, msgId|toolUseId}
   // 每个 session 的 DOM + 流式状态快照：切走时缓存，切回来直接复用，免 spinner 免重渲
@@ -2246,6 +2247,7 @@ function saveCurrentSessionCache() {
     toolById:         state.toolById,
     askuserById:      state.askuserById,
     shareFileById:    state.shareFileById,
+    serverToolById:   state.serverToolById,
     blocksByIdx:      state.blocksByIdx,
     firstSeq:         state.firstSeq,
     hasMoreHistory:   state.hasMoreHistory,
@@ -2295,6 +2297,7 @@ function restoreSessionCache(cached) {
   state.toolById        = cached.toolById;
   state.askuserById     = cached.askuserById || new Map();
   state.shareFileById   = cached.shareFileById || new Map();
+  state.serverToolById  = cached.serverToolById || new Map();
   state.blocksByIdx     = cached.blocksByIdx;
   state.activeMsgId     = null;    // 离开时若有未完成 message，msgId 失效；下条 message_start 会重置
   state.firstSeq        = cached.firstSeq;
@@ -2377,6 +2380,7 @@ async function enterChat(id, name, cwd, sessionState) {
     state.toolById.clear();
     state.askuserById.clear();
     state.shareFileById.clear();
+    state.serverToolById.clear();
     state.firstSeq = null;
     state.hasMoreHistory = false;
     state.maxSeq = 0;
@@ -5297,6 +5301,131 @@ function populateShareFileCard(entry, input) {
   entry.card.classList.remove("pending");
 }
 
+// ---------- server-side 工具卡 (web_search / web_fetch) ----------
+// Anthropic API 在用 server-side 工具时 emit 专门 content block:
+//   server_tool_use (模型决定调) → input_json_delta (query 拼出) →
+//   web_search_tool_result / web_fetch_tool_result (结果回来).
+// 这些不是本地 claude CLI 执行的, server 端那边 (api.anthropic.com) 干完
+// 把结果塞进 stream. 渲一张小巧的卡, 跟普通 tool-card 区分 (用 🌐 icon).
+const SERVER_TOOL_ICONS = {
+  web_search: "🔍",
+  web_fetch: "🌐",
+  code_execution: "⚙",
+};
+const SERVER_TOOL_RESULT_TYPES = new Set([
+  "web_search_tool_result", "web_fetch_tool_result",
+  "code_execution_tool_result",
+]);
+
+function ensureServerToolCard(toolUseId, name) {
+  let entry = state.serverToolById.get(toolUseId);
+  if (entry) return entry;
+  const root = chatRoot();
+  state.currentToolGroup = null;
+  const card = document.createElement("div");
+  card.className = "server-tool-card pending";
+  card.dataset.toolUseId = toolUseId;
+  const icon = SERVER_TOOL_ICONS[name] || "🌐";
+  card.innerHTML =
+    '<div class="st-head">'
+    +   '<span class="st-icon">' + escHTML(icon) + '</span>'
+    +   '<span class="st-name">' + escHTML(name || "server-tool") + '</span>'
+    +   '<span class="st-query"></span>'
+    +   '<span class="st-status">searching…</span>'
+    + '</div>'
+    + '<div class="st-results" hidden></div>';
+  root.appendChild(card);
+  chatScrollBottom();
+  entry = {
+    toolUseId,
+    card,
+    name: name || "server-tool",
+    partialInput: "",
+    finalInput: null,
+    queryEl: card.querySelector(".st-query"),
+    statusEl: card.querySelector(".st-status"),
+    resultsEl: card.querySelector(".st-results"),
+    done: false,
+  };
+  state.serverToolById.set(toolUseId, entry);
+  return entry;
+}
+
+function _serverToolQueryText(name, input) {
+  if (!input || typeof input !== "object") return "";
+  if (name === "web_search") return String(input.query || "");
+  if (name === "web_fetch") return String(input.url || "");
+  if (name === "code_execution") {
+    const c = input.code || input.command || "";
+    return String(c).split("\n")[0].slice(0, 80);
+  }
+  return JSON.stringify(input).slice(0, 80);
+}
+
+function refreshServerToolInput(entry) {
+  if (!entry) return;
+  let input = entry.finalInput;
+  if (!input && entry.partialInput) {
+    try { input = JSON.parse(entry.partialInput); } catch (_) { input = null; }
+  }
+  if (input) {
+    const q = _serverToolQueryText(entry.name, input);
+    if (q && entry.queryEl.textContent !== q) entry.queryEl.textContent = q;
+  } else if (entry.partialInput) {
+    entry.queryEl.textContent = entry.partialInput.slice(0, 80);
+  }
+}
+
+function attachServerToolResult(toolUseId, content) {
+  const entry = state.serverToolById.get(toolUseId);
+  if (!entry) return;
+  entry.done = true;
+  entry.card.classList.remove("pending");
+  entry.card.classList.add("done");
+  entry.resultsEl.hidden = false;
+  entry.resultsEl.innerHTML = "";
+  // content 可能是 array of {type, url, title, ...} 或 {type:"text", text}
+  const items = Array.isArray(content) ? content : [content];
+  let count = 0;
+  for (const it of items) {
+    if (!it || typeof it !== "object") continue;
+    // web_search_result: {type: "web_search_result", url, title, encrypted_content?}
+    if (it.type === "web_search_result" || it.url) {
+      const a = document.createElement("a");
+      a.className = "st-result";
+      a.href = it.url || "#";
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = it.title || it.url || "(result)";
+      a.title = it.url || "";
+      entry.resultsEl.appendChild(a);
+      count++;
+    } else if (it.type === "text" && it.text) {
+      // web_fetch 结果常是单个 text block, 文档全文 — 太长, 只显示一行
+      const div = document.createElement("div");
+      div.className = "st-result-text";
+      const preview = String(it.text).slice(0, 200);
+      div.textContent = preview + (it.text.length > 200 ? "…" : "");
+      entry.resultsEl.appendChild(div);
+      count++;
+    }
+  }
+  if (count === 0) {
+    // 兜底: 总归显示点什么, e.g. error 或未知 shape
+    const div = document.createElement("div");
+    div.className = "st-result-text";
+    try { div.textContent = JSON.stringify(content).slice(0, 200); }
+    catch (_) { div.textContent = "(result)"; }
+    entry.resultsEl.appendChild(div);
+    count = 1;
+  }
+  entry.statusEl.textContent = "✓ " + count + (count === 1 ? " result" : " results");
+}
+
+function isServerToolResultType(t) {
+  return SERVER_TOOL_RESULT_TYPES.has(t);
+}
+
 // ---------- 权限请求卡片 ----------
 function showPermissionRequest(evt) {
   const root = chatRoot();
@@ -5669,6 +5798,20 @@ function handleStreamEvent(ev) {
         renderToolArgs(entry);
       }
       state.blocksByIdx.set(idx, { type: "tool_use", toolUseId: cb.id });
+    } else if (cb.type === "server_tool_use") {
+      // server-side 工具 (web_search / web_fetch / code_execution).
+      // 模型决定调 → 渲一张小卡, 等 query 流完 + result 回来填.
+      const ent = ensureServerToolCard(cb.id, cb.name);
+      if (cb.input && typeof cb.input === "object" && Object.keys(cb.input).length) {
+        ent.finalInput = cb.input;
+        refreshServerToolInput(ent);
+      }
+      state.blocksByIdx.set(idx, { type: "server_tool_use", toolUseId: cb.id });
+      hideThinkingPlaceholder();
+    } else if (isServerToolResultType(cb.type)) {
+      // server-side 工具结果块. tool_use_id 指向之前的 server_tool_use.
+      attachServerToolResult(cb.tool_use_id, cb.content);
+      state.blocksByIdx.set(idx, { type: "server_tool_result", toolUseId: cb.tool_use_id });
     }
     return;
   }
@@ -5697,6 +5840,15 @@ function handleStreamEvent(ev) {
           entry.finalInput = JSON.parse(entry.partialInput);
         } catch (e) { /* still partial */ }
         renderToolArgs(entry);
+      }
+    } else if (d.type === "input_json_delta" && block.type === "server_tool_use") {
+      hideThinkingPlaceholder();
+      const ent = state.serverToolById.get(block.toolUseId);
+      if (ent) {
+        ent.partialInput += d.partial_json || "";
+        try { ent.finalInput = JSON.parse(ent.partialInput); }
+        catch (_) { /* still partial */ }
+        refreshServerToolInput(ent);
       }
     }
     // 实时 token 估算（Claude CLI 风格）：按 partial 文本字符数 / 2.8 估，最终 message_delta 真实值覆盖
@@ -5740,6 +5892,17 @@ function handleAssistantMessage(msg) {
         renderMDIntoBubble(bubble, b.text);
         if (id) state.msgById.set(id, { bubble, text: b.text });
       }
+    } else if (b.type === "server_tool_use") {
+      // backlog replay: server-side tool 块.
+      const ent = ensureServerToolCard(b.id, b.name);
+      if (b.input && typeof b.input === "object") {
+        ent.finalInput = b.input;
+        refreshServerToolInput(ent);
+      }
+      continue;
+    } else if (isServerToolResultType(b.type)) {
+      attachServerToolResult(b.tool_use_id, b.content);
+      continue;
     } else if (b.type === "tool_use") {
       if (isAskUserTool(b.name)) {
         // 最终 input 到位，渲染问题/选项；live 路径上 ensureAskUserCard 已经在 content_block_start 时建好
