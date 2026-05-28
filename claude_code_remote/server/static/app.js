@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v181";
+const __CCR_APP_VER = "v182";
 
 const $ = (id) => document.getElementById(id);
 
@@ -2357,9 +2357,7 @@ async function enterChat(id, name, cwd, sessionState) {
     state._turnCardObserver = null;
   }
   state._turnCard = null;
-  // 重置 dup 诊断: 上 session 的 dup 报告跟新 session 不相关; banner 也清.
-  _dupDiagBuffer.length = 0;
-  _hideDupDiagBanner();
+  // 切 session 断旧 dedup observer (新 session enterChat 里重装).
   if (_turnCardMutationObserver) {
     _turnCardMutationObserver.disconnect();
     _turnCardMutationObserver = null;
@@ -2429,8 +2427,7 @@ async function enterChat(id, name, cwd, sessionState) {
   if (cached) {
     state.sessionCache.delete(id);   // LRU：拿出来用，离开时再放回
     restoreSessionCache(cached);
-    _installTurnCardMutationDiag();
-    _assertNoDupTurnCards("cache-restore");
+    _installTurnCardDedupObserver();
     // cwd 显示用最新 home 数据（一般不变，但兜底）. 用 abbreviateHome 保留 ~,
     // 由 CSS .meta-cwd dir=rtl 处理截断 — 不能预截 (会丢 ~).
     state.cwdShort = abbreviateHome(cwd || "");
@@ -2495,8 +2492,8 @@ async function enterChat(id, name, cwd, sessionState) {
   $("chat-log").innerHTML = "";
   state.currentToolGroup = null;
   state.earlierFragment = null;
-  // dup 诊断 observer — chat-log 任何 .turn-card 增改都立即扫一次.
-  _installTurnCardMutationDiag();
+  // turn-card 实时去重 observer.
+  _installTurnCardDedupObserver();
   // 进 chat 先显示 spinner 遮挡 chat-log. 后台 backlog + autoFill 渲到
   // chat-log (用户看不见, overlay 盖着). autoFill 满 2 屏后 hide overlay,
   // 用户一次看到完整 2 屏内容.
@@ -2548,7 +2545,6 @@ async function enterChat(id, name, cwd, sessionState) {
     // 一次兜底.
     _dedupeTurnCardsByKey();
     _dedupeAdjacentTurnCards();   // settle 点: 收掉 key 不同的相邻重复
-    _assertNoDupTurnCards("after-idb-replay");
     // 立即 fade-out spinner — 缓存内容已经渲, 用户可见. backlog 还会来,
     // 走 dedupe 静默合入.
     const _ld = $("chat-loading");
@@ -3315,13 +3311,11 @@ function _ensureTurnCard() {
     card.innerHTML = `<span class="turn-card-icon"></span>`
       + `<span class="turn-card-tokens">↓0t</span>`
       + `<span class="turn-card-time">0s</span>`;
+    // createdBy: 相邻去重时用来判断留哪张 (留 _renderTurnSummary 的真卡,
+    // 删 _ensureTurnCard 的 live 幽灵). 是修复逻辑的一部分, 不是纯调试.
     card.dataset.createdBy = "_ensureTurnCard";
-    card.dataset.createdAt = String(Date.now());
-    card.dataset.createdReplay = String(!!state.isHistoryReplay);
-    card.dataset.createdEarlier = String(!!state.earlierFragment);
-    // dataset.turnStart 在 append 之前设好 — 这样 MutationObserver 的
-    // dedup (childList 回调里读 dataset.turnStart) 一定能看到 key, 不会
-    // 因为"卡入 DOM 时还没 key"而漏 dedup.
+    // dataset.turnStart 在 append 之前设好 — MutationObserver 的 dedup
+    // (childList 回调里读 dataset.turnStart) 一定能看到 key.
     if (key) card.dataset.turnStart = key;
     log.appendChild(card);
   }
@@ -3405,149 +3399,12 @@ function _finalizeTurnCard() {
   }
 }
 
-// 诊断: 检查 chat-log 是否有同 key 的 turn-card. 有就 console.error
-// + 在 UI 顶部弹个可点的红色 banner (累计计数 + 一键 copy 完整 JSON
-// 到剪贴板). 不抛, 不阻塞. _dupDiagBuffer 在 enterChat 清零.
-const _dupDiagBuffer = [];
-let _dupDiagBannerEl = null;
-
-function _cardSnap(c, log) {
-  return {
-    idx: Array.from(log.children).indexOf(c),
-    key: c.dataset.turnStart || null,
-    active: c.classList.contains("turn-active"),
-    tokens: c.querySelector(".turn-card-tokens")?.textContent || "",
-    time: c.querySelector(".turn-card-time")?.textContent || "",
-    iconTier: c.querySelector(".turn-card-icon")?.dataset.tier || "",
-    // 调试: 这张卡是谁建的 / 何时建的 / 当时 state 状态
-    createdBy: c.dataset.createdBy || "?",
-    createdAt: c.dataset.createdAt || "?",
-    createdReplay: c.dataset.createdReplay || "?",
-    createdEarlier: c.dataset.createdEarlier || "?",
-    createdRoot: c.dataset.createdRoot || "?",
-  };
-}
-
-function _showDupDiagBanner() {
-  if (!_dupDiagBannerEl) {
-    const el = document.createElement("div");
-    el.id = "dup-diag-banner";
-    el.style.cssText =
-      "position:fixed;top:12px;right:12px;z-index:9999;"
-      + "background:#cf222e;color:#fff;padding:8px 14px;border-radius:8px;"
-      + "font:600 13px ui-monospace,SFMono-Regular,Menlo,monospace;"
-      + "box-shadow:0 6px 18px rgba(0,0,0,0.25);cursor:pointer;"
-      + "max-width:380px;line-height:1.4;";
-    el.title = "Click to copy full diagnostic JSON to clipboard";
-    el.addEventListener("click", _copyDupDiag);
-    document.body.appendChild(el);
-    _dupDiagBannerEl = el;
-  }
-  _dupDiagBannerEl.textContent =
-    "🐛 turn-card dup × " + _dupDiagBuffer.length + " (click to copy diag)";
-}
-
-function _hideDupDiagBanner() {
-  if (_dupDiagBannerEl) {
-    _dupDiagBannerEl.remove();
-    _dupDiagBannerEl = null;
-  }
-}
-
-async function _copyDupDiag() {
-  const log = $("chat-log");
-  const sid = state.sessionId;
-  const sess = sid ? state.sessionsById.get(sid) : null;
-  const data = {
-    ts: new Date().toISOString(),
-    appVer: typeof __CCR_APP_VER !== "undefined" ? __CCR_APP_VER : "?",
-    sessionId: sid,
-    sessionState: sess && sess.state || "?",
-    appOnline: sess && sess.app_online,
-    appId: sess && sess.app_id,
-    isHistoryReplay: state.isHistoryReplay,
-    earlierFragmentSet: !!state.earlierFragment,
-    maxSeq: state.maxSeq,
-    dedupeBoundary: state.dedupeBoundary,
-    cacheHit: state.cacheHit,
-    turnStartAt: state.turnStartAt,
-    turnEndAt: state.turnEndAt,
-    currentMsgModel: state.currentMsgModel,
-    dupEvents: _dupDiagBuffer,
-    currentCards: log
-      ? Array.from(log.querySelectorAll(":scope > .turn-card"))
-          .map(c => _cardSnap(c, log))
-      : [],
-  };
-  const json = JSON.stringify(data, null, 2);
-  try {
-    await navigator.clipboard.writeText(json);
-    if (_dupDiagBannerEl) {
-      _dupDiagBannerEl.textContent = "✓ copied — paste to dev";
-      setTimeout(() => {
-        if (_dupDiagBannerEl) _showDupDiagBanner();
-      }, 2000);
-    }
-  } catch (e) {
-    console.error("[CCR] copy diag failed", e);
-    console.log("[CCR] diag JSON:\n" + json);
-    alert("Clipboard copy failed. Full JSON dumped to console.");
-  }
-}
-
-function _assertNoDupTurnCards(hint) {
-  const log = $("chat-log");
-  if (!log) return;
-  const cards = Array.from(log.querySelectorAll(":scope > .turn-card"));
-  const byKey = new Map();      // dataset.turnStart → card
-  const byContent = new Map();  // "tokens|time" → card
-  for (const c of cards) {
-    const k = c.dataset.turnStart || "(no-key)";
-    const content = (c.querySelector(".turn-card-tokens")?.textContent || "")
-      + "|" + (c.querySelector(".turn-card-time")?.textContent || "");
-    // 1) 同 key dup (老逻辑)
-    if (byKey.has(k) && k !== "(no-key)") {
-      _reportDup(hint + ":same-key", byKey.get(k), c, log);
-    } else {
-      byKey.set(k, c);
-    }
-    // 2) 同内容 dup (tokens+time 一样) — key 可能不同! 这是按 key dedup
-    //    根本碰不到的情况, 很可能就是一直没解决的真凶.
-    if (content !== "|" && byContent.has(content)) {
-      const prev = byContent.get(content);
-      // 同 key 的已经在上面报过了, 这里只报 key 不同的内容重复
-      if ((prev.dataset.turnStart || "") !== (c.dataset.turnStart || "")) {
-        _reportDup(hint + ":same-content-diff-key", prev, c, log);
-      }
-    } else {
-      byContent.set(content, c);
-    }
-  }
-}
-
-function _reportDup(hint, first, second, log) {
-  const info = {
-    hint,
-    firstKey: first.dataset.turnStart || "(no-key)",
-    secondKey: second.dataset.turnStart || "(no-key)",
-    first: _cardSnap(first, log),
-    second: _cardSnap(second, log),
-    totalCards: log.querySelectorAll(":scope > .turn-card").length,
-    isHistoryReplay: state.isHistoryReplay,
-    earlierFragmentSet: !!state.earlierFragment,
-    turnStartAt: state.turnStartAt,
-    turnEndAt: state.turnEndAt,
-  };
-  console.error("[CCR] DUPLICATE turn-card", info);
-  _dupDiagBuffer.push(info);
-  _showDupDiagBanner();
-}
-
-// Live observer: chat-log 任何 .turn-card 增减都立即触发. dup 出现那一刻
-// (1) 记录到 diag buffer (hint="live-mutation") (2) 立即 dedupe — 不等
-// backlog_done 才清, 不给用户肉眼可见的窗口看到两张.
+// Live dedup observer: chat-log 加进新 .turn-card 时立即去重, 不留 visible
+// 窗口. 同 key 去重任何时候都安全; 相邻去重 (收 key 不同的幽灵卡) 只在
+// live 模式 (非 backlog 重放) 跑 — backlog 期间卡会"暂时相邻"(气泡还没到),
+// 那时跑会误删真卡又被重建 → 死循环.
 let _turnCardMutationObserver = null;
-function _installTurnCardMutationDiag() {
+function _installTurnCardDedupObserver() {
   if (_turnCardMutationObserver) return;
   const log = $("chat-log");
   if (!log) return;
@@ -3561,9 +3418,11 @@ function _installTurnCardMutationDiag() {
       }
       if (touched) break;
     }
-    if (touched) {
-      _assertNoDupTurnCards("live-mutation");
-      _dedupeTurnCardsByKey();   // ← 立即 dedupe, 不留 visible 窗口
+    if (!touched) return;
+    _dedupeTurnCardsByKey();   // 同 key 去重 (任何时候安全)
+    // 相邻去重只在 live 模式 — 收 /resume 迟到的 active 幽灵卡 (key 不同).
+    if (!state.isHistoryReplay && !state.earlierFragment) {
+      _dedupeAdjacentTurnCards();
     }
   });
   _turnCardMutationObserver.observe(log, { childList: true });
@@ -3630,6 +3489,16 @@ function _dedupeAdjacentTurnCards() {
       else if (aActive && !bActive) drop = a;   // 留 finalized
       else if (bActive && !aActive) drop = b;
       else drop = b;                             // 都一样 → 删后一张
+      // 删的若是当前 active card (state._turnCard), 必须断它的
+      // MutationObserver + 清 ref — 否则那个 observer 会在下次 mutation 把
+      // 被删的卡 appendChild 回来 (复活), 形成 删↔复活 死循环.
+      if (drop === state._turnCard) {
+        if (state._turnCardObserver) {
+          state._turnCardObserver.disconnect();
+          state._turnCardObserver = null;
+        }
+        state._turnCard = null;
+      }
       drop.remove();
       removed = true;
       break;   // children 变了, 重新从头扫
@@ -3711,11 +3580,8 @@ function _renderTurnSummary(evt) {
       `<span class="turn-card-icon">${iconHTML}</span>`
       + `<span class="turn-card-tokens">↓${_fmtTok(tok)}</span>`
       + `<span class="turn-card-time">${formatDuration(duration)}</span>`;
+    // createdBy: 相邻去重判断留哪张用 (留这张真 summary 卡).
     card.dataset.createdBy = "_renderTurnSummary";
-    card.dataset.createdAt = String(Date.now());
-    card.dataset.createdReplay = String(!!state.isHistoryReplay);
-    card.dataset.createdEarlier = String(!!state.earlierFragment);
-    card.dataset.createdRoot = (root === $("chat-log")) ? "chat-log" : "earlierFragment";
     // key 在 append 前设好 — MutationObserver dedup 入 DOM 即可见 key.
     if (key) card.dataset.turnStart = key;
     root.appendChild(card);
@@ -5763,10 +5629,8 @@ function handleEvent(evt, ts) {
       autoFillInitialCards();
       // 同 key 重复卡去重 (applyTurnState live path + _renderTurnSummary
       // replay path 可能给同一 turn 各建一张, 跨 root 漏 dedupe).
-      _assertNoDupTurnCards("backlog-done-before-dedupe");
       _dedupeTurnCardsByKey();
       _dedupeAdjacentTurnCards();   // settle 点: 收掉 key 不同的相邻重复
-      _assertNoDupTurnCards("backlog-done-after-dedupe");
       // 兜底: session 已结束 (state 非 busy/running) 时, 清掉因为
       // turn_state(end) 缺失而残留的 .turn-active turn-card.
       _reconcileTurnCardsAfterBacklog();
