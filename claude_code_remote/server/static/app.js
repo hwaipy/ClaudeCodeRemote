@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v177";
+const __CCR_APP_VER = "v178";
 
 const $ = (id) => document.getElementById(id);
 
@@ -640,7 +640,21 @@ function setSortMode(mode) {
       : "Sorted by last-active — click for creation date";
   }
 }
+// 用户 inline rename 进行中 (contenteditable focus + .editing class)? 任何
+// 会 innerHTML 重置 list 的 render 都得跳过, 否则编辑框被吹掉 → 失焦 +
+// 内容丢失. 跳过的 render 请求标记为 deferred, 提交/取消 rename 后重新跑一次
+// 把队列里堆的 state 更新 (session_state / 新 session 进来 / 排序变化等) 落地.
+let _renderListPending = false;
+function _isAnyCardEditing() {
+  return !!document.querySelector(".session-card .name.editing");
+}
+
 function renderSessionList() {
+  if (_isAnyCardEditing()) {
+    _renderListPending = true;   // 编辑完后再渲
+    return;
+  }
+  _renderListPending = false;
   const listActive   = $("session-list-active");
   const listStash    = $("session-list-stash");
   const listInactive = $("session-list-inactive");
@@ -796,6 +810,15 @@ function renderOneCard(s, container, section) {
       nameEl.classList.remove("editing");
       nameEl.removeEventListener("keydown", onKey);
       nameEl.removeEventListener("blur", onBlur);
+      // 编辑期间 deferred 掉的 render 请求 — 现在跑一遍, 把堆的 state
+      // 更新 (其它 session 状态变 / 排序变 / 新进来 / 等) 落 DOM.
+      if (_renderListPending) {
+        // 用 microtask 推一步, 避免在 commit 内部 (我们正在用 nameEl)
+        // 同步重写 list innerHTML — 防 contenteditable 的 blur 还没 settle.
+        Promise.resolve().then(() => {
+          if (!_isAnyCardEditing()) renderSessionList();
+        });
+      }
     }
     async function commit() {
       if (settled) return;

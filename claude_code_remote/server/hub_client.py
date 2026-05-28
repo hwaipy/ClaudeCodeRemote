@@ -83,14 +83,31 @@ class HubClient:
             backoff = min(backoff * 1.7, 30.0)
 
     async def _connect_once(self) -> None:
+        import os
         url = _ws_url(self.hub_url) + f"?token={self.device_token}"
         log.info("hub_client connecting %s", url)
         # max_size 默认 1 MiB — claude 的大 tool_result / 大 diff 经 base64
         # 编码 (+33%) 经常超 1MB → 1009 message too big → 整条 tunnel 断开.
         # 调到 64 MiB 兜底 (跟 hub 端 starlette WebSocket 默认对齐).
-        async with websockets.connect(url, ping_interval=20,
-                                       ping_timeout=15,
-                                       max_size=64 * 1024 * 1024) as ws:
+        kwargs = {
+            "ping_interval": 20,
+            "ping_timeout": 15,
+            "max_size": 64 * 1024 * 1024,
+        }
+        # CCR_HUB_NO_PROXY=1: 显式禁用 websockets 自动从环境/系统检测代理.
+        # 用例: macOS 上 mihomo / Clash 做透明 HTTPS 拦截 (自签 CA), Python 不
+        # 认 cert. 设这个 env 让 websockets 直连 hub, 不走代理.
+        if os.environ.get("CCR_HUB_NO_PROXY", "").strip() in ("1", "true", "yes"):
+            kwargs["proxy"] = None
+        # CCR_HUB_INSECURE=1: 跳过 TLS 证书校验. 同样兜底 mihomo 拦截或 hub
+        # 用自签证书的场景. 默认 0 — 不开就走系统 CA 链.
+        if os.environ.get("CCR_HUB_INSECURE", "").strip() in ("1", "true", "yes"):
+            import ssl as _ssl
+            ctx = _ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = _ssl.CERT_NONE
+            kwargs["ssl"] = ctx
+        async with websockets.connect(url, **kwargs) as ws:
             # hello
             hello = tp.Control(
                 stream_id="*",
