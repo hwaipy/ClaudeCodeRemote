@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v182";
+const __CCR_APP_VER = "v183";
 
 const $ = (id) => document.getElementById(id);
 
@@ -315,6 +315,22 @@ function toggleTheme() {
 const _IS_PWA = window.matchMedia("(display-mode: standalone)").matches
              || window.navigator.standalone === true;
 if (_IS_PWA) document.body.classList.add("is-pwa");
+
+// ---------- 外链统一在新 tab / 外部浏览器打开 ----------
+// 聊天里渲染的 http(s) 链接 (markdown autolink / server-tool 结果 / help /
+// onboarding 等) 一律新开. PWA standalone 模式下 <a target="_blank"> 经常
+// 被 webview 吞掉 → 在当前 PWA 里导航走 (整个 app 被替换), 体验很差.
+// 用一个 delegated click handler 统一拦截外链, 强制 window.open(_blank),
+// 覆盖所有来源 (不依赖各处记得加 target). 站内 #hash / 相对路径 (OAuth
+// start 链接等) 不 http(s):// 开头, 不拦.
+document.addEventListener("click", (e) => {
+  const a = e.target && e.target.closest && e.target.closest("a[href]");
+  if (!a) return;
+  const href = a.getAttribute("href") || "";
+  if (!/^https?:\/\//i.test(href)) return;   // 只管外链
+  e.preventDefault();
+  window.open(href, "_blank", "noopener,noreferrer");
+});
 
 // ---------- 视图切换 ----------
 function showView(name) {
