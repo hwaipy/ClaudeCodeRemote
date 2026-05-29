@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v183";
+const __CCR_APP_VER = "v184";
 
 const $ = (id) => document.getElementById(id);
 
@@ -729,9 +729,14 @@ function renderOneCard(s, container, section) {
   // the green-glow card border — no text label.
   const showBadge = s.state === "waiting_permission"
                  || s.state === "needs_input";
+  // 未读: 跑过一轮且结束 (idle/finished) 但用户还没看过这次结果.
+  // busy / 待批准 / 待输入 有自己的视觉, 不叠蓝点. seen_at 服务端维护.
+  const unseen = (s.state === "idle" || s.state === "finished")
+              && (s.last_activity_at || 0) > (s.seen_at || 0);
   const el = document.createElement("div");
   el.className = "session-card state-" + (badge.cls || "idle")
                + (isBusy ? " session-busy" : "")
+               + (unseen ? " unseen" : "")
                + (isCurrent ? " is-current" : "");
   el.setAttribute("data-id", s.id);
   // Absolute path, but $HOME → "~". Detect /home/<user> and /Users/<user>
@@ -775,6 +780,7 @@ function renderOneCard(s, container, section) {
      </span>`
   ) : "";
   el.innerHTML = `
+    <span class="unseen-dot" aria-label="unread" title="未读: 有你还没看过的新结果"></span>
     <button class="card-menu-btn" aria-label="More" title="More">⋯</button>
     <div class="card-menu" hidden role="menu">${menuItemsHtml}</div>
     <div class="session-row1">
@@ -1236,6 +1242,21 @@ function _optimisticSessionUpdate(sid, patch) {
   if (!cur) return;
   state.sessionsById.set(sid, Object.assign({}, cur, patch));
   renderSessionList();
+}
+
+// 标记 session 已读: 乐观把本地 seen_at 提到 last_activity_at (立即清蓝点),
+// 后台 POST 落服务端 (跨设备). tmp- session 不发 (还没真存在).
+function _markSessionSeen(sid) {
+  if (!sid || sid.startsWith("tmp-")) return;
+  const cur = state.sessionsById.get(sid);
+  if (cur) {
+    const la = cur.last_activity_at || 0;
+    if ((cur.seen_at || 0) < la) {
+      _optimisticSessionUpdate(sid, { seen_at: la });
+    }
+  }
+  api(`/api/sessions/${encodeURIComponent(sid)}/seen`, { method: "POST" })
+    .catch(() => { /* 静默: 下次 /api/sessions 刷新会校准 */ });
 }
 
 function _withSortKey(msg, existing) {
@@ -2388,6 +2409,10 @@ async function enterChat(id, name, cwd, sessionState) {
     state.ws = null;
   }
   state.sessionId = id;
+  // 标记已读: 进 chat 即视为看过 → 清未读蓝点. 乐观把本地 seen_at 设成
+  // last_activity_at 立即消点, 后台 POST 落服务端 (跨设备同步). tmp- session
+  // 还没真存在, 不发.
+  _markSessionSeen(id);
   // 切 sid 第一时间 restore chat-input 草稿 — 避免上 session 输入残留. 任何
   // 后续 enterChat 早 return 路径 (tmp / cache hit / cache miss) 都已经覆盖.
   restoreChatInputDraft(id);

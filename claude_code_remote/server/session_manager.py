@@ -134,6 +134,9 @@ class Session:
     # 这两个值绑死到 session, resume 时同样透传, 保证整段会话风格一致.
     model:  str = ""    # e.g. "sonnet" / "opus" / "haiku" / 完整 id / ""
     effort: str = ""    # one of low/medium/high/xhigh/max / ""
+    # 已读基线: 用户最后一次进 chat 看这个 session 的时刻 (server 端维护,
+    # 跨设备). 未读判据: state idle/finished 且 last_activity_at > seen_at.
+    seen_at: float = 0.0
 
     def envelope(self, evt: dict[str, Any]) -> dict[str, Any]:
         self.seq += 1
@@ -172,6 +175,7 @@ class Session:
             # 空=Default) 不同 — 当 self.model="" 时, 这是"实际跑了什么".
             # 前端 chat-menu 的 Default 选项文本加注用这个值.
             "cur_model": self.cur_model,
+            "seen_at": self.seen_at,
         }
 
 
@@ -227,6 +231,7 @@ class SessionManager:
                 stashed_at=r.get("stashed_at"),
                 model=r.get("model") or "",
                 effort=r.get("effort") or "",
+                seen_at=r.get("seen_at") or 0.0,
             )
             sess.seq = await db.max_seq(r["id"])
             async with self._lock:
@@ -275,10 +280,14 @@ class SessionManager:
             extra_args=_build_cli_extra_args(model, effort),
         )
         await proc.start()
+        _now = time.time()
         sess = Session(
             id=local_id, cwd=cwd, name=name or "untitled",
-            created_at=time.time(), proc=proc,
+            created_at=_now, proc=proc,
+            last_activity_at=_now,   # 跟 seen_at 精确相等 — 否则 dataclass
+                                     # 默认 time.time() 会晚几 µs → 误判未读
             model=model, effort=effort,
+            seen_at=_now,            # 基线: 新建即视为已读, 跑完一轮才变未读
         )
         await db.insert_session(local_id, sess.name, cwd, sess.created_at,
                                 model=model, effort=effort)
@@ -373,6 +382,18 @@ class SessionManager:
             return False
         sess.name = name
         await db.update_name(sess_id, name)
+        self._broadcast_status(sess)
+        return True
+
+    async def mark_seen(self, sess_id: str) -> bool:
+        """用户进 chat 看了 → 标记已读. 更新 DB + 内存 seen_at, 广播
+        session_state 让所有设备的 home 蓝点同步消失."""
+        async with self._lock:
+            sess = self.sessions.get(sess_id)
+        if not sess:
+            return False
+        seen = await db.mark_seen(sess_id)
+        sess.seen_at = seen
         self._broadcast_status(sess)
         return True
 

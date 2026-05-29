@@ -237,6 +237,10 @@ def _norm_session(payload: dict) -> dict:
     # 自定义 endpoint 来决定 model 选择 UI.
     if "cur_model" in payload:
         out["cur_model"] = payload.get("cur_model") or ""
+    # seen_at: server 端维护的已读基线. SPA 用 (state idle/finished 且
+    # last_active > seen_at) 判未读蓝点. 跨设备一致 (所有设备经 hub).
+    if "seen_at" in payload:
+        out["seen_at"] = payload.get("seen_at")
     return out
 
 

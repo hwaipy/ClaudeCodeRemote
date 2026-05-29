@@ -151,6 +151,7 @@ class ForwardMiddleware(BaseHTTPMiddleware):
                     "is_inactive": bool(s.get("is_inactive")),
                     "pending_permissions": int(s.get("pending_permissions") or 0),
                     "needs_action_detail": s.get("needs_action_detail"),
+                    "seen_at": s.get("seen_at"),
                     "app_id": s["app_id"],
                     "app_name": s.get("app_name")
                                  or app_name_by_id.get(s["app_id"], ""),

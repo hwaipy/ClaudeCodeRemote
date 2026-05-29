@@ -802,6 +802,22 @@ input:focus, textarea:focus { border-color: var(--accent); }
 }
 .session-card[hidden] { display: none; }   /* search filter relies on this */
 
+/* 未读蓝点: 卡片左上角小实心圆. 仅 .session-card.unseen 时显示. 表示
+   "跑完了但你还没看过这次结果" — seen_at 服务端维护跨设备. */
+.session-card .unseen-dot { display: none; }
+.session-card.unseen .unseen-dot {
+  display: block;
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2f81f7;   /* 蓝 — 跟 busy 绿 / waiting 黄区分 */
+  box-shadow: 0 0 0 2px var(--bg-card);   /* 描边把它从卡片边缘衬出来 */
+  z-index: 2;
+}
+
 /* Kebab menu button (top-right corner of each card) + its popup menu.
    Always visible (desktop + touch), tiny + dim so it doesn't compete
    with the card content. */

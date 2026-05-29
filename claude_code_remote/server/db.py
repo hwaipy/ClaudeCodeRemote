@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     deactivated_at      REAL,
     stashed_at          REAL,
     model               TEXT NOT NULL DEFAULT '',
-    effort              TEXT NOT NULL DEFAULT ''
+    effort              TEXT NOT NULL DEFAULT '',
+    seen_at             REAL NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -74,6 +75,11 @@ def _open() -> sqlite3.Connection:
         conn.execute("ALTER TABLE sessions ADD COLUMN model TEXT NOT NULL DEFAULT ''")
     if "effort" not in cols:
         conn.execute("ALTER TABLE sessions ADD COLUMN effort TEXT NOT NULL DEFAULT ''")
+    if "seen_at" not in cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN seen_at REAL NOT NULL DEFAULT 0")
+        # 老 session 基线: 把 seen_at 补成 last_activity_at, 避免迁移后历史
+        # session 全标成未读 (用户从没"看过", seen_at=0 < last_activity → 全蓝点).
+        conn.execute("UPDATE sessions SET seen_at=last_activity_at WHERE seen_at=0")
     return conn
 
 
@@ -101,10 +107,12 @@ async def _run(fn, *args, **kwargs):
 async def insert_session(sess_id: str, name: str, cwd: str, created_at: float,
                          model: str = "", effort: str = "") -> None:
     def _w() -> None:
+        # seen_at = created_at 作基线: 新 session 还没跑过 (last_activity_at ==
+        # created_at == seen_at), 不算未读. 跑完一轮后 last_activity_at 才 > seen_at.
         _conn.execute(
             "INSERT INTO sessions(id, name, cwd, created_at, last_activity_at, "
-            "model, effort) VALUES (?,?,?,?,?,?,?)",
-            (sess_id, name, cwd, created_at, created_at, model, effort),
+            "model, effort, seen_at) VALUES (?,?,?,?,?,?,?,?)",
+            (sess_id, name, cwd, created_at, created_at, model, effort, created_at),
         )
     await _run(_w)
 
@@ -133,6 +141,22 @@ async def update_activity(sess_id: str, ts: float | None = None) -> None:
         _conn.execute("UPDATE sessions SET last_activity_at=? WHERE id=?",
                        (ts, sess_id))
     await _run(_w)
+
+
+async def mark_seen(sess_id: str, ts: float | None = None) -> float:
+    """用户进 chat 看了这个 session → 标记已读. seen_at = max(给定 ts /
+    now, 当前 last_activity_at) — 保证 seen_at ≥ last_activity_at, 蓝点判据
+    (last_activity_at > seen_at) 立刻为假. 返回写入的 seen_at."""
+    now = ts if ts is not None else time.time()
+    def _w() -> float:
+        row = _conn.execute(
+            "SELECT last_activity_at FROM sessions WHERE id=?", (sess_id,)
+        ).fetchone()
+        la = (row[0] if row else 0) or 0
+        seen = max(now, la)
+        _conn.execute("UPDATE sessions SET seen_at=? WHERE id=?", (seen, sess_id))
+        return seen
+    return await _run(_w)
 
 
 async def mark_hibernated(sess_id: str) -> None:
@@ -208,7 +232,7 @@ async def mark_stashed(sess_id: str) -> None:
 
 _SESS_COLS = ("id", "claude_session_id", "name", "cwd", "created_at",
               "last_activity_at", "hibernated_at", "finished_at", "deleted_at",
-              "deactivated_at", "stashed_at", "model", "effort")
+              "deactivated_at", "stashed_at", "model", "effort", "seen_at")
 
 
 async def get_session(sess_id: str) -> dict[str, Any] | None:

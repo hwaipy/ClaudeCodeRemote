@@ -407,6 +407,16 @@ async def rename_session(session_id: str, req: RenameRequest) -> dict[str, Any]:
     return {"ok": True, "name": name}
 
 
+@router.post("/sessions/{session_id}/seen")
+async def mark_session_seen(session_id: str) -> dict[str, Any]:
+    """用户进 chat 看了这个 session → 标记已读 (清未读蓝点). seen_at 存
+    server 端, 广播 session_state 让所有设备同步. idempotent."""
+    ok = await manager.mark_seen(session_id)
+    if not ok:
+        raise HTTPException(404, "session not found")
+    return {"ok": True}
+
+
 @router.post("/sessions/{session_id}/activate")
 async def activate_session(session_id: str) -> dict[str, Any]:
     """Move a previously-deactivated session back into the Active bucket."""
