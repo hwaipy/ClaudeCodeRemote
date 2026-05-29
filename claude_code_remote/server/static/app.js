@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v184";
+const __CCR_APP_VER = "v185";
 
 const $ = (id) => document.getElementById(id);
 
@@ -2363,6 +2363,7 @@ function restoreSessionCache(cached) {
   state.firstSeq        = cached.firstSeq;
   state.hasMoreHistory  = cached.hasMoreHistory;
   state.maxSeq          = cached.maxSeq || 0;
+  state.seenSeqs        = new Set();
   state.turnStartAt     = cached.turnStartAt;
   state.turnEndAt       = cached.turnEndAt;
   state.curOutputTokens = cached.curOutputTokens || 0;
@@ -2446,6 +2447,7 @@ async function enterChat(id, name, cwd, sessionState) {
     state.firstSeq = null;
     state.hasMoreHistory = false;
     state.maxSeq = 0;
+    state.seenSeqs = new Set();
     state.cwdShort = "~";
     $("chat-log").innerHTML = "";
     $("chat-loading").hidden = true;
@@ -2503,6 +2505,7 @@ async function enterChat(id, name, cwd, sessionState) {
   state.firstSeq = null;
   state.hasMoreHistory = false;
   state.maxSeq = 0;
+  state.seenSeqs = new Set();
   state.cwdShort = abbreviateHome(cwd || "");
   state.totalCostUsd = 0;
   state.lastInputTokens = 0;
@@ -2575,6 +2578,10 @@ async function enterChat(id, name, cwd, sessionState) {
     // 内容. ws 后来的 envelope 走 dedupeBoundary 跳过同 seq.
     for (const r of rows) {
       try {
+        // 跨源幂等: 同 envelope seq 不重复 handleEvent. 防 IDB replay 与 WS
+        // backlog race 时同条 user_input / assistant 被渲两次.
+        if (r.seq && state.seenSeqs && state.seenSeqs.has(r.seq)) continue;
+        if (r.seq) state.seenSeqs.add(r.seq);
         handleEvent(r.event, r.ts);
         if (r.seq > (state.maxSeq || 0)) state.maxSeq = r.seq;
       } catch (e) {
@@ -4300,6 +4307,11 @@ function connectWS() {
         if (typeof _env.seq === "number" && _env.seq > 0) {
           // dedupe 仅针对本次连接前已处理的 seq；本次连接收到的事件（含 backlog 的 earlier 批）都放行
           if (_env.seq <= (state.dedupeBoundary || 0)) return;
+          // 跨源幂等: IDB replay 与 WS backlog 可能 race (WS 先 open 时
+          // dedupeBoundary=0, server backlog 全放; 之后 IDB rows 补回来).
+          // seenSeqs Set 兜底, 任意一路先把 seq 处理过, 另一路 skip.
+          if (state.seenSeqs && state.seenSeqs.has(_env.seq)) return;
+          if (state.seenSeqs) state.seenSeqs.add(_env.seq);
           if (_env.seq > (state.maxSeq || 0)) state.maxSeq = _env.seq;
         }
         // IDB write: 仅持久化 server 自己持久化的 envelope (有 seq>0).
