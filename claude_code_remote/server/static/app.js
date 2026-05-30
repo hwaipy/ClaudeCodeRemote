@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v186";
+const __CCR_APP_VER = "v187";
 
 const $ = (id) => document.getElementById(id);
 
@@ -900,10 +900,15 @@ function renderOneCard(s, container, section) {
         startRename();
       } else if (action === "delete") {
         if (!confirm(`Delete session "${s.name}"? This cannot be undone.`)) return;
+        // 乐观: 卡片立刻消失, 不等 server / WS session_deleted.
+        _optimisticSessionDelete(s.id);
+        idbDeleteSession(s.id);
         try {
           await api(`/api/sessions/${encodeURIComponent(s.id)}`, { method: "DELETE" });
-          idbDeleteSession(s.id);   // 顺便清掉浏览器 IDB 缓存
-        } catch (err) { alert("Delete failed: " + err.message); }
+          _deletedBackup.delete(s.id);   // 成功 → 丢掉备份
+        } catch (err) {
+          await _optimisticSessionDeleteRollback(s.id, err);
+        }
       } else if (action === "deactivate") {
         _optimisticSessionUpdate(s.id, { is_inactive: true, is_stash: false });
         try {
@@ -1243,6 +1248,51 @@ function _optimisticSessionUpdate(sid, patch) {
   renderSessionList();
 }
 
+// 乐观 spawn: POST /api/spawn 返回后立刻把新 session 写进 list, 不等
+// globalWS 推 session_state. 桌面双栏下用户立即看到新卡; WS 后到的
+// 权威 payload 会 merge 覆盖. r = {id, name, cwd, created_at, model, effort}
+function _optimisticSpawnAdd(r) {
+  if (!r || !r.id) return;
+  const now = r.created_at || (Date.now() / 1000);
+  const sess = {
+    id: r.id,
+    name: r.name || "untitled",
+    cwd: r.cwd || "",
+    state: "idle",
+    created_at: now,
+    last_activity_at: now,
+    seen_at: now,
+    pending_permissions: 0,
+    model: r.model || "",
+    effort: r.effort || "",
+  };
+  state.sessionsById.set(r.id, _withSortKey(sess, null));
+  renderSessionList();
+}
+
+// 乐观 delete: DOM / state 立刻去掉卡片, 不等 WS session_deleted.
+// 失败时 _optimisticSessionDeleteRollback 用备份恢复.
+const _deletedBackup = new Map();
+function _optimisticSessionDelete(sid) {
+  const cur = state.sessionsById.get(sid);
+  if (cur) _deletedBackup.set(sid, cur);
+  state.sessionsById.delete(sid);
+  state.sessionCache.delete(sid);
+  renderSessionList();
+}
+
+async function _optimisticSessionDeleteRollback(sid, err) {
+  const bak = _deletedBackup.get(sid);
+  if (bak) {
+    state.sessionsById.set(sid, bak);
+    _deletedBackup.delete(sid);
+    renderSessionList();
+  } else if (state.hubMode && typeof hubFetchSessions === "function") {
+    hubFetchSessions();
+  }
+  alert("Delete failed: " + ((err && err.message) || err));
+}
+
 // 标记 session 已读: 乐观把本地 seen_at 提到 last_activity_at (立即清蓝点),
 // 后台 POST 落服务端 (跨设备). tmp- session 不发 (还没真存在).
 function _markSessionSeen(sid) {
@@ -1383,6 +1433,9 @@ $("spawn-go").addEventListener("click", async () => {
       method: "POST",
       body: JSON.stringify(body),
     });
+    // 乐观: 立刻把新 session 写进 list, 不等 globalWS session_state 推达.
+    // hub mode 下 app_id 等字段先空, WS 后到再 merge 补全 (handleGlobalMsg).
+    _optimisticSpawnAdd(r);
     state.cwd = cwd;
     // 每个 server 各存自己 last cwd (per-app key); 老的全局 ccr.cwd 不再写,
     // 但保留 read 兼容 (没存过 per-app 时 fallback 到 "~").
