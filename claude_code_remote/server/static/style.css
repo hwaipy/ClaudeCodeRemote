@@ -802,20 +802,16 @@ input:focus, textarea:focus { border-color: var(--accent); }
 }
 .session-card[hidden] { display: none; }   /* search filter relies on this */
 
-/* 未读蓝点: 卡片左上角小实心圆. 仅 .session-card.unseen 时显示. 表示
+/* 未读: 不增加新元素, 直接把已有的 .state-dot 由灰/空心改成蓝实心.
+   仅 idle / finished 才会被 JS 标 .unseen (busy/waiting/needs-input 状态色
+   优先级更高, 这里只覆盖灰系状态的两种).
    "跑完了但你还没看过这次结果" — seen_at 服务端维护跨设备. */
-.session-card .unseen-dot { display: none; }
-.session-card.unseen .unseen-dot {
-  display: block;
-  position: absolute;
-  top: 7px;
-  left: 7px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #2f81f7;   /* 蓝 — 跟 busy 绿 / waiting 黄区分 */
-  box-shadow: 0 0 0 2px var(--bg-card);   /* 描边把它从卡片边缘衬出来 */
-  z-index: 2;
+.session-card.unseen.state-idle .state-dot,
+.session-card.unseen.state-hibernated .state-dot,
+.session-card.unseen.state-finished .state-dot {
+  background: #2f81f7;
+  border: 0;
+  width: 8px; height: 8px;
 }
 
 /* Kebab menu button (top-right corner of each card) + its popup menu.

@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v185";
+const __CCR_APP_VER = "v186";
 
 const $ = (id) => document.getElementById(id);
 
@@ -780,7 +780,6 @@ function renderOneCard(s, container, section) {
      </span>`
   ) : "";
   el.innerHTML = `
-    <span class="unseen-dot" aria-label="unread" title="未读: 有你还没看过的新结果"></span>
     <button class="card-menu-btn" aria-label="More" title="More">⋯</button>
     <div class="card-menu" hidden role="menu">${menuItemsHtml}</div>
     <div class="session-row1">

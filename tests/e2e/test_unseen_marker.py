@@ -67,8 +67,11 @@ def _enter_home(page):
 
 
 def test_frontend_unseen_dot_logic(logged_in_page, base_url, test_token):
-    """前端: idle + last_activity_at > seen_at → 卡片有 .unseen + 蓝点显示;
-    busy / 已读 / 没跑过 → 无."""
+    """前端: idle + last_activity_at > seen_at → 卡片 .unseen + state-dot 变蓝;
+    busy / 已读 / 没跑过 → 不变蓝.
+
+    蓝色复用同一颗 .state-dot 元素 (idle/finished 默认是空心/灰, 加 .unseen
+    时覆盖为蓝实心), 不增加新的 UI 元素."""
     page = logged_in_page
     sid = api_spawn(base_url, test_token, "/tmp", "dot-logic")
     try:
@@ -80,42 +83,59 @@ def test_frontend_unseen_dot_logic(logged_in_page, base_url, test_token):
             const base = (state.sessionsById.get(sid)) || {{
               id: sid, name: 'x', cwd: '/tmp', created_at: 1000,
             }};
+            // 蓝色定义: state-dot background 是 #2f81f7 (47,129,247)
+            const isBlue = (rgb) => /\\b47,\\s*129,\\s*247\\b/.test(rgb);
             const mk = (patch) => {{
               state.sessionsById.set(sid, Object.assign({{}}, base, patch));
               renderSessionList();
               const card = document.querySelector(
                 `.session-card[data-id='${{sid}}']`);
-              const dot = card && card.querySelector('.unseen-dot');
+              const dot = card && card.querySelector('.state-dot');
+              const bg = dot ? getComputedStyle(dot).backgroundColor : '';
               return {{
                 hasUnseenClass: !!card && card.classList.contains('unseen'),
-                dotVisible: !!dot && getComputedStyle(dot).display !== 'none',
+                dotIsBlue: isBlue(bg),
+                // 应该只有一颗 state-dot, 不该有独立的 .unseen-dot 元素
+                separateDotExists: !!card &&
+                  !!card.querySelector('.unseen-dot'),
+                bg,
               }};
             }};
             return {{
-              // idle + 有新活动未读
               idleUnseen: mk({{ state: 'idle',
                 last_activity_at: 2000, seen_at: 1000 }}),
-              // idle 但已读 (seen_at >= la)
               idleSeen: mk({{ state: 'idle',
                 last_activity_at: 2000, seen_at: 2000 }}),
-              // busy 不显示 (即使 la > seen)
               busy: mk({{ state: 'busy',
                 last_activity_at: 2000, seen_at: 1000 }}),
-              // 没跑过 (la == seen)
               fresh: mk({{ state: 'idle',
                 last_activity_at: 1000, seen_at: 1000 }}),
-              // finished + 未读
               finishedUnseen: mk({{ state: 'finished',
                 last_activity_at: 3000, seen_at: 1000 }}),
             }};
           }}
         """)
         assert result["idleUnseen"]["hasUnseenClass"], "idle+未读应有 .unseen"
-        assert result["idleUnseen"]["dotVisible"], "蓝点应可见"
-        assert not result["idleSeen"]["hasUnseenClass"], "已读不应有蓝点"
+        assert result["idleUnseen"]["dotIsBlue"], (
+            f"idle+未读: state-dot 应为蓝, 实际 bg={result['idleUnseen']['bg']}"
+        )
+        assert not result["idleUnseen"]["separateDotExists"], (
+            "不应有独立的 .unseen-dot 元素 (已合到 state-dot)"
+        )
+        assert not result["idleSeen"]["hasUnseenClass"], "已读不应有 .unseen"
+        assert not result["idleSeen"]["dotIsBlue"], (
+            f"idle+已读: state-dot 不应为蓝, 实际 bg={result['idleSeen']['bg']}"
+        )
         assert not result["busy"]["hasUnseenClass"], "busy 不显示蓝点"
+        assert not result["busy"]["dotIsBlue"], (
+            f"busy: state-dot 应为绿, 实际 bg={result['busy']['bg']}"
+        )
         assert not result["fresh"]["hasUnseenClass"], "没跑过不显示蓝点"
-        assert result["finishedUnseen"]["hasUnseenClass"], "finished+未读应有蓝点"
+        assert result["finishedUnseen"]["hasUnseenClass"], "finished+未读应有 .unseen"
+        assert result["finishedUnseen"]["dotIsBlue"], (
+            f"finished+未读: state-dot 应为蓝, "
+            f"实际 bg={result['finishedUnseen']['bg']}"
+        )
     finally:
         api_delete_session(base_url, test_token, sid)
 
