@@ -14,7 +14,7 @@ def test_healthz(base_url):
 def test_index_html(base_url):
     r = httpx.get(base_url + "/")
     assert r.status_code == 200
-    assert "<title>ClaudeCodeRemote</title>" in r.text
+    assert "<title>Vibing everything</title>" in r.text
 
 
 def test_manifest(base_url):

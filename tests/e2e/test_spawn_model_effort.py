@@ -125,17 +125,19 @@ def test_norm_model_effort_validators():
 # ---------- 白盒: 前端 ----------
 
 def test_modal_has_model_select_no_effort():
-    """前端 spawn modal: 只暴露 model select. effort 已从 UI 移除 (Default
-    值无法可靠探知). 后端 effort 字段仍保留, spawn 时默认空字符串."""
+    """前端 spawn modal: model select 已变成 hidden + 空 option (创建时不指定
+    model, 由 server wrapper / CLI / chat-menu 决定). effort 完全移除."""
     src = pathlib.Path(
         "claude_code_remote/server/static/index.html"
     ).read_text()
-    assert 'id="spawn-model"' in src, "modal must have #spawn-model select"
+    assert 'id="spawn-model"' in src, "modal must keep #spawn-model select"
     assert 'id="spawn-effort"' not in src, (
         "spawn-effort select must be removed from modal"
     )
-    for opt in ('value="opus"', 'value="sonnet"', 'value="haiku"'):
-        assert opt in src, f"model select missing option: {opt}"
+    # spawn-model 现在是 hidden + 单空 option, 不再列 opus/sonnet/haiku
+    assert re.search(
+        r'<select[^>]*id="spawn-model"[^>]*hidden', src
+    ), "spawn-model select 应带 hidden 属性"
 
 
 def test_spawn_go_posts_model():

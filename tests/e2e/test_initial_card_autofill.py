@@ -44,9 +44,10 @@ def test_autofill_uses_viewport_height_criterion():
     )
 
 
-def test_chat_loading_overlay_shows_then_autofill_fades():
-    """enterChat cache-miss: chat-loading overlay 立即 show 遮挡, autoFill
-    完成后才 fade-out 揭幕."""
+def test_chat_loading_overlay_shows_then_backlog_done_fades():
+    """enterChat cache-miss: chat-loading overlay 立即 show 遮挡, backlog_done
+    handler 立即 fade-out 揭幕 (不再等 autoFill 满 2 屏, 否则长 session
+    用户看到一直转圈)."""
     src = pathlib.Path(
         "claude_code_remote/server/static/app.js"
     ).read_text()
@@ -54,15 +55,22 @@ def test_chat_loading_overlay_shows_then_autofill_fades():
     assert "_ld.hidden = false" in src, (
         "cache miss path must show chat-loading overlay first"
     )
-    # autoFill finally 块负责 fade-out
+    # backlog_done handler 必须有 fade-out chat-loading 的逻辑
+    assert re.search(
+        r"backlog_done[^}]*?chat-loading",
+        src, re.S,
+    ), "backlog_done handler 应在 settle 时 fade-out chat-loading"
+    # autoFill 不再操心 overlay (按 stale 文档注释清空)
     m = re.search(
         r"async function autoFillInitialCards\([^)]*\)\s*\{(.*?)\n\}",
         src, re.S,
     )
     assert m, "autoFillInitialCards not found"
     body = m.group(1)
-    assert "chat-loading" in body and "fade-out" in body, (
-        "autoFill finally must fade-out chat-loading overlay"
+    # autoFill 内部不应再含真的 fade-out 逻辑 (已迁出). 去掉单行注释后比对.
+    body_no_comments = re.sub(r"//[^\n]*", "", body)
+    assert "fade-out" not in body_no_comments, (
+        "autoFill 不该再操控 overlay (overlay 由 backlog_done handler 负责)"
     )
 
 

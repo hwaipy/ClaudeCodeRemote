@@ -247,7 +247,7 @@ def test_perm_menu_has_four_modes(logged_in_page, spawned_session):
     hp.expect_visible()
     hp.card_by_id(sid).click()
 
-    logged_in_page.locator("#chat-perm").dispatch_event("click")
+    logged_in_page.locator("#chat-menu-perm-btn").dispatch_event("click")
     items = logged_in_page.locator("#perm-menu .perm-menu-item")
     expect(items).to_have_count(4)
     modes = items.evaluate_all("els => els.map(e => e.dataset.mode)")

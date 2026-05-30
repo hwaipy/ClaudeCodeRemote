@@ -771,17 +771,23 @@ def test_new_btn_width_grows_monotonically_during_close(logged_in_page):
     logged_in_page.wait_for_timeout(450)
 
     logged_in_page.locator("#search-clear").click()
+    # 立刻采第 1 帧, 之后每 ~60ms 再采 — 动画现在 < 200ms 跑完, 取样
+    # 必须从 0ms 开始否则第一帧已经走过半. 关键契约: 单调增长 + 收尾 = 36.
     samples = []
-    for step in (60, 60, 60, 100, 100):
+    for step in (0, 30, 30, 50, 100, 100):
         logged_in_page.wait_for_timeout(step)
         samples.append(new_btn.bounding_box()["width"])
     for i in range(1, len(samples)):
         assert samples[i] + 1.5 >= samples[i - 1], (
             f"new-btn width should grow monotonically during close: {samples}"
         )
-    # new-btn is a 36px icon — close must take it from 0 back to ~36.
-    assert samples[-1] >= samples[0] + 20, (
-        f"close should have made visible progress (≥20 px): {samples}"
+    # 收尾必须到 36 (icon-btn 完整宽度)
+    assert samples[-1] >= 32, (
+        f"close 应让 new-btn 长回 ~36px, 收尾 {samples[-1]}: {samples}"
+    )
+    # 整个过程必须有可见进展 (任意两点 delta ≥ 8 px)
+    assert max(samples) - min(samples) >= 8, (
+        f"close 应有可见进展 (max-min ≥ 8px): {samples}"
     )
 
 

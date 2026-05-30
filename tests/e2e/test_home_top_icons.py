@@ -1,7 +1,6 @@
-"""Spec §2: home-top has three round icon buttons of the same shape:
-#settings-btn (left), #new-btn (middle-ish), #search-btn (right).
-When search opens, both #settings-btn AND #new-btn squeeze to width 0
-(animation, not display:none) — the icons stay in DOM.
+"""Spec §2: home-top 顺序 (按 spec 行表): .home-brand 撑左 + 右侧 icon 串
+#new-btn → #apps-btn (hub-only) → #settings-btn → #search-btn. 搜索打开时
+所有非 search icon 同时压缩到 width 0 (动画, 不 display:none) 留 DOM 不动.
 """
 from __future__ import annotations
 
@@ -19,9 +18,9 @@ def test_three_icon_buttons_present_in_order(logged_in_page):
     n = logged_in_page.locator("#new-btn").bounding_box()
     sb = logged_in_page.locator("#search-btn").bounding_box()
     assert s and n and sb
-    # Left → right order: settings < new < search
-    assert s["x"] < n["x"] < sb["x"], (
-        f"order should be settings({s['x']}) < new({n['x']}) < search({sb['x']})"
+    # spec 顺序: new → settings → search (local mode 下 apps-btn 隐藏)
+    assert n["x"] < s["x"] < sb["x"], (
+        f"order should be new({n['x']}) < settings({s['x']}) < search({sb['x']})"
     )
     # All three vertically aligned (centers within 6px)
     s_cy = s["y"] + s["height"] / 2
@@ -50,24 +49,27 @@ def test_three_icons_share_dimensions(logged_in_page):
         assert abs(b["width"] - b["height"]) <= 8, f"not round-ish: {b}"
 
 
-def test_settings_and_new_packed_left_search_pushed_right(logged_in_page):
-    """settings + new should be adjacent on the LEFT (gap ≤ ~10px);
-    search-bar should sit on the RIGHT, separated by a large gap."""
+def test_icons_layout_new_settings_packed_search_pushed_right(logged_in_page):
+    """spec 行 743: home-top 一行 flex, .home-brand 撑左, new/settings 8px
+    gap 紧贴, #search-bar 用 margin-left: auto 推到最右. 三个 icon 同一行."""
     hp = HomePage(logged_in_page)
     hp.expect_visible()
-    s = logged_in_page.locator("#settings-btn").bounding_box()
     n = logged_in_page.locator("#new-btn").bounding_box()
+    s = logged_in_page.locator("#settings-btn").bounding_box()
     sb = logged_in_page.locator("#search-bar").bounding_box()
-    assert s and n and sb
-    # settings → new gap: just the 8px flex gap, so right_of_settings + 8 ≈ x_of_new
-    gap_left = n["x"] - (s["x"] + s["width"])
-    assert 0 <= gap_left <= 14, (
-        f"settings and new should be packed left (gap ≤ 14): {gap_left}"
+    assert n and s and sb
+    cy = lambda b: b["y"] + b["height"] / 2
+    assert abs(cy(n) - cy(s)) <= 6 and abs(cy(s) - cy(sb)) <= 6, (
+        f"icons must share a row: cys={cy(n)}/{cy(s)}/{cy(sb)}"
     )
-    # new → search-bar gap: the auto margin, so this should be LARGE (more than half the row)
-    gap_right = sb["x"] - (n["x"] + n["width"])
-    assert gap_right > 100, (
-        f"search should be pushed right (gap > 100): {gap_right}"
+    gap_ns = s["x"] - (n["x"] + n["width"])
+    assert 0 <= gap_ns <= 14, (
+        f"new → settings 应紧贴 (gap ≤ 14): {gap_ns}"
+    )
+    # search-bar 用 margin-left:auto 推到最右, 跟 settings 留大空隙
+    gap_ss = sb["x"] - (s["x"] + s["width"])
+    assert gap_ss > 50, (
+        f"search-bar 应被推到右侧 (gap_ss > 50): {gap_ss}"
     )
 
 

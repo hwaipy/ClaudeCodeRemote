@@ -50,16 +50,6 @@ def test_settings_back_closes(logged_in_page):
     expect(logged_in_page.locator("#view-settings")).not_to_have_class(ACTIVE)
 
 
-def test_default_cwd_persists_to_localStorage(logged_in_page):
-    hp = HomePage(logged_in_page)
-    hp.expect_visible()
-    logged_in_page.locator("#settings-btn").click()
-    logged_in_page.locator("#settings-default-cwd").fill("/tmp/mydefault")
-    # Storage written on input
-    val = logged_in_page.evaluate('() => localStorage.getItem("ccr.defaultCwd")')
-    assert val == "/tmp/mydefault", f"expected stored, got {val!r}"
-
-
 def test_default_perm_persists_and_marks_active(logged_in_page):
     hp = HomePage(logged_in_page)
     hp.expect_visible()
@@ -81,23 +71,20 @@ def test_default_perm_persists_and_marks_active(logged_in_page):
     assert stored == "allow_all", f"expected allow_all, got {stored!r}"
 
 
-def test_new_session_modal_uses_settings_defaults(logged_in_page, tmp_path):
-    """After setting defaults in settings view, opening the new-session
-    modal pre-fills spawn-cwd + selects spawn-perm accordingly."""
+def test_new_session_modal_uses_settings_default_perm(logged_in_page):
+    """spec 行 935: settings 唯一项是 default perm. 设完 perm → 开 new-session
+    modal → spawn-perm 应预选该 mode. (default cwd 设置已从 spec 删除,
+    cwd 不再在 settings 配置)."""
     hp = HomePage(logged_in_page)
     hp.expect_visible()
-    # Configure defaults in settings
     logged_in_page.locator("#settings-btn").click()
-    logged_in_page.locator("#settings-default-cwd").fill(str(tmp_path))
     logged_in_page.locator(
         "#settings-default-perm .spawn-perm-btn[data-mode='accept_edits']"
     ).click()
     logged_in_page.locator("#settings-back").click()
     expect(logged_in_page.locator("#view-settings")).not_to_have_class(ACTIVE)
-    # Open new-session modal
     logged_in_page.locator("#new-btn").click()
     expect(logged_in_page.locator("#modal-new-session")).to_be_visible()
-    expect(logged_in_page.locator("#spawn-cwd")).to_have_value(str(tmp_path))
     expect(
         logged_in_page.locator("#spawn-perm .spawn-perm-btn.active")
     ).to_have_attribute("data-mode", "accept_edits")

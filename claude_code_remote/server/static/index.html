@@ -72,7 +72,6 @@
         <div class="hub-landing-cta-label">⬇ 一键登录, 立刻开始使用</div>
         <!-- OAuth icon row — JS 按 oauth_providers 渲染 -->
         <div class="login-oauth" id="login-oauth"></div>
-        <div class="err" id="login-err"></div>
         <div class="hub-landing-cta-help">
           <a href="#help" id="login-help-link">查看帮助</a>
         </div>
@@ -88,9 +87,12 @@
       <label for="login-token">Bearer Token</label>
       <input id="login-token" type="password" autocomplete="current-password" placeholder="CCR_TOKEN">
       <button class="btn btn-primary btn-block" id="login-go">Sign in</button>
-      <div class="err login-local-err"></div>
       <div class="hint">Token is set via the server env var <span class="kbd">CCR_TOKEN</span>.</div>
     </div>
+    <!-- #login-err 必须放在 .hub-landing / .login-local 之外, 否则
+         CSS 隔模式隐藏会让错误条永远不可见 (locale mode 时 .hub-landing
+         全部 display:none). 这里居于 .center-wrap 下, 两种模式都能看到. -->
+    <div class="err" id="login-err"></div>
   </div>
 </div>
 

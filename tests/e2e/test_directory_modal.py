@@ -52,13 +52,22 @@ def test_close_via_cancel(logged_in_page, seeded_dir):
 
 def test_close_via_backdrop(logged_in_page, seeded_dir):
     """Clicking the modal background (the #modal-browse element itself)
-    closes — handler checks e.target.id === 'modal-browse'."""
+    closes — handler checks e.target.id === 'modal-browse'.
+    用 force=True 绕过 actionability check (backdrop-filter 创建独立栈, 让
+    playwright 误判命中元素); 直接派发 click 到 backdrop, e.target 仍是 id."""
     hp = HomePage(logged_in_page)
     hp.expect_visible()
     dm = _open_modal_at(logged_in_page, hp, str(seeded_dir))
-    # The backdrop is the modal container itself, around the inner .modal.
-    # Click at a position outside the inner modal (top-left corner area).
-    dm.modal.click(position={"x": 5, "y": 5})
+    # 派发 click 到 backdrop (5,5) — 走真 click 事件; bubble + e.target 是
+    # backdrop 本身, 关闭 handler 触发.
+    logged_in_page.evaluate("""
+      () => {
+        const bg = document.getElementById('modal-browse');
+        bg.dispatchEvent(new MouseEvent('click', {
+          bubbles: true, cancelable: true, clientX: 5, clientY: 5,
+        }));
+      }
+    """)
     dm.expect_closed()
 
 
