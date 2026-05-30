@@ -40,10 +40,13 @@ CREATE TABLE IF NOT EXISTS apps (
   revoked_at            REAL,
   total_online_seconds  INTEGER NOT NULL DEFAULT 0,
   sort_order            INTEGER NOT NULL DEFAULT 0,
+  short_host            TEXT,                       -- 6 base62, /files/<sh>/<fid>
   created_at            REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_apps_user  ON apps(user_id);
 CREATE INDEX IF NOT EXISTS idx_apps_token ON apps(device_token_hash);
+-- idx_apps_short_host 在 migration 里建 — 老 DB 此时 apps 表还没 short_host
+-- 列, CREATE INDEX ON apps(short_host) 会爆.
 
 CREATE TABLE IF NOT EXISTS pairing_tokens (
   code        TEXT PRIMARY KEY,
@@ -184,6 +187,9 @@ async def init(path: str | Path) -> None:
             "ALTER TABLE sessions_cache ADD COLUMN cur_model TEXT",
             "ALTER TABLE apps ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE sessions_cache ADD COLUMN seen_at REAL",
+            "ALTER TABLE apps ADD COLUMN short_host TEXT",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_apps_short_host "
+            "ON apps(short_host) WHERE short_host IS NOT NULL",
         ):
             try:
                 c.execute(ddl)
@@ -363,6 +369,58 @@ async def get_user_by_id(user_id: str) -> dict | None:
 
 # ---- apps ----
 
+# short_host 字符集: base62 (a-z A-Z 0-9), 6 字 → 62⁶ ≈ 568 亿. 不可枚举,
+# 不暴露 app_id 任何 bit. 老 app 启动时 backfill (login / register 路径)
+_SHORT_HOST_ALPHABET = (
+    "abcdefghijklmnopqrstuvwxyz"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "0123456789"
+)
+_SHORT_HOST_LEN = 6
+
+
+def _generate_short_host_sync(c) -> str:
+    """生成一个不冲突的 6 字 base62. UNIQUE 索引兜底重试."""
+    for _ in range(10):
+        sh = "".join(secrets.choice(_SHORT_HOST_ALPHABET)
+                     for _ in range(_SHORT_HOST_LEN))
+        row = c.execute(
+            "SELECT 1 FROM apps WHERE short_host=?", (sh,),
+        ).fetchone()
+        if not row:
+            return sh
+    raise RuntimeError("short_host generation collision (>10 attempts)")
+
+
+def _ensure_short_host_sync(c, app_id: str) -> str:
+    """读 app 的 short_host. 没有就生成 + UPDATE. 老 app 第一次接入时跑这条."""
+    row = c.execute(
+        "SELECT short_host FROM apps WHERE id=?", (app_id,),
+    ).fetchone()
+    if row and row["short_host"]:
+        return row["short_host"]
+    sh = _generate_short_host_sync(c)
+    c.execute("UPDATE apps SET short_host=? WHERE id=?", (sh, app_id))
+    return sh
+
+
+async def ensure_short_host(app_id: str) -> str:
+    def _q():
+        return _ensure_short_host_sync(_get_conn(), app_id)
+    return await asyncio.to_thread(_q)
+
+
+async def find_app_by_short_host(short_host: str) -> dict | None:
+    """公开 /files/<sh>/... 查 app 用. 不限 user_id (任何人凭 URL 都可)."""
+    def _q():
+        row = _get_conn().execute(
+            "SELECT * FROM apps WHERE short_host=? AND revoked_at IS NULL",
+            (short_host,),
+        ).fetchone()
+        return dict(row) if row else None
+    return await asyncio.to_thread(_q)
+
+
 def _ensure_seed_app_sync(
     admin_email: str, name: str, tok_hash: str,
 ) -> str:
@@ -381,13 +439,16 @@ def _ensure_seed_app_sync(
             "UPDATE apps SET device_token_hash=?, revoked_at=NULL WHERE id=?",
             (tok_hash, row["id"]),
         )
+        _ensure_short_host_sync(c, row["id"])   # 老 row 没 short_host → 补
         return row["id"]
     app_id = "app-" + secrets.token_hex(8)
     order = _next_sort_order_sync(user_id)
+    sh = _generate_short_host_sync(c)
     c.execute(
-        "INSERT INTO apps(id, user_id, name, device_token_hash, created_at, sort_order) "
-        "VALUES(?,?,?,?,?,?)",
-        (app_id, user_id, name, tok_hash, time.time(), order),
+        "INSERT INTO apps(id, user_id, name, device_token_hash, created_at, "
+        "sort_order, short_host) "
+        "VALUES(?,?,?,?,?,?,?)",
+        (app_id, user_id, name, tok_hash, time.time(), order, sh),
     )
     return app_id
 
@@ -401,13 +462,20 @@ async def ensure_seed_app(
 
 
 async def find_app_by_token(token: str) -> dict | None:
+    """每次 app 接入时调. 顺便 backfill short_host (老 app 没这字段)."""
     def _q():
         tok_hash = hash_token(token)
-        row = _get_conn().execute(
+        c = _get_conn()
+        row = c.execute(
             "SELECT * FROM apps WHERE device_token_hash=? AND revoked_at IS NULL",
             (tok_hash,),
         ).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        d = dict(row)
+        if not d.get("short_host"):
+            d["short_host"] = _ensure_short_host_sync(c, d["id"])
+        return d
     return await asyncio.to_thread(_q)
 
 
@@ -415,7 +483,7 @@ async def list_apps_for_user(user_id: str) -> list[dict]:
     def _q():
         rows = _get_conn().execute(
             "SELECT id, user_id, name, last_seen_at, revoked_at, created_at, "
-            "total_online_seconds, sort_order FROM apps "
+            "total_online_seconds, sort_order, short_host FROM apps "
             "WHERE user_id=? AND revoked_at IS NULL "
             "ORDER BY sort_order ASC, created_at ASC",
             (user_id,),

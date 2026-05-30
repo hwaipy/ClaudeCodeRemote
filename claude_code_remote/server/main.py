@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import config, db
-from .api import router as api_router
+from .api import router as api_router, public_router as api_public_router
 from .hub_client import maybe_start as maybe_start_hub
 from .session_manager import manager
 from .ws import router as ws_router
@@ -42,6 +42,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ClaudeCodeRemote", lifespan=lifespan)
 app.include_router(api_router)
+app.include_router(api_public_router)
 app.include_router(ws_router)
 app.mount("/static", StaticFiles(directory=str(config.STATIC_DIR)), name="static")
 

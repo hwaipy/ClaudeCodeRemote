@@ -99,6 +99,7 @@ async def list_apps(ccr_sess: str | None = Cookie(None)):
             # 持久化累计 + 当前 session 的运行时长 — 前端只看 total 即可.
             "total_online_seconds": int(r.get("total_online_seconds") or 0),
             "connected_at": online_app.connected_at if online_app else None,
+            "short_host": r.get("short_host"),   # /files/<sh>/<fid> 用
         })
     return out
 

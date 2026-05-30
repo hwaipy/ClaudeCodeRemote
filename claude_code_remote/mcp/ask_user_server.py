@@ -81,6 +81,45 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="share_url",
+            description=(
+                "Mint a PUBLIC, anonymous HTTPS URL for any file on this "
+                "server, served through the CCR hub at "
+                "vibe.qpqi.group/files/<short_host>/<id>. Anyone with the "
+                "URL can download — no login. The id is 8-byte random and "
+                "unguessable, but the URL is a capability — only mint and "
+                "share when the user explicitly wants the file to be "
+                "publicly fetchable. Different from share_file which renders "
+                "an in-chat download card behind CCR auth. Default expires_in_sec "
+                "is none (URL never expires); pass a number to auto-expire. "
+                "Returns { id, url, expires_at }."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": (
+                            "Absolute filesystem path on this server. "
+                            "Must exist and be a regular file."
+                        ),
+                    },
+                    "expires_in_sec": {
+                        "type": "number",
+                        "description": (
+                            "Optional. Seconds until URL stops working. "
+                            "Omit / 0 / null = never expires."
+                        ),
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "Optional short note for your own records.",
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
+        types.Tool(
             name="share_file",
             description=(
                 "Render a prominent file card in the user's CCR chat with a "
@@ -119,11 +158,52 @@ async def list_tools() -> list[types.Tool]:
 
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+    if name == "share_url":
+        return await _call_share_url(arguments)
     if name == "share_file":
         return await _call_share_file(arguments)
     if name == "ask_user":
         return await _call_ask_user(arguments)
     return [types.TextContent(type="text", text=f"error: unknown tool {name}")]
+
+
+async def _call_share_url(arguments: dict) -> list[types.TextContent]:
+    """POST /api/share 在 CCR backend 上, 拿 id + 公开 URL 回吐给 claude."""
+    path = (arguments.get("path") or "").strip()
+    if not path:
+        return [types.TextContent(
+            type="text",
+            text=json.dumps({"error": "path required"}, ensure_ascii=False),
+        )]
+    body = {"path": path}
+    if "expires_in_sec" in arguments and arguments["expires_in_sec"]:
+        body["expires_in_sec"] = arguments["expires_in_sec"]
+    if "note" in arguments and arguments["note"]:
+        body["note"] = arguments["note"]
+    try:
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.post(
+                f"{BACKEND_URL}/api/share",
+                headers={"Authorization": f"Bearer {BACKEND_TOKEN}"},
+                json=body,
+            )
+            if r.status_code >= 400:
+                return [types.TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {"error": f"server {r.status_code}: {r.text}"},
+                        ensure_ascii=False,
+                    ),
+                )]
+            return [types.TextContent(
+                type="text",
+                text=json.dumps(r.json(), ensure_ascii=False),
+            )]
+    except httpx.HTTPError as e:
+        return [types.TextContent(
+            type="text",
+            text=json.dumps({"error": f"http: {e}"}, ensure_ascii=False),
+        )]
 
 
 async def _call_share_file(arguments: dict) -> list[types.TextContent]:

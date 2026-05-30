@@ -49,6 +49,25 @@ class HubClient:
         self.connected = asyncio.Event()
         self.app_id: str | None = None
         self.user_id: str | None = None
+        # spec §17 公开文件分享: hub 端注册时分配, ready 帧带回. 用来拼
+        # https://<hub_origin>/files/<short_host>/<fid> URL.
+        self.short_host: str | None = None
+        # hub 的对外 origin (HTTPS). 取 CCR_HUB_ORIGIN_PUBLIC env, 没设就退化
+        # 从 hub_url 推导 (ws:// → http://, wss:// → https://).
+        self.hub_origin: str = self._derive_hub_origin(hub_url)
+
+    @staticmethod
+    def _derive_hub_origin(hub_url: str) -> str:
+        import os
+        explicit = os.environ.get("CCR_HUB_ORIGIN_PUBLIC", "").strip()
+        if explicit:
+            return explicit.rstrip("/")
+        u = hub_url.strip()
+        if u.startswith("wss://"):
+            return "https://" + u[len("wss://"):]
+        if u.startswith("ws://"):
+            return "http://" + u[len("ws://"):]
+        return u.rstrip("/")
 
     def start(self) -> None:
         if self._task is None:
@@ -125,9 +144,10 @@ class HubClient:
                 raise RuntimeError(f"unexpected ready frame: {ready!r}")
             self.app_id = ready.data.get("app_id")
             self.user_id = ready.data.get("user_id")
+            self.short_host = ready.data.get("short_host")
             self.connected.set()
-            log.info("hub_client ready app_id=%s user_id=%s",
-                     self.app_id, self.user_id)
+            log.info("hub_client ready app_id=%s user_id=%s short_host=%s",
+                     self.app_id, self.user_id, self.short_host)
 
             # M-Hub-2: 启 metadata pump task — 订阅 session_manager 的
             # global stream, 翻成 control 帧推 hub.
@@ -145,6 +165,7 @@ class HubClient:
                 self.connected.clear()
                 self.app_id = None
                 self.user_id = None
+                self.short_host = None
 
     async def _loop(self, ws) -> None:
         send_lock = asyncio.Lock()
@@ -418,8 +439,14 @@ class HubClient:
             log.exception("metadata pump crashed")
 
 
+# 模块级单例: 其它模块 (api._build_share_url) 用 from .hub_client import client
+# 拿当前 hub state. None 表示未启用 hub.
+client: HubClient | None = None
+
+
 def maybe_start(asgi_app) -> HubClient | None:
     """读 env, 决定是否启动 HubClient. 没配 hub_url 时返回 None."""
+    global client
     hub_url = os.environ.get("CCR_HUB_URL", "").strip()
     token = os.environ.get("CCR_HUB_DEVICE_TOKEN", "").strip()
     if not hub_url or not token:

@@ -20,6 +20,10 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
 
+# 公开 router — 不带 require_token. 给 spec §17 的 GET /api/share/<fid>
+# 用 (hub forward 路径), 也允许本地直访 (无 auth, 通过 fid 不可枚举保密).
+public_router = APIRouter(prefix="/api")
+
 
 class SpawnRequest(BaseModel):
     cwd: str = Field(..., min_length=1)
@@ -284,6 +288,116 @@ async def session_file(session_id: str, path: str = "") -> Any:
         media_type="application/octet-stream",   # 强制 attachment 行为
         content_disposition_type="attachment",
     )
+
+
+# ---------- 公开文件分享 (spec §17) ----------
+
+class ShareCreateRequest(BaseModel):
+    path: str = Field(..., min_length=1)
+    expires_in_sec: float | None = None
+    note: str = ""
+
+
+@router.post("/share")
+async def share_create(req: ShareCreateRequest) -> dict[str, Any]:
+    """生成 share id + URL. path 绝对 + 必须存在."""
+    from . import db
+    raw = (req.path or "").strip()
+    if not raw:
+        raise HTTPException(400, "path required")
+    expanded = os.path.expanduser(raw)
+    if not os.path.isabs(expanded):
+        raise HTTPException(400, "absolute path required")
+    p = Path(expanded).resolve()
+    if not p.exists():
+        raise HTTPException(404, f"file not found: {p}")
+    if not p.is_file():
+        raise HTTPException(400, f"not a file: {p}")
+    # expires_in_sec=0 / None → 永久
+    expires_in = None
+    if req.expires_in_sec and req.expires_in_sec > 0:
+        expires_in = float(req.expires_in_sec)
+
+    row = await db.insert_file_share(
+        path=str(p), expires_in_sec=expires_in, note=req.note or "",
+    )
+    # URL 拼接: 拿 hub origin + short_host. hub_client 已在跑就能从 cfg / state 拿.
+    url = _build_share_url(row["id"])
+    return {
+        "id": row["id"],
+        "url": url,
+        "expires_at": row["expires_at"],
+        "note": row["note"],
+    }
+
+
+@router.get("/share")
+async def share_list() -> dict[str, list[dict[str, Any]]]:
+    """Owner 视角 — 列出全部 share row, 含 path."""
+    from . import db
+    shares = await db.list_file_shares()
+    out = []
+    for r in shares:
+        out.append({
+            "id": r["id"],
+            "path": r["path"],
+            "url": _build_share_url(r["id"]),
+            "created_at": r["created_at"],
+            "expires_at": r["expires_at"],
+            "accessed_at": r["accessed_at"],
+            "note": r["note"],
+        })
+    return {"shares": out}
+
+
+@router.delete("/share/{fid}")
+async def share_delete(fid: str) -> dict[str, Any]:
+    from . import db
+    ok = await db.delete_file_share(fid)
+    if not ok:
+        raise HTTPException(404, "share not found")
+    return {"ok": True}
+
+
+# 公开 GET — 不 require_token. fid 16 hex 不可枚举即是保密. 任何错误统一
+# 404 不区分: 防嗅探 (id 不存在 / 已过期 / 文件已删都返同样 404).
+@public_router.get("/share/{fid}")
+async def share_get_public(fid: str) -> Any:
+    from fastapi.responses import FileResponse
+    from . import db
+    row = await db.get_file_share(fid)
+    if not row:
+        raise HTTPException(404, "not found")
+    if row["expires_at"] and row["expires_at"] < time.time():
+        raise HTTPException(404, "not found")
+    p = Path(row["path"])
+    if not p.exists() or not p.is_file():
+        raise HTTPException(404, "not found")
+    # bump accessed_at (fire-and-forget)
+    asyncio.create_task(db.touch_file_share(fid))
+    return FileResponse(
+        str(p),
+        filename=p.name,
+        media_type="application/octet-stream",
+        content_disposition_type="attachment",
+    )
+
+
+def _build_share_url(fid: str) -> str:
+    """根据 hub_client state 拼出 https://<hub>/files/<short_host>/<fid>.
+
+    没接入 hub (纯 local 模式) 或 hub_client 还没拿到 short_host → 返本地
+    fallback URL (仅 owner 自己机器内有用, 公网下不通).
+    """
+    try:
+        from .hub_client import client as _hub_client
+        sh = getattr(_hub_client, "short_host", "") or ""
+        origin = getattr(_hub_client, "hub_origin", "") or ""
+        if sh and origin:
+            return f"{origin.rstrip('/')}/files/{sh}/{fid}"
+    except Exception:
+        pass
+    return f"/api/share/{fid}"
 
 
 @router.get("/sessions/{session_id}/tool/{tool_use_id}")

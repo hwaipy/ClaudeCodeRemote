@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import secrets
 import sqlite3
 import time
 from pathlib import Path
@@ -54,6 +55,20 @@ CREATE TABLE IF NOT EXISTS permissions (
     ts          REAL NOT NULL,
     PRIMARY KEY (sess_id, scope, key)
 );
+
+-- spec §17: 公开文件分享 (per-app local table). id 是 8B random hex,
+-- 公网 URL 形如 https://vibe.qpqi.group/files/<short_host>/<id>.
+CREATE TABLE IF NOT EXISTS file_shares (
+    id          TEXT PRIMARY KEY,
+    path        TEXT NOT NULL,        -- 绝对路径, 散落任意目录
+    created_at  REAL NOT NULL,
+    expires_at  REAL,                 -- NULL = 永不过期
+    accessed_at REAL,                 -- 上次被拉时间
+    note        TEXT,
+    user_id     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_file_shares_expires
+    ON file_shares(expires_at) WHERE expires_at IS NOT NULL;
 """
 
 _conn: sqlite3.Connection | None = None
@@ -80,6 +95,8 @@ def _open() -> sqlite3.Connection:
         # 老 session 基线: 把 seen_at 补成 last_activity_at, 避免迁移后历史
         # session 全标成未读 (用户从没"看过", seen_at=0 < last_activity → 全蓝点).
         conn.execute("UPDATE sessions SET seen_at=last_activity_at WHERE seen_at=0")
+    # file_shares 表本身用 CREATE TABLE IF NOT EXISTS 在 _SCHEMA 里建,
+    # 老 db 第一次跑新代码就会被建出来, 不需要单独 ALTER.
     return conn
 
 
@@ -423,4 +440,87 @@ async def find_orphan_perm_reqs(sess_id: str) -> list[str]:
             except Exception:
                 pass
         return [r for r in reqs if r and r not in resolved]
+    return await _run(_w)
+
+
+# ---------- file_shares (spec §17 公开文件分享) ----------
+
+async def insert_file_share(
+    path: str, expires_in_sec: float | None = None,
+    note: str = "", user_id: str = "",
+) -> dict:
+    """INSERT 一条 share row. id = 16 hex (8B random). 返回完整 row dict."""
+    sid = secrets.token_hex(8)
+    now = time.time()
+    expires_at = (now + expires_in_sec) if expires_in_sec else None
+
+    def _w() -> dict:
+        _conn.execute(
+            "INSERT INTO file_shares(id, path, created_at, expires_at, "
+            "accessed_at, note, user_id) VALUES(?,?,?,?,?,?,?)",
+            (sid, path, now, expires_at, None, note or None,
+             user_id or None),
+        )
+        return {
+            "id": sid, "path": path, "created_at": now,
+            "expires_at": expires_at, "accessed_at": None,
+            "note": note or None, "user_id": user_id or None,
+        }
+    return await _run(_w)
+
+
+async def get_file_share(fid: str) -> dict | None:
+    def _w() -> dict | None:
+        row = _conn.execute(
+            "SELECT id, path, created_at, expires_at, accessed_at, note, "
+            "user_id FROM file_shares WHERE id=?", (fid,),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0], "path": row[1], "created_at": row[2],
+            "expires_at": row[3], "accessed_at": row[4],
+            "note": row[5], "user_id": row[6],
+        }
+    return await _run(_w)
+
+
+async def touch_file_share(fid: str) -> None:
+    """命中下载后 bump accessed_at."""
+    now = time.time()
+
+    def _w() -> None:
+        _conn.execute(
+            "UPDATE file_shares SET accessed_at=? WHERE id=?", (now, fid),
+        )
+    await _run(_w)
+
+
+async def delete_file_share(fid: str) -> bool:
+    def _w() -> bool:
+        cur = _conn.execute("DELETE FROM file_shares WHERE id=?", (fid,))
+        return cur.rowcount > 0
+    return await _run(_w)
+
+
+async def list_file_shares(user_id: str = "") -> list[dict]:
+    """user_id 为空 → 列全部 (本机 owner 才能调到这条路径); 否则按 owner 过滤."""
+    def _w() -> list[dict]:
+        if user_id:
+            rows = _conn.execute(
+                "SELECT id, path, created_at, expires_at, accessed_at, note, "
+                "user_id FROM file_shares WHERE user_id=? "
+                "ORDER BY created_at DESC", (user_id,),
+            ).fetchall()
+        else:
+            rows = _conn.execute(
+                "SELECT id, path, created_at, expires_at, accessed_at, note, "
+                "user_id FROM file_shares ORDER BY created_at DESC",
+            ).fetchall()
+        return [
+            {"id": r[0], "path": r[1], "created_at": r[2],
+             "expires_at": r[3], "accessed_at": r[4],
+             "note": r[5], "user_id": r[6]}
+            for r in rows
+        ]
     return await _run(_w)

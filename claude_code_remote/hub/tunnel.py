@@ -311,11 +311,17 @@ async def app_tunnel(
     log.info("app online: %s (%s) user=%s",
              online.app_id, online.name, online.user_id)
 
-    # ready
+    # ready — 带 short_host 给 app 端拼公开 share URL (spec §17).
+    # row 由 find_app_by_token 返回, 内部已 backfill short_host.
+    short_host = row.get("short_host") or ""
     ready = tp.Control(
         stream_id="*",
         op="ready",
-        data={"app_id": online.app_id, "user_id": online.user_id},
+        data={
+            "app_id": online.app_id,
+            "user_id": online.user_id,
+            "short_host": short_host,
+        },
     )
     await ws.send_text(tp.encode(ready))
 

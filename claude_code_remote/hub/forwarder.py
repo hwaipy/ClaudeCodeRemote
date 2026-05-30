@@ -113,11 +113,83 @@ async def _resolve_target(request, user_id: str):
     return await _pick_app_for_user(user_id), body
 
 
+async def _handle_public_files(request: Request, path: str) -> Response:
+    """GET /files/<short_host>/<fid> → 找在线 app → forward /api/share/<fid>.
+
+    完全公开, 不查 cookie / token. 任何错误统一 404 防嗅探:
+    - short_host 不存在 → 404
+    - app 离线 → 404 (不告诉攻击者"这台 app 曾经存在")
+    - app 端 404 → 透传 404
+    """
+    parts = path.split("/")
+    # ['', 'files', '<sh>', '<fid>', ...rest]
+    if len(parts) < 4 or not parts[2] or not parts[3]:
+        return Response(status_code=404)
+    short_host = parts[2]
+    fid = parts[3]
+
+    app_row = await hub_db.find_app_by_short_host(short_host)
+    if not app_row:
+        return Response(status_code=404)
+    online = None
+    for o in registry.online_apps():
+        if o.app_id == app_row["id"]:
+            online = o
+            break
+    if not online:
+        # 不返 503 — 不告诉外人 "这台 app 是注册过的, 只是现在离线"
+        return Response(status_code=404)
+
+    # 改写到 app 的 share endpoint
+    target_path = f"/api/share/{fid}"
+    body = await request.body()
+    headers = {}
+    for k, v in request.headers.items():
+        if k.lower() in _DROP_HEADERS:
+            continue
+        headers[k] = v
+    # 公开 path 不带 x-ccr-user-id (app 端 /api/share/<id> 不需要 owner)
+
+    req = tp.HttpReq(
+        stream_id="r-" + secrets.token_hex(8),
+        method=request.method,
+        path=target_path,
+        query=request.url.query,
+        headers=headers,
+        body_b64=base64.b64encode(body).decode("ascii"),
+        user_id="",   # 公开
+    )
+    try:
+        res = await online.send_http_req(req, timeout=30.0)
+    except Exception as e:  # noqa: BLE001
+        log.warning("/files forward failed: %s", e)
+        return Response(status_code=502)
+    await hub_db.touch_app_seen(online.app_id)
+
+    body_bytes = base64.b64decode(res.body_b64) if res.body_b64 else b""
+    out_headers = {}
+    for k, v in res.headers.items():
+        if k.lower() in {"transfer-encoding", "content-length", "connection"}:
+            continue
+        out_headers[k] = v
+    return Response(
+        content=body_bytes,
+        status_code=res.status,
+        headers=out_headers,
+        media_type=out_headers.get("content-type"),
+    )
+
+
 class ForwardMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         if _is_local_path(path):
             return await call_next(request)
+
+        # 公开文件分享 /files/<short_host>/<fid> — bypass auth, 按 short_host
+        # 查 app, 转发到 app 的 /api/share/<fid>. spec §17.
+        if path.startswith("/files/"):
+            return await _handle_public_files(request, path)
 
         # 需要 user identity. 复用 hub cookie auth (api.py 里的 cookie 名).
         cookie = request.cookies.get("ccr_sess")
