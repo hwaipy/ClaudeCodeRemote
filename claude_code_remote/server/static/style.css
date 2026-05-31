@@ -1011,27 +1011,9 @@ body.theme-dark .state-badge.busy    { background: rgba(46, 160, 67, 0.22); colo
   .session-card.is-current {
     background: rgba(0, 113, 227, 0.14);
     cursor: default;
-    /* spec §15.2: 选中卡右边框透明 + 右角直角, 视觉跟 chat 面板拼成一体 */
-    border-right-color: transparent;
-    border-top-right-radius: 0;
-    border-bottom-right-radius: 0;
-    /* 让 card 右边界 bleed 进 center-wrap 的 16px 右 padding, 覆盖
-       view-home::after 的 1px divider, 视觉上跟 chat 拼一体. 同时 padding
-       补齐 (7 + 16 = 23), 这样 card 内部内容位置不动, kebab 也同步右移. */
-    padding-right: 23px;
-    margin-right: -16px;
-  }
-  /* kebab 用 right: 4 锚定 padding box 右边, padding-right 涨了 16,
-     需要把 right 偏移也加 16 → 视觉 x 保持不变 (test §15.2 契约). */
-  .session-card.is-current .card-menu-btn {
-    right: 20px;
   }
   @media (hover: hover) {
-    .session-card.is-current:hover {
-      background: rgba(0, 113, 227, 0.14);
-      /* hover 不能让 :hover { border-color } 把右边翻回灰 */
-      border-right-color: transparent;
-    }
+    .session-card.is-current:hover { background: rgba(0, 113, 227, 0.14); }
   }
 }
 @media (min-width: 900px) and (prefers-color-scheme: dark) {

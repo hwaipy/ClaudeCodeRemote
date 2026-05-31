@@ -356,103 +356,36 @@ def test_rename_doesnt_shift_card_layout(logged_in_page, spawned_session):
             )
 
 
-def test_current_card_merges_into_chat_on_wide(wide_page, base_url, test_token):
-    """Wide layout: selected card visually merges into the chat panel.
-    - Its left/top/bottom keep the subtle gray border
-    - Right border + right radius dissolve
-    - Right edge reaches the sidebar's right edge (covers the divider
-      pseudo at this card's height, so the divider has a notch here)
-    - Internal kebab position is unchanged by the extension"""
+def test_current_card_keeps_normal_shape_on_wide(wide_page, base_url, test_token):
+    """选中卡只换背景色, 不做右开口 merge — 跟普通卡形态一致 (圆角 + 边框).
+    用户偏好: 选中态简单. spec §15.2 已撤销原 merge 契约."""
     from tests.helpers import api_spawn, api_delete_session
     import re as _re
-    sid = api_spawn(base_url, test_token, "/tmp", "merge-test")
+    sid = api_spawn(base_url, test_token, "/tmp", "current-simple")
     try:
         hp = HomePage(wide_page)
         hp.expect_visible()
         card = hp.card_by_id(sid)
         expect(card).to_be_visible(timeout=5000)
-        # Capture kebab position BEFORE click (not yet is-current)
-        kebab_before = card.locator(".card-menu-btn").bounding_box()
         card.click()
         expect(card).to_have_class(_re.compile(r"\bis-current\b"), timeout=5000)
-
-        # Right edge stuff
-        border_color = computed(wide_page, card, "border-right-color").replace(" ", "")
-        assert border_color in ("rgba(0,0,0,0)", "transparent"), (
-            f"is-current right border-color: {border_color}"
-        )
+        # 右上角必须保留圆角 (不直角)
         radius = computed_px(wide_page, card, "border-top-right-radius")
-        assert radius <= 1, f"top-right radius should be 0: {radius}"
-
-        # Right edge meets sidebar's right edge
+        assert radius >= 8, f"top-right radius 应保留圆角 (>= 8), got {radius}"
+        # 右边框不应是透明 (跟其它三边一样, 由 var(--border))
+        bc = computed(wide_page, card, "border-right-color").replace(" ", "")
+        assert bc not in ("rgba(0,0,0,0)", "transparent"), (
+            f"右边框不该透明, got {bc}"
+        )
+        # 卡片右边界不应突破 sidebar 右沿
         sidebar = wide_page.locator("#view-home")
         card_box = card.bounding_box()
         side_box = sidebar.bounding_box()
         side_right = side_box["x"] + side_box["width"]
         card_right = card_box["x"] + card_box["width"]
-        assert card_right >= side_right - 2, (
-            f"card right ({card_right}) should reach sidebar right ({side_right})"
+        assert card_right < side_right, (
+            f"卡片右边界 ({card_right}) 不该达到 sidebar 右沿 ({side_right})"
         )
-
-        # Kebab x position should NOT have shifted by the bleed amount
-        kebab_after = card.locator(".card-menu-btn").bounding_box()
-        kebab_drift = abs(kebab_after["x"] - kebab_before["x"])
-        assert kebab_drift <= 3, (
-            f"kebab should stay at same x: before={kebab_before['x']}, "
-            f"after={kebab_after['x']}, drift={kebab_drift}"
-        )
-    finally:
-        api_delete_session(base_url, test_token, sid)
-
-
-def test_current_card_right_border_stays_transparent_on_hover(
-    wide_page, base_url, test_token
-):
-    """Spec §15.2 hover契约: 选中卡的 border-right-color must remain
-    transparent in both normal and :hover states. Otherwise the base
-    .session-card:hover rule (which sets border-color) would flip the right
-    border to gray, breaking the E='not visible' contract and changing
-    the visible borders' appearance under hover."""
-    from tests.helpers import api_spawn, api_delete_session
-    import re as _re
-    sid = api_spawn(base_url, test_token, "/tmp", "hover-border-test")
-    try:
-        hp = HomePage(wide_page)
-        hp.expect_visible()
-        card = hp.card_by_id(sid)
-        expect(card).to_be_visible(timeout=5000)
-        card.click()
-        expect(card).to_have_class(_re.compile(r"\bis-current\b"), timeout=5000)
-
-        # Normal state — right border should be transparent
-        normal_color = computed(wide_page, card, "border-right-color").replace(" ", "")
-        assert normal_color in ("rgba(0,0,0,0)", "transparent"), (
-            f"normal state: right border should be transparent, got {normal_color}"
-        )
-
-        # Hover state — must STILL be transparent
-        card.hover()
-        # Give the browser a tick to apply :hover styles
-        wide_page.wait_for_timeout(50)
-        hover_color = computed(wide_page, card, "border-right-color").replace(" ", "")
-        assert hover_color in ("rgba(0,0,0,0)", "transparent"), (
-            f"hover state: right border should be transparent (was {normal_color} "
-            f"in normal state, became {hover_color} on hover — :hover rule must "
-            f"not flip the right border to gray)"
-        )
-
-        # The other three borders should keep the same color (var(--border)).
-        for side in ("top", "left", "bottom"):
-            n = computed(wide_page, card, f"border-{side}-color").replace(" ", "")
-            wide_page.wait_for_timeout(0)
-            h = wide_page.evaluate(
-                f"() => getComputedStyle(document.querySelector(`[data-id='{sid}']`))"
-                f".getPropertyValue('border-{side}-color').replace(/\\s/g, '')"
-            )
-            assert n == h, (
-                f"border-{side}-color changed on hover: normal={n}, hover={h} "
-                f"— §15.2 contract requires hover invariance"
-            )
     finally:
         api_delete_session(base_url, test_token, sid)
 

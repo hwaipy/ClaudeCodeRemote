@@ -1,7 +1,7 @@
 // ClaudeCodeRemote 前端：登录 → 会话列表 → 单会话聊天。
 // M2: 工具调用卡片渲染 + tool_result 配对 + 流式参数累积。
 
-const __CCR_APP_VER = "v189";
+const __CCR_APP_VER = "v191";
 
 const $ = (id) => document.getElementById(id);
 
@@ -6539,22 +6539,8 @@ $("chat-input").addEventListener("keydown", e => {
   //   - e.isComposing: 现代浏览器
   //   - keyCode === 229: 仅 Safari 旧版兜底（isComposing 不可靠时）
   if (e.isComposing || e.keyCode === 229) return;
-  if (e.key !== "Enter") return;
-  // primary 指针: coarse = 触屏 (手机/平板 soft keyboard 无 Ctrl 组合, Enter
-  // 必须发送, enterkeyhint="send" 把按钮标"发送"). fine = 鼠标/笔 (桌面 IDE
-  // 风格: Enter 换行, Ctrl/⌘+Enter 才发). 用 matchMedia 自动切.
-  const touchPrimary = window.matchMedia
-    && window.matchMedia("(pointer: coarse)").matches;
-  if (touchPrimary) {
-    // 触屏: Enter (不带 Shift) = 发送
-    if (!e.shiftKey) {
-      e.preventDefault();
-      sendUserMessage();
-    }
-    return;
-  }
-  // 桌面: 只有 Ctrl/⌘+Enter 才发. 裸 Enter / Shift+Enter 让 textarea 自然换行.
-  if (e.ctrlKey || e.metaKey) {
+  // 桌面 + 移动 一致行为: Enter 发送, Shift+Enter 换行 (ChatGPT/Slack 风格).
+  if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     sendUserMessage();
   }
