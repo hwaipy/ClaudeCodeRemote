@@ -322,7 +322,7 @@ async def share_create(req: ShareCreateRequest) -> dict[str, Any]:
         path=str(p), expires_in_sec=expires_in, note=req.note or "",
     )
     # URL 拼接: 拿 hub origin + short_host. hub_client 已在跑就能从 cfg / state 拿.
-    url = _build_share_url(row["id"])
+    url = _build_share_url(row["id"], str(p))
     return {
         "id": row["id"],
         "url": url,
@@ -341,7 +341,7 @@ async def share_list() -> dict[str, list[dict[str, Any]]]:
         out.append({
             "id": r["id"],
             "path": r["path"],
-            "url": _build_share_url(r["id"]),
+            "url": _build_share_url(r["id"], r["path"]),
             "created_at": r["created_at"],
             "expires_at": r["expires_at"],
             "accessed_at": r["accessed_at"],
@@ -361,8 +361,9 @@ async def share_delete(fid: str) -> dict[str, Any]:
 
 # 公开 GET — 不 require_token. fid 16 hex 不可枚举即是保密. 任何错误统一
 # 404 不区分: 防嗅探 (id 不存在 / 已过期 / 文件已删都返同样 404).
-@public_router.get("/share/{fid}")
-async def share_get_public(fid: str) -> Any:
+# 路由接受两种 path: 裸 /share/<fid> 和带装饰路径 /share/<fid>/<rest>.
+# rest 只是给用户看的 (URL 反映源文件磁盘位置), 服务端只按 fid 查表.
+async def _share_get_handler(fid: str) -> Any:
     from fastapi.responses import FileResponse
     from . import db
     row = await db.get_file_share(fid)
@@ -373,7 +374,6 @@ async def share_get_public(fid: str) -> Any:
     p = Path(row["path"])
     if not p.exists() or not p.is_file():
         raise HTTPException(404, "not found")
-    # bump accessed_at (fire-and-forget)
     asyncio.create_task(db.touch_file_share(fid))
     return FileResponse(
         str(p),
@@ -383,21 +383,43 @@ async def share_get_public(fid: str) -> Any:
     )
 
 
-def _build_share_url(fid: str) -> str:
-    """根据 hub_client state 拼出 https://<hub>/files/<short_host>/<fid>.
+@public_router.get("/share/{fid}")
+async def share_get_public(fid: str) -> Any:
+    return await _share_get_handler(fid)
+
+
+@public_router.get("/share/{fid}/{rest:path}")
+async def share_get_public_with_tail(fid: str, rest: str) -> Any:
+    """rest 被忽略 — 仅供 URL 装饰 (反映源文件路径). 服务端只按 fid 查."""
+    return await _share_get_handler(fid)
+
+
+def _build_share_url(fid: str, abs_path: str = "") -> str:
+    """根据 hub_client state 拼出
+        https://<hub>/files/<short_host>/<fid>/<rel-path>
+
+    rel-path 来自原文件绝对路径 (lstrip('/'), 每段 URL-encode), 装饰用 —
+    服务端只按 fid 查表, 后段 hub forwarder 忽略. 让用户一眼从 URL 看出
+    "这是哪台机的哪个路径的文件".
 
     没接入 hub (纯 local 模式) 或 hub_client 还没拿到 short_host → 返本地
     fallback URL (仅 owner 自己机器内有用, 公网下不通).
     """
+    from urllib.parse import quote
+    decorative = ""
+    if abs_path:
+        rel = abs_path.lstrip("/")
+        # quote 默认 safe="/", 保留分隔符. 中文 / 空格等会被 percent-encode.
+        decorative = "/" + quote(rel)
     try:
         from .hub_client import client as _hub_client
         sh = getattr(_hub_client, "short_host", "") or ""
         origin = getattr(_hub_client, "hub_origin", "") or ""
         if sh and origin:
-            return f"{origin.rstrip('/')}/files/{sh}/{fid}"
+            return f"{origin.rstrip('/')}/files/{sh}/{fid}{decorative}"
     except Exception:
         pass
-    return f"/api/share/{fid}"
+    return f"/api/share/{fid}{decorative}"
 
 
 @router.get("/sessions/{session_id}/tool/{tool_use_id}")

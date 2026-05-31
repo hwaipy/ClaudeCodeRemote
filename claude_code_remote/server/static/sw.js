@@ -9,7 +9,7 @@
 // 反代前缀通过 self.registration.scope 自动获得 (注册时由 client 端按
 // document.baseURI 算好), 不需要硬编码 /remote 之类.
 
-const CACHE = "ccr-v191";   // bump 强制清掉旧 cache, PWA 重启后拿新代码.
+const CACHE = "ccr-v193";   // bump 强制清掉旧 cache, PWA 重启后拿新代码.
                             // ⚠ 必须跟 app.js 顶上的 __CCR_APP_VER 同步 bump,
                             // 否则 footer 显示版本不准, 用户看不出新代码到了没.
 const SCOPE_PATH = new URL(self.registration.scope).pathname;  // 末尾保证带 /
@@ -54,10 +54,14 @@ self.addEventListener("fetch", e => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  // 跳过 API / WS (WS 是 ws:/wss: scheme, 本身就不会过 fetch handler,
-  // 这里只防御性兜底)
+  // 跳过 API / WS / 公开文件分享 — 这些一律走网络, 不被 SW 拦.
+  // (WS 是 ws:/wss: scheme, 本身就不会过 fetch handler, 这里只防御性兜底.)
+  // /files/<short_host>/<fid>: spec §17 hub 公开 share URL. SW 必须放过,
+  // 否则 navigate 模式下 cacheKey 被替换成 SCOPE_PATH 喂回 SPA shell,
+  // 用户看到的是 Vibing 登录页而不是文件.
   if (url.pathname.startsWith(SCOPE_PATH + "api/")
       || url.pathname.startsWith(SCOPE_PATH + "ws/")
+      || url.pathname.startsWith(SCOPE_PATH + "files/")
       || url.pathname === SCOPE_PATH + "ws-global") return;
 
   // 用户手动刷新: req.cache 是 "reload" 或 "no-cache" — 走网络, 把
